@@ -3,6 +3,7 @@ import type { FlightDeal, PreferenceMemory } from '@/types'
 export const mockDeals: FlightDeal[] = [
   {
     id: 'fd001',
+    platform: '航旅纵横',
     origin: '北京', originCode: 'BJS',
     destination: '三亚', destinationCode: 'SYX',
     price: 398, originalPrice: 980,
@@ -16,6 +17,7 @@ export const mockDeals: FlightDeal[] = [
   },
   {
     id: 'fd002',
+    platform: '飞猪',
     origin: '上海', originCode: 'SHA',
     destination: '大理', destinationCode: 'DLU',
     price: 560, originalPrice: 1200,
@@ -29,6 +31,7 @@ export const mockDeals: FlightDeal[] = [
   },
   {
     id: 'fd003',
+    platform: '去哪儿',
     origin: '广州', originCode: 'CAN',
     destination: '成都', destinationCode: 'CTU',
     price: 320, originalPrice: 720,
@@ -42,6 +45,7 @@ export const mockDeals: FlightDeal[] = [
   },
   {
     id: 'fd004',
+    platform: '携程',
     origin: '北京', originCode: 'BJS',
     destination: '厦门', destinationCode: 'XMN',
     price: 480, originalPrice: 1100,
@@ -55,6 +59,7 @@ export const mockDeals: FlightDeal[] = [
   },
   {
     id: 'fd005',
+    platform: '同程',
     origin: '深圳', originCode: 'SZX',
     destination: '西藏', destinationCode: 'LXA',
     price: 890, originalPrice: 1850,

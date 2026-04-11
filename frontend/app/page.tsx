@@ -1,23 +1,36 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
-
-// Inline mock for the missed deal preview card
-const missedDeal = {
-  origin: '北京', destination: '三亚',
-  price: 398, originalPrice: 980,
-  airline: '海南航空', departDate: '2026-05-01',
-  departTime: '07:30', arriveTime: '13:45',
-  signals: ['近90天低位', '五一低价'],
-  systemId: 'SYS.042',
-  discount: 59,
-}
+import { useEffect, useState } from 'react'
+import { DEFAULT_USER_ID, getRecommendationDeals } from '@/lib/api-client'
+import { hotDeals, missedDeal as mockMissedDeal } from '@/lib/mocks'
+import type { FlightDeal } from '@/types'
 
 const avatarColors = ['#1B2B5E', '#22C55E', '#F59E0B', '#8B5CF6']
+const cardOffsets = ['-rotate-[6deg] -translate-y-2', 'rotate-0', 'rotate-[6deg] translate-y-2']
 
 export default function LoginPage() {
   const [loading, setLoading] = useState(false)
+  const [heroDeals, setHeroDeals] = useState<FlightDeal[]>([mockMissedDeal, ...hotDeals.slice(1, 3)])
+
+  useEffect(() => {
+    let mounted = true
+
+    getRecommendationDeals(DEFAULT_USER_ID)
+      .then((deals) => {
+        if (mounted && deals.length > 0) {
+          setHeroDeals(deals.slice(0, 3))
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setHeroDeals([mockMissedDeal, ...hotDeals.slice(1, 3)])
+        }
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const handleLogin = () => {
     setLoading(true)
@@ -25,175 +38,190 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-bg-gray overflow-hidden font-sans">
+    <div className="min-h-screen overflow-hidden bg-[#fdfefe] font-sans text-navy">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-10%] top-[-8%] h-[340px] w-[340px] rounded-full bg-[#e7f1ec]/55 blur-3xl" />
+        <div className="absolute bottom-[-10%] left-[18%] h-[280px] w-[280px] rounded-full bg-[#eef3f8]/75 blur-3xl" />
+        <div className="absolute right-[-8%] top-[10%] h-[420px] w-[420px] rounded-full bg-[#e8eef7]/55 blur-3xl" />
+        <div className="absolute right-[18%] top-[30%] h-[260px] w-[260px] rounded-full bg-[#edf5f0]/45 blur-3xl" />
+      </div>
 
-      {/* ── LEFT PANEL ─────────────────────────────────── */}
-      <div className="flex-1 flex flex-col justify-center px-14 py-12 relative">
+      <div className="relative flex min-h-screen overflow-hidden">
 
-        {/* Brand mark */}
-        <div className="absolute top-8 left-14 flex items-center gap-2">
-          <div className="w-5 h-5 rounded-full bg-navy" />
-          <span className="font-mono text-xs tracking-[0.18em] text-navy/40 uppercase">
-            FareSniper
-          </span>
+        {/* ── LEFT PANEL ─────────────────────────────────── */}
+        <div className="relative flex flex-1 flex-col items-center justify-center px-14 py-12">
+
+          {/* Brand mark */}
+          <div className="absolute left-14 top-8 flex max-w-[560px] items-start gap-4">
+            <div className="mt-1.5 h-5 w-5 flex-shrink-0 rounded-full bg-navy" />
+            <div className="text-left">
+              <p className="text-[0.95rem] font-semibold tracking-[0.02em] text-navy/88">
+                特价机票发现平台：懂你的航线才叫真特价。
+              </p>
+              <p className="mt-1 font-mono text-[11px] tracking-[0.12em] text-navy/42">
+                FareSniper: I remenber your dreams, so I track your deals
+              </p>
+            </div>
+          </div>
+
+          <div className="flex max-w-[520px] flex-col items-center text-center">
+            {/* Live badge */}
+            <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#9fd8af] bg-[#dff4e4]/85 px-3 py-1.5 text-xs font-medium text-signal-text shadow-[0_10px_30px_rgba(34,197,94,0.08)]">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-signal" />
+              </span>
+              实时监测中 · 今日发现 12 个特价
+            </div>
+
+            {/* Headline */}
+            <h1 className="mb-5 font-heading text-[3.9rem] font-bold leading-[1.04] tracking-tight text-navy">
+              好机票，<br />
+              <span className="italic font-heading text-[#6d7698]">不等人。</span>
+            </h1>
+
+            <p className="mb-10 text-[1.05rem] leading-relaxed text-[#7d859d]">
+              AI 实时监测 3 亿+ 价格数据，<br />
+              只在真正值得买的时候告诉你。
+            </p>
+
+            <button
+              onClick={handleLogin}
+              disabled={loading}
+              className="flex w-full max-w-[640px] items-center justify-center gap-2.5 rounded-2xl bg-navy py-[15px] text-[0.98rem] font-semibold text-white transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#24366f] hover:shadow-[0_18px_40px_rgba(27,43,94,0.18)] disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {loading ? (
+                <span className="h-5 w-5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+              ) : (
+                <svg className="h-4 w-4" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M2 7h10M8 3l4 4-4 4" />
+                </svg>
+              )}
+              {loading ? '正在进入...' : '开始发现特价机票'}
+            </button>
+
+            <p className="mt-4 max-w-[520px] text-sm leading-relaxed text-[#7d859d]">
+              无需登录，先看看今天有哪些真正值得买的路线。
+            </p>
+
+            {/* Social proof */}
+            <div className="mt-10 flex items-center gap-3 border-t border-[#d8d6cf] pt-8">
+              <div className="flex -space-x-2">
+                {avatarColors.map((color, i) => (
+                  <div
+                    key={i}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-[#f7f4ee] text-[10px] font-bold text-white"
+                    style={{ backgroundColor: color }}
+                  >
+                    {['赵', '钱', '孙', '李'][i]}
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm text-[#7d859d]">
+                已帮助 <strong className="font-semibold text-navy">12,847</strong> 人省下机票钱
+              </p>
+            </div>
+          </div>
         </div>
 
-        <div className="max-w-[420px]">
-          {/* Live badge */}
-          <div className="inline-flex items-center gap-2 bg-signal-muted border border-signal/20 text-signal-text text-xs font-medium px-3 py-1.5 rounded-full mb-8">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-signal" />
-            </span>
-            实时监测中 · 今日发现 12 个特价
-          </div>
+        {/* ── RIGHT PANEL ────────────────────────────────── */}
+        <div className="relative flex w-[50%] flex-col items-center justify-center overflow-visible bg-transparent">
 
-          {/* Headline */}
-          <h1 className="font-heading text-[3.6rem] font-bold leading-[1.08] text-navy tracking-tight mb-5">
-            好机票，<br />
-            <span className="italic font-heading text-navy/60">不等人。</span>
-          </h1>
+          {/* Decorative blobs */}
+          <div className="pointer-events-none absolute right-[-20px] top-[16%] h-64 w-64 rounded-full bg-[#e2eaf5]/28 blur-3xl" />
+          <div className="pointer-events-none absolute bottom-[20%] left-[-20px] h-52 w-52 rounded-full bg-[#e7f2eb]/24 blur-3xl" />
 
-          <p className="text-gray-400 text-[1.05rem] leading-relaxed mb-10">
-            AI 实时监测 3 亿+ 价格数据，<br />
-            只在真正值得买的时候告诉你。
-          </p>
-
-          {/* WeChat CTA */}
-          <button
-            onClick={handleLogin}
-            disabled={loading}
-            className="w-full bg-[#07C160] hover:bg-[#06AD56] active:bg-[#059447] text-white font-semibold text-[0.95rem] py-[14px] rounded-2xl flex items-center justify-center gap-2.5 transition-all duration-200 hover:shadow-lg hover:shadow-[#07C160]/30 disabled:opacity-70 disabled:cursor-not-allowed"
-          >
-            {loading ? (
-              <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            ) : (
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M8.691 2.188C3.891 2.188 0 5.476 0 9.539c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.29.295a.326.326 0 0 0 .167-.054l1.903-1.114a.864.864 0 0 1 .717-.098 10.16 10.16 0 0 0 2.837.403c.276 0 .543-.027.811-.05-.857-2.578.157-4.972 1.932-6.446 1.703-1.415 3.882-1.98 5.853-1.838-.576-3.583-4.196-6.348-8.596-6.348zM5.785 5.991c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178A1.17 1.17 0 0 1 4.623 7.17c0-.651.52-1.18 1.162-1.18zm5.813 0c.642 0 1.162.529 1.162 1.18a1.17 1.17 0 0 1-1.162 1.178 1.17 1.17 0 0 1-1.162-1.178c0-.651.52-1.18 1.162-1.18zm9.266 6.658c-3.763 0-6.813 2.507-6.813 5.601 0 3.094 3.05 5.601 6.813 5.601a7.93 7.93 0 0 0 2.27-.325.688.688 0 0 1 .574.079l1.507.882a.26.26 0 0 0 .132.043c.126 0 .231-.105.231-.234 0-.056-.023-.112-.039-.168l-.31-1.175a.468.468 0 0 1 .169-.529C23.087 20.561 24 19.019 24 17.25c0-3.094-3.05-5.601-6.136-5.601zm-3.624 3.084a.932.932 0 0 1 0 1.864.932.932 0 0 1 0-1.864zm3.552 0a.932.932 0 0 1 0 1.864.932.932 0 0 1 0-1.864z"/>
-              </svg>
-            )}
-            {loading ? '正在登录...' : '微信一键登录'}
-          </button>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-4">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-gray-300 text-xs">或者</span>
-            <div className="flex-1 h-px bg-gray-200" />
-          </div>
-
-          {/* Phone login */}
-          <Link
-            href="/chat"
-            className="w-full block text-center border border-navy/15 text-navy/60 text-sm py-3.5 rounded-2xl hover:border-navy/30 hover:text-navy hover:bg-navy/[0.03] transition-all duration-200"
-          >
-            手机号登录
-          </Link>
-
-          {/* Social proof */}
-          <div className="flex items-center gap-3 mt-10 pt-8 border-t border-gray-100">
-            <div className="flex -space-x-2">
-              {avatarColors.map((color, i) => (
-                <div
-                  key={i}
-                  className="w-7 h-7 rounded-full border-2 border-white flex items-center justify-center text-white text-[10px] font-bold"
-                  style={{ backgroundColor: color }}
-                >
-                  {['赵','钱','孙','李'][i]}
-                </div>
-              ))}
+          <div className="relative z-10 flex w-full max-w-[880px] -translate-x-8 -translate-y-6 flex-col items-center justify-center px-4">
+            {/* Caption */}
+            <div className="mb-8 text-center">
+              <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-navy/28">
+                你上次搜索后可能错过的
+              </p>
+              <p className="text-sm text-navy/45">
+                这次，不止给你一张票，而是一组值得看的机会。
+              </p>
             </div>
-            <p className="text-gray-400 text-sm">
-              已帮助 <strong className="text-navy font-semibold">12,847</strong> 人省下机票钱
+
+            {/* Deal Card Row */}
+            <div className="flex items-center justify-center gap-3">
+              {heroDeals.slice(0, 3).map((deal, index) => {
+                const discount = deal.originalPrice > deal.price
+                  ? Math.round((1 - deal.price / deal.originalPrice) * 100)
+                  : 0
+
+                return (
+                  <div
+                    key={deal.id}
+                    className={`group w-[236px] cursor-default rounded-[28px] border border-white/75 bg-white/94 p-4 shadow-[0_22px_60px_rgba(62,73,102,0.13)] backdrop-blur-md transition-all duration-500 ${cardOffsets[index] ?? ''} hover:-translate-y-1 hover:rotate-0`}
+                  >
+                    <div className="mb-4 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="mb-1 font-mono text-[10px] text-gray-300">{deal.systemId}</p>
+                        <p className="font-heading text-[0.95rem] font-bold leading-tight text-navy">
+                          {deal.origin} → {deal.destination}
+                        </p>
+                        <p className="mt-0.5 text-xs text-gray-400">
+                          {deal.airline} · {deal.departDate}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        {deal.originalPrice > deal.price && (
+                          <p className="mb-0.5 text-xs text-gray-300 line-through">¥{deal.originalPrice}</p>
+                        )}
+                        <p className="font-heading text-[1.7rem] font-bold leading-none text-navy">
+                          ¥{deal.price}
+                        </p>
+                        {discount > 0 && (
+                          <p className="mt-0.5 text-xs font-medium text-signal">-{discount}%</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="mb-3 flex items-center gap-2 border-y border-gray-50 px-1 py-2.5">
+                      <span className="text-[0.95rem] font-semibold tabular-nums text-navy">{deal.departTime}</span>
+                      <div className="relative flex flex-1 items-center">
+                        <div className="h-px flex-1 bg-gray-100" />
+                        <div className="mx-2 text-gray-300">
+                          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M9.293 1.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L11.586 7H3a1 1 0 110-2h8.586L9.293 2.707a1 1 0 010-1.414z"/>
+                          </svg>
+                        </div>
+                        <div className="h-px flex-1 bg-gray-100" />
+                      </div>
+                      <span className="text-[0.95rem] font-semibold tabular-nums text-navy">{deal.arriveTime}</span>
+                    </div>
+
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {deal.signals.slice(0, 2).map((signal) => (
+                        <span
+                          key={signal}
+                          className="rounded-full bg-signal-muted px-2.5 py-1 text-[11px] font-medium text-signal-text"
+                        >
+                          {signal}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-2xl bg-navy px-3.5 py-2.5">
+                      <span className="text-xs font-mono text-white/50">AI 判断</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75" />
+                          <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
+                        </span>
+                        <span className="text-[0.95rem] font-semibold text-white">{deal.verdict}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <p className="mt-10 text-center text-xs text-navy/34">
+              进入后可继续查看今日全部特价 →
             </p>
           </div>
         </div>
-      </div>
-
-      {/* ── RIGHT PANEL ────────────────────────────────── */}
-      <div className="w-[46%] bg-navy/[0.04] grain-overlay flex flex-col items-center justify-center relative overflow-hidden">
-
-        {/* Decorative blobs */}
-        <div className="absolute top-1/3 right-[-80px] w-72 h-72 rounded-full bg-signal/8 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/4 left-[-60px] w-56 h-56 rounded-full bg-navy/6 blur-3xl pointer-events-none" />
-
-        {/* Caption */}
-        <p className="font-mono text-[11px] tracking-[0.2em] text-gray-300 uppercase mb-5">
-          你上次搜索后可能错过的
-        </p>
-
-        {/* Deal Card */}
-        <div className="relative w-[300px] group">
-          {/* Shadow card behind */}
-          <div className="absolute inset-0 bg-navy/8 rounded-3xl translate-x-3 translate-y-3 transition-transform duration-500 group-hover:translate-x-5 group-hover:translate-y-5" />
-
-          {/* Main card */}
-          <div className="relative bg-white rounded-3xl p-6 shadow-card-float rotate-[3deg] group-hover:rotate-0 transition-all duration-500 cursor-default no-select">
-
-            {/* Card top row */}
-            <div className="flex items-start justify-between mb-5">
-              <div>
-                <p className="font-mono text-[10px] text-gray-300 mb-1">{missedDeal.systemId}</p>
-                <p className="font-heading text-[1.1rem] font-bold text-navy leading-tight">
-                  {missedDeal.origin} → {missedDeal.destination}
-                </p>
-                <p className="text-gray-400 text-xs mt-0.5">
-                  {missedDeal.airline} · {missedDeal.departDate}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-gray-300 text-xs line-through mb-0.5">¥{missedDeal.originalPrice}</p>
-                <p className="font-heading text-[2.2rem] font-bold text-navy leading-none">
-                  ¥{missedDeal.price}
-                </p>
-                <p className="text-signal text-xs font-medium mt-0.5">-{missedDeal.discount}%</p>
-              </div>
-            </div>
-
-            {/* Flight timeline */}
-            <div className="flex items-center gap-2 py-3.5 px-1 border-y border-gray-50 mb-4">
-              <span className="text-navy text-sm font-semibold tabular-nums">{missedDeal.departTime}</span>
-              <div className="flex-1 relative flex items-center">
-                <div className="flex-1 h-px bg-gray-100" />
-                <div className="mx-2 text-gray-300">
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M9.293 1.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L11.586 7H3a1 1 0 110-2h8.586L9.293 2.707a1 1 0 010-1.414z"/>
-                  </svg>
-                </div>
-                <div className="flex-1 h-px bg-gray-100" />
-              </div>
-              <span className="text-navy text-sm font-semibold tabular-nums">{missedDeal.arriveTime}</span>
-            </div>
-
-            {/* Signal tags */}
-            <div className="flex flex-wrap gap-1.5 mb-4">
-              {missedDeal.signals.map((s) => (
-                <span
-                  key={s}
-                  className="bg-signal-muted text-signal-text text-[11px] font-medium px-2.5 py-1 rounded-full"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
-
-            {/* AI verdict bar */}
-            <div className="bg-navy rounded-2xl px-4 py-3 flex items-center justify-between">
-              <span className="text-white/50 text-xs font-mono">AI 判断</span>
-              <div className="flex items-center gap-1.5">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-signal" />
-                </span>
-                <span className="text-white text-sm font-semibold">建议现在买</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <p className="mt-7 text-gray-300 text-xs text-center">
-          登录后查看今日全部特价 →
-        </p>
       </div>
     </div>
   )

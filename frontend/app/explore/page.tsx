@@ -1,152 +1,265 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-
-const deals = [
-  {
-    id: 'fd001',
-    origin: '北京', originCode: 'BJS',
-    destination: '三亚', destinationCode: 'SYX',
-    price: 398, originalPrice: 980,
-    departDate: '2026-05-01', airline: '海南航空',
-    signals: ['近90天低位', '五一低价'],
-    confidence: 'high' as const,
-    systemId: 'SYS.042',
-    gradientFrom: '#0EA5E9', gradientTo: '#22D3EE',
-    verdict: '建议现在买',
-  },
-  {
-    id: 'fd002',
-    origin: '上海', originCode: 'SHA',
-    destination: '大理', destinationCode: 'DLU',
-    price: 560, originalPrice: 1200,
-    departDate: '2026-04-20', airline: '云南航空',
-    signals: ['符合心理价位', '近期最低'],
-    confidence: 'high' as const,
-    systemId: 'SYS.117',
-    gradientFrom: '#8B5CF6', gradientTo: '#C4B5FD',
-    verdict: '建议现在买',
-  },
-  {
-    id: 'fd003',
-    origin: '广州', originCode: 'CAN',
-    destination: '成都', destinationCode: 'CTU',
-    price: 320, originalPrice: 720,
-    departDate: '2026-04-25', airline: '四川航空',
-    signals: ['历史新低'],
-    confidence: 'medium' as const,
-    systemId: 'SYS.208',
-    gradientFrom: '#10B981', gradientTo: '#6EE7B7',
-    verdict: '可以关注',
-  },
-  {
-    id: 'fd004',
-    origin: '北京', originCode: 'BJS',
-    destination: '厦门', destinationCode: 'XMN',
-    price: 480, originalPrice: 1100,
-    departDate: '2026-05-03', airline: '厦门航空',
-    signals: ['近90天低位', '假期前低价'],
-    confidence: 'high' as const,
-    systemId: 'SYS.334',
-    gradientFrom: '#F59E0B', gradientTo: '#FCD34D',
-    verdict: '建议现在买',
-  },
-  {
-    id: 'fd005',
-    origin: '深圳', originCode: 'SZX',
-    destination: '西藏', destinationCode: 'LXA',
-    price: 890, originalPrice: 1850,
-    departDate: '2026-05-10', airline: '西藏航空',
-    signals: ['季节性低点', '符合偏好'],
-    confidence: 'medium' as const,
-    systemId: 'SYS.456',
-    gradientFrom: '#3B82F6', gradientTo: '#93C5FD',
-    verdict: '可以关注',
-  },
-]
+import { useSearchParams } from 'next/navigation'
+import { DEFAULT_USER_ID, getRecommendationDeals, searchFlights } from '@/lib/api-client'
+import type { ExploreSearchResult, FlightDeal } from '@/types'
 
 const confidenceConfig = {
-  high:   { label: '高置信', dot: '#22C55E', bg: 'bg-signal-muted', text: 'text-signal-text' },
-  medium: { label: '中置信', dot: '#F59E0B', bg: 'bg-amber-50',    text: 'text-amber-700'  },
-  low:    { label: '低置信', dot: '#D1D5DB', bg: 'bg-gray-50',     text: 'text-gray-500'   },
+  high: { label: '高置信', dot: '#22C55E', bg: 'bg-signal-muted', text: 'text-signal-text' },
+  medium: { label: '中置信', dot: '#F59E0B', bg: 'bg-amber-50', text: 'text-amber-700' },
+  low: { label: '低置信', dot: '#D1D5DB', bg: 'bg-gray-50', text: 'text-gray-500' },
 }
 
 const filters = ['全部', '高置信', '符合偏好', '今日新增']
+const cardPattern = [
+  'xl:col-span-5',
+  'xl:col-span-4',
+  'xl:col-span-3',
+  'xl:col-span-4',
+  'xl:col-span-5',
+  'xl:col-span-3',
+]
+
+type PriceBoardItem = {
+  platform: string
+  price: number
+  tone: 'current' | 'lower' | 'higher'
+}
+
+function buildPriceBoard(deal: FlightDeal, index: number): PriceBoardItem[] {
+  const knownPlatforms = ['携程', '飞猪', '去哪儿', '同程', '航旅纵横']
+  const alternates = knownPlatforms.filter((platform) => platform !== deal.platform).slice(0, 3)
+  const offsets = [-28, 14, 39]
+
+  const board = [
+    {
+      platform: deal.platform || '当前平台',
+      price: deal.price,
+      tone: 'current' as const,
+    },
+    ...alternates.map((platform, platformIndex) => {
+      const delta = offsets[(index + platformIndex) % offsets.length]
+
+      return {
+        platform,
+        price: Math.max(deal.price + delta, Math.floor(deal.price * 0.9)),
+        tone: delta < 0 ? 'lower' as const : 'higher' as const,
+      }
+    }),
+  ]
+
+  return board.sort((left, right) => left.price - right.price)
+}
+
+function getCompareToneClass(tone: PriceBoardItem['tone']): string {
+  if (tone === 'current') return 'bg-navy text-white'
+  if (tone === 'lower') return 'bg-[#ecfdf3] text-[#15803d]'
+  return 'bg-[#f8fafc] text-navy/60'
+}
 
 export default function ExplorePage() {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState('全部')
+  const [searchResult, setSearchResult] = useState<ExploreSearchResult | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const searchParams = useSearchParams()
+  const queryText = searchParams.get('q')?.trim() ?? ''
+
+  useEffect(() => {
+    let mounted = true
+
+    async function loadData() {
+      setLoading(true)
+      setError('')
+
+      try {
+        if (queryText) {
+          const cached = window.sessionStorage.getItem('faresniper:last-search')
+          if (cached) {
+            const parsed = JSON.parse(cached) as ExploreSearchResult
+            if (parsed.queryText === queryText && mounted) {
+              setSearchResult(parsed)
+              setLoading(false)
+              return
+            }
+          }
+
+          const result = await searchFlights(queryText, DEFAULT_USER_ID)
+          if (!mounted) return
+          window.sessionStorage.setItem('faresniper:last-search', JSON.stringify(result))
+          setSearchResult(result)
+          setLoading(false)
+          return
+        }
+
+        const deals = await getRecommendationDeals(DEFAULT_USER_ID)
+        if (!mounted) return
+        setSearchResult({
+          userId: DEFAULT_USER_ID,
+          queryText: '',
+          normalizedText: '首页推荐',
+          recommendationText: '可以关注',
+          recommendationConfidence: 'medium',
+          resultCount: deals.length,
+          deals,
+          matchedPreferences: [],
+        })
+      } catch (loadError) {
+        if (!mounted) return
+        setError(loadError instanceof Error ? loadError.message : '加载失败，请确认后端已启动')
+      } finally {
+        if (mounted) {
+          setLoading(false)
+        }
+      }
+    }
+
+    void loadData()
+
+    return () => {
+      mounted = false
+    }
+  }, [queryText])
+
+  const filteredDeals = (searchResult?.deals ?? []).filter((deal) => {
+    if (activeFilter === '高置信') return deal.confidence === 'high'
+    if (activeFilter === '符合偏好') return deal.signals.some((signal) => signal.includes('偏好') || signal.includes('心理价位'))
+    if (activeFilter === '今日新增') return true
+    return true
+  })
+
+  const lowestPrice = filteredDeals.length > 0 ? Math.min(...filteredDeals.map((deal) => deal.price)) : null
+  const highestConfidenceCount = filteredDeals.filter((deal) => deal.confidence === 'high').length
 
   return (
-    <div className="min-h-screen bg-bg-gray font-sans">
-
-      {/* ── NAV ────────────────────────────────────────── */}
-      <nav className="flex items-center justify-between px-8 py-5">
-        <Link href="/chat" className="flex items-center gap-2 group">
-          <div className="w-4 h-4 rounded-full bg-navy group-hover:scale-110 transition-transform" />
-          <span className="font-mono text-[11px] tracking-[0.18em] text-navy/35 uppercase group-hover:text-navy/60 transition-colors">
-            FareSniper
-          </span>
-        </Link>
+    <div className="min-h-screen bg-[#f8f9fc] font-sans">
+      <nav className="flex items-center justify-between px-6 py-5 lg:px-8">
         <div className="flex items-center gap-5">
-          <Link href="/chat" className="text-sm text-gray-400 hover:text-navy transition-colors">
+          <Link
+            href="/chat"
+            className="group inline-flex items-center gap-2 rounded-full border border-[#e7ebf3] bg-white px-4 py-2 text-sm text-navy/60 shadow-[0_8px_24px_rgba(27,43,94,0.05)] transition-all hover:-translate-y-0.5 hover:text-navy"
+          >
+            <svg className="h-4 w-4 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 13L5 8l5-5" />
+            </svg>
+            返回对话
+          </Link>
+
+          <Link href="/chat" className="flex items-center gap-2 group">
+            <div className="h-4 w-4 rounded-full bg-navy group-hover:scale-110 transition-transform" />
+            <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-navy/35 group-hover:text-navy/60 transition-colors">
+              FareSniper
+            </span>
+          </Link>
+        </div>
+
+        <div className="flex items-center gap-5">
+          <Link href="/chat" className="text-sm text-gray-400 transition-colors hover:text-navy">
             对话
           </Link>
           <Link
             href="/memory"
-            className="text-sm text-gray-400 hover:text-navy transition-colors flex items-center gap-1.5"
+            className="flex items-center gap-1.5 text-sm text-gray-400 transition-colors hover:text-navy"
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-signal" />
+            <span className="h-1.5 w-1.5 rounded-full bg-signal" />
             我的记忆
           </Link>
-          <div className="w-8 h-8 rounded-full bg-navy flex items-center justify-center text-white text-xs font-semibold">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-navy text-xs font-semibold text-white">
             我
           </div>
         </div>
       </nav>
 
-      {/* ── HEADER ─────────────────────────────────────── */}
-      <div className="px-8 pt-2 pb-6">
-        <p className="font-mono text-[11px] tracking-[0.18em] text-gray-300 uppercase mb-2">
-          DISCOVER · 今日精选
-        </p>
-        <h1 className="font-heading text-[2.6rem] font-bold text-navy leading-tight">
-          为你发现
-        </h1>
-        <p className="text-gray-400 text-sm mt-2">
-          AI 从今日{' '}
-          <span className="text-navy font-semibold">847</span>{' '}
-          个价格异动中筛选 · 共{' '}
-          <span className="text-navy font-semibold">5</span>{' '}
-          个值得关注
-        </p>
+      <div className="px-6 pb-6 pt-2 lg:px-8">
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_360px] xl:items-end">
+          <div>
+            <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-gray-300">
+              DISCOVER · 全平台筛选
+            </p>
+            <h1 className="font-heading text-[2.8rem] font-bold leading-tight text-navy">
+              {queryText ? '搜索结果' : '为你发现'}
+            </h1>
+            <p className="mt-2 max-w-[760px] text-sm text-gray-400">
+              {loading ? '正在拉取最新票价和建议...' : (
+                <>
+                  {queryText ? '查询：' : 'AI 当前为你整理 · 共 '}
+                  {queryText && <span className="font-semibold text-navy">{queryText}</span>}
+                  {queryText && ' · '}
+                  共 <span className="font-semibold text-navy">{filteredDeals.length}</span> 个值得关注
+                  {searchResult && (
+                    <>
+                      {' '}· 判断：<span className="font-semibold text-navy">{searchResult.recommendationText}</span>
+                    </>
+                  )}
+                </>
+              )}
+            </p>
+          </div>
+
+          <div className="rounded-[30px] border border-[#e8edf7] bg-[linear-gradient(145deg,#ffffff_0%,#f2f6ff_100%)] p-5 shadow-[0_18px_50px_rgba(27,43,94,0.06)]">
+            <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-navy/34">
+              Price Radar
+            </p>
+            <div className="mt-4 grid grid-cols-3 gap-3">
+              <div className="rounded-2xl bg-white px-4 py-4">
+                <p className="text-xs text-navy/38">结果数</p>
+                <p className="mt-2 text-2xl font-semibold text-navy">{filteredDeals.length}</p>
+              </div>
+              <div className="rounded-2xl bg-white px-4 py-4">
+                <p className="text-xs text-navy/38">高置信</p>
+                <p className="mt-2 text-2xl font-semibold text-navy">{highestConfidenceCount}</p>
+              </div>
+              <div className="rounded-2xl bg-white px-4 py-4">
+                <p className="text-xs text-navy/38">最低价</p>
+                <p className="mt-2 text-2xl font-semibold text-navy">
+                  {lowestPrice !== null ? `¥${lowestPrice}` : '--'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* ── FILTER BAR ─────────────────────────────────── */}
-      <div className="px-8 flex items-center gap-2 mb-6">
-        {filters.map((f) => (
+      <div className="mb-6 flex flex-wrap items-center gap-2 px-6 lg:px-8">
+        {filters.map((filter) => (
           <button
-            key={f}
-            onClick={() => setActiveFilter(f)}
-            className={`text-xs font-medium px-3.5 py-1.5 rounded-full border transition-all duration-200 ${
-              activeFilter === f
-                ? 'bg-navy text-white border-navy shadow-sm'
-                : 'bg-white text-gray-400 border-gray-100 hover:border-navy/20 hover:text-navy'
+            key={filter}
+            onClick={() => setActiveFilter(filter)}
+            className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all duration-200 ${
+              activeFilter === filter
+                ? 'border-navy bg-navy text-white shadow-sm'
+                : 'border-gray-100 bg-white text-gray-400 hover:border-navy/20 hover:text-navy'
             }`}
           >
-            {f}
+            {filter}
           </button>
         ))}
       </div>
 
-      {/* ── DEAL CARDS HORIZONTAL SCROLL ───────────────── */}
-      <div className="scroll-x pb-8">
-        <div className="flex gap-4 px-8" style={{ width: 'max-content' }}>
-          {deals.map((deal) => {
+      <div className="px-6 pb-12 lg:px-8">
+        {error && (
+          <div className="mb-4 rounded-2xl bg-red-50 px-4 py-3 text-sm text-red-500">
+            {error}
+          </div>
+        )}
+
+        {!loading && filteredDeals.length === 0 && !error && (
+          <div className="mb-4 rounded-2xl bg-white px-5 py-6 text-sm text-gray-400 shadow-card">
+            暂时没有找到符合条件的票，换个说法再试试。
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-12 xl:auto-rows-[minmax(260px,auto)]">
+          {filteredDeals.map((deal, index) => {
             const conf = confidenceConfig[deal.confidence]
             const isHovered = hoveredId === deal.id
-            const discount = Math.round((1 - deal.price / deal.originalPrice) * 100)
+            const discount = deal.originalPrice > deal.price
+              ? Math.round((1 - deal.price / deal.originalPrice) * 100)
+              : 0
+            const compareBoard = buildPriceBoard(deal, index)
 
             return (
               <Link
@@ -154,114 +267,181 @@ export default function ExplorePage() {
                 href="/chat"
                 onMouseEnter={() => setHoveredId(deal.id)}
                 onMouseLeave={() => setHoveredId(null)}
-                className={`flex-shrink-0 w-[272px] bg-white rounded-3xl overflow-hidden shadow-card transition-all duration-300 ${
-                  isHovered ? 'shadow-card-float -translate-y-2' : ''
+                className={`group overflow-hidden rounded-[32px] bg-white shadow-[0_22px_60px_rgba(27,43,94,0.08)] transition-all duration-300 ${cardPattern[index % cardPattern.length]} ${
+                  isHovered ? '-translate-y-1.5 shadow-[0_28px_80px_rgba(27,43,94,0.12)]' : ''
                 }`}
               >
-                {/* ── DESTINATION IMAGE (gradient) */}
                 <div
-                  className="h-44 relative overflow-hidden"
+                  className="relative overflow-hidden"
                   style={{
                     background: `linear-gradient(140deg, ${deal.gradientFrom} 0%, ${deal.gradientTo} 100%)`,
                   }}
                 >
-                  {/* Shimmer overlay on hover */}
                   <div
-                    className={`absolute inset-0 bg-white/10 transition-opacity duration-300 ${isHovered ? 'opacity-100' : 'opacity-0'}`}
+                    className={`absolute inset-0 bg-white/10 transition-opacity duration-300 ${
+                      isHovered ? 'opacity-100' : 'opacity-0'
+                    }`}
                   />
 
-                  {/* System ID — top right */}
-                  <span className="absolute top-3 right-3.5 font-mono text-[10px] text-white/40">
-                    {deal.systemId}
-                  </span>
+                  <div className="relative flex min-h-[230px] flex-col justify-between p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={`flex items-center gap-1.5 rounded-full ${conf.bg} px-2.5 py-1`}>
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: conf.dot }}
+                        />
+                        <span className={`text-[10px] font-semibold ${conf.text}`}>{conf.label}</span>
+                      </div>
 
-                  {/* Confidence badge — top left */}
-                  <div className={`absolute top-3 left-3.5 flex items-center gap-1.5 ${conf.bg} px-2.5 py-1 rounded-full`}>
-                    <span
-                      className="w-1.5 h-1.5 rounded-full"
-                      style={{ backgroundColor: conf.dot }}
-                    />
-                    <span className={`text-[10px] font-semibold ${conf.text}`}>{conf.label}</span>
-                  </div>
+                      <div className="text-right">
+                        <p className="font-mono text-[10px] text-white/42">{deal.systemId}</p>
+                        <p className="mt-1 rounded-full bg-white/16 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur-sm">
+                          来源：{deal.platform}
+                        </p>
+                      </div>
+                    </div>
 
-                  {/* Route overlay — bottom */}
-                  <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/30 to-transparent">
-                    <p className="font-mono text-[10px] text-white/60 mb-0.5">
-                      {deal.originCode} → {deal.destinationCode}
-                    </p>
-                    <p className="text-white font-semibold text-[1.05rem] leading-tight">
-                      {deal.origin} → {deal.destination}
-                    </p>
+                    <div>
+                      <p className="font-mono text-[10px] text-white/62">
+                        {deal.originCode} → {deal.destinationCode}
+                      </p>
+                      <h2 className="mt-2 text-[1.9rem] font-semibold leading-tight text-white">
+                        {deal.origin} → {deal.destination}
+                      </h2>
+                      <p className="mt-3 max-w-[280px] text-sm text-white/76">
+                        {deal.airline} · {deal.departDate} · {deal.departTime} - {deal.arriveTime}
+                      </p>
+                    </div>
                   </div>
                 </div>
 
-                {/* ── CARD BODY */}
-                <div className="p-5">
-                  {/* Price row */}
-                  <div className="flex items-baseline gap-2 mb-3">
-                    <span className="font-heading text-[2.2rem] font-bold text-navy leading-none">
-                      ¥{deal.price}
-                    </span>
-                    <span className="text-gray-300 text-sm line-through">¥{deal.originalPrice}</span>
-                    <span className="ml-auto text-xs font-semibold text-signal">
-                      -{discount}%
-                    </span>
-                  </div>
-
-                  {/* Meta */}
-                  <p className="text-gray-400 text-xs mb-3">
-                    {deal.airline} · {deal.departDate}
-                  </p>
-
-                  {/* Signal tags */}
-                  <div className="flex flex-wrap gap-1.5 mb-4">
-                    {deal.signals.map((signal) => (
-                      <span
-                        key={signal}
-                        className="bg-signal-muted text-signal-text text-[10px] font-medium px-2.5 py-0.5 rounded-full"
-                      >
-                        {signal}
+                <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1.2fr)_220px]">
+                  <div>
+                    <div className="mb-4 flex items-baseline gap-2">
+                      <span className="font-heading text-[2.5rem] font-bold leading-none text-navy">
+                        ¥{deal.price}
                       </span>
-                    ))}
+                      {deal.originalPrice > deal.price && (
+                        <>
+                          <span className="text-sm text-gray-300 line-through">¥{deal.originalPrice}</span>
+                          <span className="ml-auto text-sm font-semibold text-signal">
+                            -{discount}%
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5">
+                      {deal.signals.map((signal) => (
+                        <span
+                          key={signal}
+                          className="rounded-full bg-signal-muted px-2.5 py-1 text-[10px] font-medium text-signal-text"
+                        >
+                          {signal}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                      <div className="rounded-2xl bg-[#f7f9fc] px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-navy/30">行程时间</p>
+                        <p className="mt-2 text-lg font-semibold text-navy">
+                          {deal.departTime} - {deal.arriveTime}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-[#f7f9fc] px-4 py-4">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-navy/30">AI 判断</p>
+                        <p className="mt-2 text-lg font-semibold text-navy">{deal.verdict}</p>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* AI verdict bar */}
-                  <div className="bg-navy/[0.05] rounded-xl px-3.5 py-2.5 flex items-center justify-between">
-                    <span className="text-gray-400 text-[11px] font-mono">AI 判断</span>
-                    <span
-                      className={`text-xs font-semibold flex items-center gap-1.5 ${
-                        deal.confidence === 'high' ? 'text-navy' : 'text-gray-400'
-                      }`}
-                    >
-                      {deal.verdict}
-                      <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-                        <path d="M2 6h8M7 3l3 3-3 3" />
-                      </svg>
-                    </span>
+                  <div className="rounded-[26px] bg-[linear-gradient(145deg,#f8faff_0%,#eef3ff_100%)] p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-navy/34">
+                        平台比价
+                      </p>
+                      <span className="text-[11px] text-navy/34">同路线参考</span>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {compareBoard.map((item) => (
+                        <div
+                          key={`${deal.id}-${item.platform}`}
+                          className={`flex items-center justify-between rounded-2xl px-3 py-3 ${getCompareToneClass(item.tone)}`}
+                        >
+                          <div>
+                            <p className="text-xs font-semibold">{item.platform}</p>
+                            <p className="mt-1 text-[11px] opacity-70">
+                              {item.tone === 'current' ? '当前展示票源' : item.tone === 'lower' ? '更低参考价' : '更高参考价'}
+                            </p>
+                          </div>
+                          <span className="text-lg font-semibold">¥{item.price}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-4 rounded-2xl bg-white px-3.5 py-3">
+                      <div className="flex items-center justify-between text-[11px] text-navy/36">
+                        <span>建议动作</span>
+                        <span>{deal.confidence === 'high' ? '优先下单' : '继续观察'}</span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#e7ebf5]">
+                        <div
+                          className="h-full rounded-full bg-[linear-gradient(90deg,#1b2b5e_0%,#3a67d8_100%)]"
+                          style={{
+                            width: deal.confidence === 'high' ? '82%' : deal.confidence === 'medium' ? '64%' : '42%',
+                          }}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Link>
             )
           })}
-        </div>
-      </div>
 
-      {/* ── BOTTOM CTA ─────────────────────────────────── */}
-      <div className="px-8 pb-12">
-        <div className="bg-navy rounded-2xl px-6 py-5 flex items-center justify-between max-w-[600px]">
-          <div>
-            <p className="text-white font-semibold text-sm mb-0.5">没看到合适的？</p>
-            <p className="text-white/50 text-xs">告诉我你的想法，我再帮你找</p>
-          </div>
-          <Link
-            href="/chat"
-            className="bg-white text-navy text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-white/90 transition-colors flex items-center gap-1.5"
-          >
-            开始对话
-            <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M2 7h10M8 3l4 4-4 4" />
-            </svg>
-          </Link>
+          {!loading && !error && (
+            <>
+              <div className="rounded-[32px] border border-[#e8edf7] bg-[linear-gradient(145deg,#1f2f69_0%,#2d4a93_100%)] p-6 text-white shadow-[0_22px_60px_rgba(27,43,94,0.14)] md:col-span-2 xl:col-span-4">
+                <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-white/54">
+                  Compare Logic
+                </p>
+                <h3 className="mt-3 text-[1.6rem] font-semibold leading-tight">
+                  每张卡都先看票价，再看平台差价
+                </h3>
+                <p className="mt-3 text-sm leading-relaxed text-white/72">
+                  现在不是只给你一张票，而是把当前票源和其他平台的参考价一起摆出来，让你一眼判断这张票到底是真的值，还是只是看起来便宜。
+                </p>
+              </div>
+
+              <div className="rounded-[32px] border border-[#e8edf7] bg-white p-6 shadow-[0_22px_60px_rgba(27,43,94,0.08)] xl:col-span-8">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-navy/34">
+                      Continue Search
+                    </p>
+                    <h3 className="mt-2 text-[1.7rem] font-semibold text-navy">
+                      没看到合适的？换一个目的地继续找
+                    </h3>
+                    <p className="mt-2 text-sm text-navy/46">
+                      回到对话页继续说预算、日期和城市，我会再把页面铺成新的一组机会，而不是只给你一条死板结果。
+                    </p>
+                  </div>
+
+                  <Link
+                    href="/chat"
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-navy px-5 py-3 text-sm font-semibold text-white transition-colors hover:bg-navy-light"
+                  >
+                    返回对话
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M2 7h10M8 3l4 4-4 4" />
+                    </svg>
+                  </Link>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -3,174 +3,169 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { DEFAULT_USER_ID, searchFlights } from '@/lib/api-client'
 
-// Four floating deal cards for the corners
-const floatingCards = [
-  {
-    id: 'f1',
-    origin: '北京', destination: '三亚',
-    price: 398, signal: '近90天低位',
-    gradient: 'linear-gradient(135deg, #0EA5E9, #22D3EE)',
-    position: { top: '10%', left: '4%' },
-    animation: 'drift-a',
-    systemId: 'SYS.042',
-  },
-  {
-    id: 'f2',
-    origin: '上海', destination: '大理',
-    price: 560, signal: '符合心理价位',
-    gradient: 'linear-gradient(135deg, #8B5CF6, #C4B5FD)',
-    position: { top: '8%', right: '4%' },
-    animation: 'drift-b',
-    systemId: 'SYS.117',
-  },
-  {
-    id: 'f3',
-    origin: '广州', destination: '成都',
-    price: 320, signal: '历史新低',
-    gradient: 'linear-gradient(135deg, #10B981, #6EE7B7)',
-    position: { bottom: '14%', left: '4%' },
-    animation: 'drift-c',
-    systemId: 'SYS.208',
-  },
-  {
-    id: 'f4',
-    origin: '北京', destination: '厦门',
-    price: 480, signal: '假期前低价',
-    gradient: 'linear-gradient(135deg, #F59E0B, #FCD34D)',
-    position: { bottom: '10%', right: '4%' },
-    animation: 'drift-d',
-    systemId: 'SYS.334',
-  },
+const suggestions = ['五一去三亚，预算600', '北京上海随时', '下周末成都', '暑假带娃出行']
+
+const menuItems = [
+  { href: '/chat', label: 'chat', active: true },
+  { href: '/explore', label: 'explore', active: false },
+  { href: '/memory', label: 'memory', active: false },
 ]
-
-const suggestions = ['五一三亚，预算600', '北京上海随时', '下周末成都', '暑假带娃出行']
 
 export default function ChatPage() {
   const [query, setQuery] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const router = useRouter()
 
-  const handleSearch = () => {
-    if (query.trim()) router.push('/explore')
+  const handleSearch = async () => {
+    const trimmedQuery = query.trim()
+    if (!trimmedQuery || loading) return
+
+    setLoading(true)
+    setError('')
+
+    try {
+      const result = await searchFlights(trimmedQuery, DEFAULT_USER_ID)
+      window.sessionStorage.setItem('faresniper:last-search', JSON.stringify(result))
+      router.push(`/explore?q=${encodeURIComponent(trimmedQuery)}`)
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : '搜索失败，请确认后端已启动')
+      setLoading(false)
+    }
   }
 
   return (
-    <div className="min-h-screen bg-bg-gray relative overflow-hidden font-sans">
-
-      {/* ── NAV ────────────────────────────────────────── */}
-      <nav className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-8 py-6">
-        <Link href="/" className="flex items-center gap-2 group">
-          <div className="w-4 h-4 rounded-full bg-navy group-hover:scale-110 transition-transform" />
-          <span className="font-mono text-[11px] tracking-[0.18em] text-navy/35 uppercase group-hover:text-navy/60 transition-colors">
-            FareSniper
-          </span>
-        </Link>
-        <div className="flex items-center gap-6">
-          <Link href="/memory" className="text-sm text-gray-400 hover:text-navy transition-colors">
-            我的记忆
-          </Link>
-          <Link
-            href="/explore"
-            className="text-sm bg-navy text-white px-4 py-2 rounded-xl hover:bg-navy-light transition-colors"
-          >
-            探索特价
-          </Link>
-        </div>
-      </nav>
-
-      {/* ── FLOATING DEAL CARDS (background layer) ─────── */}
-      {floatingCards.map((card) => (
-        <div
-          key={card.id}
-          className={`absolute z-0 pointer-events-none animate-${card.animation}`}
-          style={card.position as React.CSSProperties}
-        >
-          <div className="bg-white rounded-2xl shadow-card overflow-hidden w-[168px] opacity-80">
-            {/* Gradient image */}
-            <div
-              className="h-[72px] relative"
-              style={{ background: card.gradient }}
-            >
-              <span className="absolute top-2 right-2.5 font-mono text-[9px] text-white/50">
-                {card.systemId}
-              </span>
-            </div>
-            {/* Card body */}
-            <div className="px-3.5 py-3">
-              <p className="text-navy text-[11px] font-medium mb-1 truncate">
-                {card.origin} → {card.destination}
+    <div className="min-h-screen bg-[#fdfefe] font-sans text-navy">
+      <div className="flex min-h-screen">
+        <aside className="flex w-[220px] flex-col border-r border-[#e6e9ef] bg-white/75 px-5 py-6 backdrop-blur-sm">
+          <Link href="/" className="flex items-center gap-3">
+            <div className="h-4 w-4 rounded-full bg-navy" />
+            <div>
+              <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-navy/38">
+                FareSniper
               </p>
-              <p className="font-heading text-[1.4rem] font-bold text-navy leading-none mb-2">
-                ¥{card.price}
+              <p className="text-xs text-navy/54">
+                flight deals desk
               </p>
-              <span className="inline-block bg-signal-muted text-signal-text text-[10px] font-medium px-2 py-0.5 rounded-full">
-                {card.signal}
-              </span>
             </div>
-          </div>
-        </div>
-      ))}
+          </Link>
 
-      {/* ── CENTER CONTENT ─────────────────────────────── */}
-      <div className="relative z-10 min-h-screen flex flex-col items-center justify-center px-6">
-        <div className="w-full max-w-[520px] text-center">
-
-          {/* Live count badge */}
-          <div className="inline-flex items-center gap-2 bg-white border border-gray-100 shadow-sm text-gray-400 text-xs px-3.5 py-1.5 rounded-full mb-8">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75" />
-              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-signal" />
-            </span>
-            今日监测到 <strong className="text-navy mx-0.5">12</strong> 个异常低价
-          </div>
-
-          {/* Main question */}
-          <h1 className="font-heading text-[4rem] font-bold text-navy leading-[1.1] mb-3 tracking-tight">
-            想去哪？
-          </h1>
-          <p className="text-gray-400 text-base mb-8 leading-relaxed">
-            用自然语言告诉我，我来判断值不值得买
-          </p>
-
-          {/* Search input */}
-          <div className="relative bg-white rounded-2xl shadow-card border border-gray-100/80 flex items-center gap-2 pl-5 pr-1.5 py-1.5 focus-within:border-navy/25 focus-within:shadow-card-hover transition-all duration-300">
-            <svg className="w-4 h-4 text-gray-300 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <circle cx="6.5" cy="6.5" r="4.5" />
-              <path d="M10.5 10.5L14 14" strokeLinecap="round" />
-            </svg>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="比如：五一去三亚，预算 600"
-              className="flex-1 py-3 bg-transparent text-navy placeholder-gray-300 text-[0.95rem] font-sans outline-none"
-              autoFocus
-            />
-            <button
-              onClick={handleSearch}
-              className="flex-shrink-0 bg-navy hover:bg-navy-light text-white text-sm font-medium px-5 py-3 rounded-xl flex items-center gap-2 transition-all duration-200 hover:shadow-md"
-            >
-              分析
-              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M2 7h10M8 3l4 4-4 4" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Quick suggestion pills */}
-          <div className="flex flex-wrap justify-center gap-2 mt-4">
-            {suggestions.map((s) => (
-              <button
-                key={s}
-                onClick={() => setQuery(s)}
-                className="bg-white/80 border border-gray-100 shadow-sm text-gray-400 text-xs px-3.5 py-2 rounded-full hover:border-navy/20 hover:text-navy hover:bg-white hover:shadow-card transition-all duration-200"
+          <nav className="mt-10 flex flex-col gap-2">
+            {menuItems.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={`rounded-2xl px-4 py-3 text-sm font-medium capitalize transition-all duration-200 ${
+                  item.active
+                    ? 'bg-navy text-white shadow-[0_12px_24px_rgba(27,43,94,0.14)]'
+                    : 'text-navy/52 hover:bg-navy/[0.04] hover:text-navy'
+                }`}
               >
-                {s}
-              </button>
+                {item.label}
+              </Link>
             ))}
+          </nav>
+
+          <div className="mt-auto rounded-3xl border border-[#eceef3] bg-[#fafbfc] px-4 py-4">
+            <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-navy/28">
+              workspace
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-navy/56">
+              从这里开始搜索、探索特价，或者直接管理你的偏好记忆。
+            </p>
           </div>
-        </div>
+        </aside>
+
+        <main className="relative flex flex-1 flex-col overflow-hidden">
+          <div className="pointer-events-none absolute inset-0">
+            <div className="absolute left-[14%] top-[14%] h-[240px] w-[240px] rounded-full bg-[#e8eef7]/58 blur-3xl" />
+            <div className="absolute right-[10%] top-[18%] h-[220px] w-[220px] rounded-full bg-[#e7f1ec]/42 blur-3xl" />
+            <div className="absolute bottom-[16%] left-[32%] h-[260px] w-[260px] rounded-full bg-[#f1f3f8]/80 blur-3xl" />
+          </div>
+
+          <div className="relative z-10 flex items-center justify-between px-8 py-6">
+            <div className="rounded-full border border-[#e8ebf2] bg-white/85 px-3 py-1.5 text-xs text-navy/48 shadow-sm">
+              Chat Workspace
+            </div>
+            <div className="rounded-full border border-[#e8ebf2] bg-white/85 px-3 py-1.5 text-xs text-navy/48 shadow-sm">
+              Default view: chat
+            </div>
+          </div>
+
+          <div className="relative z-10 flex flex-1 items-center justify-center px-8 pb-12">
+            <div className="w-full max-w-[760px]">
+              <div className="text-center">
+                <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#9fd8af] bg-[#dff4e4]/85 px-3.5 py-1.5 text-xs font-medium text-signal-text shadow-[0_10px_30px_rgba(34,197,94,0.08)]">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-signal opacity-75" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-signal" />
+                  </span>
+                  今日监测到 <strong className="mx-0.5 text-navy">12</strong> 个异常低价
+                </div>
+
+                <h1 className="font-heading text-[4.4rem] font-bold leading-[1.02] tracking-tight text-navy">
+                  想去哪？
+                </h1>
+                <p className="mx-auto mt-4 max-w-[560px] text-lg leading-relaxed text-navy/46">
+                  用自然语言告诉我你的目的地、时间和预算，我来帮你判断值不值得买。
+                </p>
+              </div>
+
+              <div className="mt-10 rounded-[28px] border border-[#e9edf3] bg-white/92 p-5 shadow-[0_24px_60px_rgba(27,43,94,0.08)] backdrop-blur-sm">
+                <textarea
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault()
+                      void handleSearch()
+                    }
+                  }}
+                  placeholder="比如：五一去三亚，预算 600；或者北京出发，下周末找便宜一点的海边航线"
+                  className="min-h-[140px] w-full resize-none bg-transparent px-2 py-1 text-[1.05rem] leading-relaxed text-navy placeholder:text-[#b2b8c8] outline-none"
+                />
+
+                <div className="mt-4 flex items-center justify-between gap-4 border-t border-[#eef1f6] pt-4">
+                  <div className="rounded-full border border-[#edf0f5] bg-[#fafbfd] px-3 py-1.5 text-xs text-navy/44">
+                    Search over: FareSniper deals
+                  </div>
+                  <button
+                    onClick={() => void handleSearch()}
+                    disabled={loading}
+                    className="flex items-center gap-2 rounded-2xl bg-navy px-5 py-3 text-sm font-semibold text-white transition-all duration-200 hover:bg-[#24366f] hover:shadow-[0_14px_30px_rgba(27,43,94,0.16)] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {loading ? '分析中...' : '分析'}
+                    {!loading && (
+                      <svg className="h-3.5 w-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M2 7h10M8 3l4 4-4 4" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <p className="mt-4 text-center text-sm text-red-500">
+                  {error}
+                </p>
+              )}
+
+              <div className="mt-5 flex flex-wrap justify-center gap-3">
+                {suggestions.map((item) => (
+                  <button
+                    key={item}
+                    onClick={() => setQuery(item)}
+                    className="rounded-full border border-[#e8ebf2] bg-white/88 px-4 py-2 text-sm text-navy/54 shadow-sm transition-all duration-200 hover:border-navy/16 hover:text-navy hover:shadow-md"
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </main>
       </div>
     </div>
   )
