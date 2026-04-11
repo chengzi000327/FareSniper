@@ -1,0 +1,41 @@
+{
+  "u1": {
+    "preferences": {
+      "price_anchor": 600,
+      "frequent_destinations": [
+        "SYX",
+        "KMG"
+      ],
+      "preferred_cabin": "经济舱"
+    },
+    "preference_meta": {
+      "price_anchor": {
+        "source": "manual",
+        "updated_at": "2026-04-11T09:22:30Z"
+      },
+      "frequent_destinations": {
+        "source": "auto",
+        "updated_at": "2026-04-11T09:22:30Z"
+      },
+      "preferred_cabin": {
+        "source": "manual",
+        "updated_at": "2026-04-11T09:22:30Z"
+      }
+    },
+    "query_history": [
+      {
+        "query": {
+          "origin": "BJS",
+          "destination": "SYX",
+          "date_start": "2026-05-01",
+          "date_end": "2026-05-03",
+          "budget": 600,
+          "raw_text": "五一去三亚，600以内",
+          "normalized_text": "BJS->SYX, 2026-05-01 至 2026-05-03, 预算≤600"
+        },
+        "created_at": "2026-04-11T09:22:30Z"
+      }
+    ],
+    "click_history": []
+  }
+}
