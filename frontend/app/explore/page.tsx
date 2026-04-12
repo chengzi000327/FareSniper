@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { DEFAULT_USER_ID, getRecommendationDeals, searchFlights } from '@/lib/api-client'
@@ -59,7 +59,7 @@ function getCompareToneClass(tone: PriceBoardItem['tone']): string {
   return 'bg-[#f8fafc] text-navy/60'
 }
 
-export default function ExplorePage() {
+function ExplorePageContent() {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [activeFilter, setActiveFilter] = useState('全部')
   const [searchResult, setSearchResult] = useState<ExploreSearchResult | null>(null)
@@ -445,5 +445,13 @@ export default function ExplorePage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function ExplorePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f8f9fc] font-sans" />}>
+      <ExplorePageContent />
+    </Suspense>
   )
 }
