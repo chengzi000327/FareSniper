@@ -29,6 +29,11 @@ class DealCardDto(BaseModel):
     depart_time: str
     arrive_time: str
     price: int
+    tax: int = 0
+    baggage_fee: int = 0
+    has_baggage: bool = False
+    recommend_score: str = ""
+    prices: list[dict] = Field(default_factory=list)
     original_price: Optional[int] = None
     discount_rate: Optional[float] = None
     cabin: Optional[str] = None

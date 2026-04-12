@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -59,7 +59,7 @@ class CtripSource(DataSource):
         return self._build_mock_results(origin, destination, date_start)
 
     async def get_history_prices(self, route: str, days: int) -> List[Dict[str, Any]]:
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
         seed = self._seed_from_text(route)
         baseline = 420 + (seed % 180)
         return [
@@ -89,7 +89,7 @@ class CtripSource(DataSource):
                     start = datetime.strptime(date_start, "%Y-%m-%d").date()
                     end = datetime.strptime(date_end, "%Y-%m-%d").date()
                 except ValueError:
-                    start = end = datetime.utcnow().date()
+                    start = end = datetime.now(timezone.utc).date()
 
                 current = start
                 while current <= end:
@@ -162,6 +162,15 @@ class CtripSource(DataSource):
             "depart_time": dep_time,
             "arrive_time": arr_time,
             "price": price,
+            "tax": 120,
+            "baggage_fee": 0,
+            "has_baggage": True,
+            "recommend_score": "9.0" if confidence == "high" else "8.0",
+            "prices": [
+                {"name": "携程旅行", "price": price, "lowest": True},
+                {"name": "去哪儿网", "price": price + 30},
+                {"name": "飞猪旅行", "price": price + 45},
+            ],
             "original_price": original_price,
             "discount_rate": discount_rate if discount_rate > 0 else None,
             "cabin": "economy",
@@ -193,6 +202,9 @@ class CtripSource(DataSource):
             discount = round(0.65 + idx * 0.05, 2)
             original = int(price / discount)
             confidence = "high" if discount < 0.75 else "medium"
+            has_baggage = idx % 2 == 0
+            baggage_fee = 0 if has_baggage else 50
+            recommend_score = f"{9.8 - idx * 0.2:.1f}"
             results.append({
                 "id": f"mock-{seed}-{idx}",
                 "system_id": _next_system_id(),
@@ -206,6 +218,16 @@ class CtripSource(DataSource):
                 "depart_time": f"{dep_h:02d}:10",
                 "arrive_time": f"{arr_h:02d}:40",
                 "price": price,
+                "tax": 120,
+                "baggage_fee": baggage_fee,
+                "has_baggage": has_baggage,
+                "recommend_score": recommend_score,
+                "prices": [
+                    {"name": "携程旅行", "price": price, "lowest": True},
+                    {"name": "去哪儿网", "price": price + 30},
+                    {"name": "飞猪旅行", "price": price + 45},
+                    {"name": "同程旅行", "price": price + 60},
+                ],
                 "original_price": original,
                 "discount_rate": discount,
                 "cabin": "economy",

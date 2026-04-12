@@ -1,0 +1,169 @@
+import { ArrowRight, Bell, Briefcase, Equal, ExternalLink, Plane, Plus, ShieldCheck } from 'lucide-react'
+
+export type PriceItem = {
+  name: string
+  price: number
+  lowest?: boolean
+}
+
+export type DiscoveryCardContentProps = {
+  from: string
+  to: string
+  date?: string
+  basePrice: number
+  tax: number
+  baggageFee: number
+  hasBaggage: boolean
+  originalPrice?: number
+  platform: string
+  recommendScore?: string
+  prices: PriceItem[]
+  compact?: boolean
+  onMonitorPrice?: () => void
+}
+
+export function DiscoveryCardContent({
+  from,
+  to,
+  date,
+  basePrice,
+  tax,
+  baggageFee,
+  hasBaggage,
+  platform,
+  recommendScore,
+  prices,
+  compact,
+  onMonitorPrice,
+}: DiscoveryCardContentProps) {
+  const totalPrice = basePrice + tax + baggageFee
+  const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
+  const sectionGap = compact ? 'mb-3.5' : 'mb-5'
+
+  return (
+    <div className={`flex h-full flex-col ${cardPadding}`}>
+      <div className={`flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between ${compact ? 'mb-2.5' : 'mb-5'}`}>
+        <div className="flex items-center gap-3">
+          <div
+            className={`flex items-center justify-center rounded-2xl bg-brand-orange/10 ${compact ? 'h-10 w-10' : 'h-12 w-12'}`}
+          >
+            <Plane className={`text-brand-orange ${compact ? 'h-5 w-5' : 'h-6 w-6'}`} />
+          </div>
+          <div>
+            <div className="mb-1 flex items-center gap-2">
+              <h3 className={`font-black leading-none ${compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{from}</h3>
+              <ArrowRight className="h-4 w-4 text-brand-muted/60" />
+              <h3 className={`font-black leading-none ${compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{to}</h3>
+            </div>
+            <p className={`font-medium text-brand-muted ${compact ? 'text-xs' : 'text-sm'}`}>直飞特惠 · {date || '实时价格'}</p>
+          </div>
+        </div>
+        <div className="flex flex-col items-start sm:items-end">
+          <div className="mb-2 rounded-md bg-green-500 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20">
+            发现指数
+          </div>
+          <span className={`font-black leading-none tracking-tight text-green-500 ${compact ? 'text-2xl' : 'text-3xl'}`}>
+            {recommendScore || '9.5'}
+          </span>
+        </div>
+      </div>
+
+      <div
+        className={`relative ${sectionGap} grid grid-cols-2 items-center gap-3 overflow-hidden rounded-2xl border border-brand-text/5 bg-brand-bg/70 sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:gap-2 ${
+          compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'
+        }`}
+      >
+        <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-transparent via-brand-orange/20 to-transparent" />
+        <PriceBlock label="票价" value={`¥${basePrice}`} compact={compact} />
+        <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
+        <PriceBlock label="机建燃油" value={`¥${tax}`} compact={compact} />
+        <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
+        <PriceBlock label="行李额" value={baggageFee > 0 ? `+¥${baggageFee}` : '免费'} compact={compact} highlight={baggageFee > 0} />
+        <Equal className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
+        <div className="col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0">
+          <span className="mb-1 text-[11px] font-bold text-brand-orange sm:text-xs">综合总价</span>
+          <span className={`font-black leading-none text-brand-orange ${compact ? 'text-2xl' : 'text-3xl'}`}>¥{totalPrice}</span>
+        </div>
+      </div>
+
+      <div className={`${sectionGap} space-y-2.5`}>
+        <div className="flex items-center gap-3 rounded-2xl border border-brand-text/5 bg-white px-4 py-2 shadow-sm">
+          <div className={`flex h-9 w-9 items-center justify-center rounded-full ${hasBaggage ? 'bg-green-50' : 'bg-brand-orange/5'}`}>
+            <Briefcase className={`h-4 w-4 ${hasBaggage ? 'text-green-500' : 'text-brand-orange'}`} />
+          </div>
+          <span className={`text-sm leading-6 font-medium ${baggageFee === 0 ? 'text-green-600' : 'text-brand-orange'}`}>
+            {baggageFee === 0 ? '含 20kg 免费托运行李额度' : `暂无免费托运行李额度，需加购 ¥${baggageFee}，已为您计算至最终费用`}
+          </span>
+        </div>
+
+        <div className="flex items-start gap-3 rounded-2xl border border-green-100/60 bg-green-50/60 px-4 py-2">
+          <ShieldCheck className="mt-0.5 h-4 w-4 text-green-600" />
+          <p className="text-sm leading-6 text-green-800">
+            AI 监测：该价格为综合行李后的全网<span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
+            <span className="font-bold text-brand-orange">{platform}</span> 下单。
+          </p>
+        </div>
+      </div>
+
+      <div className={`${sectionGap} rounded-2xl border border-brand-text/5 bg-brand-bg/40 ${compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'}`}>
+        <div className="mb-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="h-2 w-2 animate-pulse rounded-full bg-brand-orange" />
+            <span className="text-xs font-bold text-brand-muted sm:text-sm">全网多端实时同步</span>
+          </div>
+          <span className="rounded-md border border-brand-orange/20 bg-white/60 px-2 py-1 text-[11px] font-bold text-brand-orange">
+            实时底价
+          </span>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {prices.map((price) => (
+            <div key={price.name} className={`flex items-center justify-between ${price.lowest ? 'opacity-100' : 'opacity-45'}`}>
+              <span className="text-sm font-medium text-brand-text">{price.name}</span>
+              <div className="flex items-center gap-2">
+                {price.lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
+                <span className={`text-sm font-black sm:text-base ${price.lowest ? 'text-brand-orange' : 'text-brand-text'}`}>¥{price.price}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-auto flex flex-col gap-2 sm:flex-row">
+        <button
+          type="button"
+          onClick={onMonitorPrice}
+          className="flex flex-1 items-center justify-center gap-2 rounded-2xl border border-brand-text/10 bg-white px-4 py-2 text-sm font-bold text-brand-text transition hover:bg-brand-orange/5"
+        >
+          <Bell className="h-4 w-4" />
+          监控价格
+        </button>
+        <button
+          type="button"
+          className="group flex flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-text px-4 py-2 text-sm font-bold text-white shadow-card transition hover:bg-brand-orange"
+        >
+          前往预订
+          <ExternalLink className="h-4 w-4 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PriceBlock({
+  label,
+  value,
+  compact,
+  highlight,
+}: {
+  label: string
+  value: string
+  compact?: boolean
+  highlight?: boolean
+}) {
+  return (
+    <div className="flex flex-col items-center">
+      <span className={`mb-1 text-brand-muted ${compact ? 'text-[11px]' : 'text-xs'}`}>{label}</span>
+      <span className={`font-bold ${highlight ? 'text-brand-orange' : 'text-brand-text'} ${compact ? 'text-sm' : 'text-base'}`}>{value}</span>
+    </div>
+  )
+}

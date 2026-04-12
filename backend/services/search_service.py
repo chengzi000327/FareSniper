@@ -90,6 +90,11 @@ class SearchService:
             f.setdefault("airline", "未知航司")
             f.setdefault("id", "unknown")
             f.setdefault("platform", "ctrip")
+            f.setdefault("tax", 120)
+            f.setdefault("baggage_fee", 0)
+            f.setdefault("has_baggage", True)
+            f.setdefault("recommend_score", "")
+            f.setdefault("prices", [])
 
         return {
             "user_id": user_id,

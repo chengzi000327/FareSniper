@@ -121,12 +121,19 @@ class RecommendationService:
             "reason": "当前五一三亚机票价格低于历史均价 18%",
             "query_hint": "五一去三亚，600以内",
             "tags": ["热门", "低价"],
-            "preview_deal": None,
+            "preview_deal": _make_preview_deal("上海", "SHA", "三亚", "SYX", 399, "9.6"),
         })
 
         # Personalized cards from frequent destinations
         frequent = prefs.get("frequent_destinations") or []
         price_anchor: Optional[int] = prefs.get("price_anchor")
+
+        _FEATURED_ROUTES = [
+            ("北京", "BJS", "东京", "NRT", 899, "9.4"),
+            ("广州", "CAN", "新加坡", "SIN", 799, "9.2"),
+            ("成都", "CTU", "曼谷", "BKK", 599, "9.5"),
+            ("上海", "SHA", "首尔", "ICN", 699, "9.3"),
+        ]
 
         for dest_code in frequent[:2]:
             dest_city = _DESTINATION_CITY_MAP.get(dest_code, dest_code)
@@ -136,7 +143,20 @@ class RecommendationService:
                 "reason": "根据长期偏好自动生成",
                 "query_hint": f"去{dest_city}，下周末出发",
                 "tags": ["个性化", "记忆"],
-                "preview_deal": None,
+                "preview_deal": _make_preview_deal("上海", "SHA", dest_city, dest_code, 599, "9.1"),
+            })
+
+        # Fill with featured routes if fewer than 4 cards total
+        for origin_city, origin_code, dest_city, dest_code, price, score in _FEATURED_ROUTES:
+            if len(cards) >= 4:
+                break
+            cards.append({
+                "id": str(uuid.uuid4()),
+                "title": f"{origin_city} → {dest_city} 特价",
+                "reason": f"{dest_city}近期低价窗口，性价比极高",
+                "query_hint": f"{origin_city}去{dest_city}，下个月出行",
+                "tags": ["特价", "热门"],
+                "preview_deal": _make_preview_deal(origin_city, origin_code, dest_city, dest_code, price, score),
             })
 
         # Budget reminder card
@@ -165,6 +185,47 @@ class RecommendationService:
 
 def _now() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _make_preview_deal(
+    origin_city: str,
+    origin_code: str,
+    dest_city: str,
+    dest_code: str,
+    price: int,
+    recommend_score: str,
+) -> Dict[str, Any]:
+    return {
+        "id": str(uuid.uuid4())[:12],
+        "system_id": "SYS.REC",
+        "platform": "携程旅行",
+        "origin_city": origin_city,
+        "origin_code": origin_code,
+        "destination_city": dest_city,
+        "destination_code": dest_code,
+        "depart_date": "2026-05-01",
+        "airline": "海南航空",
+        "depart_time": "08:10",
+        "arrive_time": "11:40",
+        "price": price,
+        "tax": 120,
+        "baggage_fee": 0,
+        "has_baggage": True,
+        "recommend_score": recommend_score,
+        "prices": [
+            {"name": "携程旅行", "price": price, "lowest": True},
+            {"name": "去哪儿网", "price": price + 30},
+            {"name": "飞猪旅行", "price": price + 45},
+            {"name": "同程旅行", "price": price + 60},
+        ],
+        "original_price": int(price / 0.68),
+        "discount_rate": 0.68,
+        "cabin": "economy",
+        "signals": ["6.8折特价"],
+        "confidence": "high",
+        "verdict": "特价！建议立即购买",
+        "booking_url": None,
+    }
 
 
 def _prefs_to_memory_items(prefs: Dict[str, Any]) -> List[Dict[str, Any]]:
