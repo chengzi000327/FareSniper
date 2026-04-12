@@ -1,206 +1,6 @@
-# 特价机票发现平台 - 技术架构与执行步骤
+# FareSniper 技术架构
 
-**版本：** v2.1
-**日期：** 2026-04-11
-**配套文档：** `PRD.md`
-
-> **v2.1 变更：** 在 v2.0 完整架构基础上，增加「分阶段交付」章节，按 MVP → 真实数据 → 精细化 三阶段推进，每阶段都可以独立上线验证。
->
-> **v2.0 架构设计是终态目标，阶段一/二会做必要的简化和替代，避免一步到位。**
-
----
-
-## 分阶段交付路线图（最重要，先看这个）
-
-**整体节奏：**
-```
-阶段一 (MVP)           阶段二 (真实数据)         阶段三 (精细化)
-  前端页面            后端+数据源接入           完整 AgentScope 架构
-  本地 mock 交互       部署上线                  优化+一键部署
-  Vercel 可演示        能真实出结果              可交付可维护
-```
-
-**每阶段交付条件：**
-
-| 阶段 | 完成标志 | 时间预估 | 架构复杂度 |
-|------|---------|---------|-----------|
-| 阶段一 | 前端三屏可点击、Vercel 可访问 | 1天 | ⭐ |
-| 阶段二 | 真实携程数据能跑通并部署 | 2-3 天 | ⭐⭐ |
-| 阶段三 | 完整 AgentScope + Plan-and-Execute + 两层记忆 | 3-5 天 | ⭐⭐⭐⭐⭐ |
-
----
-
-### 阶段一：MVP 前端页面部署（Day 1）
-
-**目标：** 让三屏流程能在浏览器里跑通，可分享 URL 给用户看产品故事。
-
-**做什么：**
-
-1. **先确定页面布局（UI 优先）**
-   - 首页：对话输入框 + 热门低价卡片 + 基于记忆的推荐卡片
-   - 结果页：结果卡片 + AI 建议 + 值得买信号
-   - 个人中心：偏好列表（可编辑/删除）
-
-2. **再跑通本地交互（纯前端模拟）**
-   - 所有数据都写死在前端 `mocks/` 目录下的 JSON
-   - 对话输入 → 前端做简单关键词匹配 → 跳转结果页
-   - "编辑偏好" → 存在 `localStorage`，刷新不丢
-   - **不需要后端，不需要数据库，不需要 LLM**
-
-3. **部署到 Vercel**
-   - `vercel --prod` 一键上线
-   - 拿到可分享 URL
-
-**技术栈（阶段一）：**
-- Next.js 14 + TypeScript + Tailwind + shadcn/ui
-- 状态：`useState` + `localStorage`
-- 假数据：写死在 `frontend/mocks/*.json`
-
-**不做什么：**
-- ❌ Python 后端
-- ❌ PostgreSQL / Redis
-- ❌ AgentScope
-- ❌ flights_monitor
-- ❌ LLM 调用
-
-**阶段一交付物：**
-- 一个可点击的 Next.js demo
-- Vercel URL
-- 产品故事完整呈现（找票→判断→记忆）
-
----
-
-### 阶段二：真实数据上线并部署（Day 2-3）
-
-**目标：** 把前端对接到真实的携程数据，让"AI 推荐"不再是假的。
-
-**做什么：**
-
-1. **最小后端（不用 AgentScope，先用 FastAPI 裸写）**
-   - FastAPI 单文件就够，`backend/main.py`
-   - 3 个路由：`/search`、`/memory`、`/recommendations`
-   - **不用复杂的 Agent 框架**，后端内部流程直接写成 Python 函数链
-
-2. **接入 flights_monitor（核心）**
-   - `backend/data_sources/ctrip_source.py` 包一层
-   - 同步 Selenium 用 `asyncio.run_in_executor` 异步化
-   - 热门航线预热：启动时跑一次，结果缓存
-
-3. **最小 LLM 调用（一个函数，不做 Agent）**
-   - `backend/llm.py` 一个文件
-   - 两个函数：`parse_intent(text)`、`generate_recommendation(flights, preferences)`
-   - 先接 1 家模型（推荐 DeepSeek，便宜快）
-
-4. **最小记忆（JSON 文件先顶着）**
-   - `backend/memory.json` 存用户偏好
-   - **还没上 PostgreSQL/Redis**
-   - 能读能写能展示就行
-
-5. **部署**
-   - 前端：Vercel
-   - 后端：Railway / Render / 自己服务器（任选）
-   - flights_monitor Selenium 需要 Chrome → 选支持 Chrome 的托管方
-
-**技术栈（阶段二）：**
-- 前端：不变（Next.js）
-- 后端：**FastAPI + flights_monitor + DeepSeek API + JSON 文件**
-- 数据库：暂无（JSON 文件代替）
-- Agent 框架：暂无（纯 Python 函数）
-
-**阶段二不做什么：**
-- ❌ AgentScope（先用普通 Python）
-- ❌ Plan-and-Execute 架构（先串行）
-- ❌ PostgreSQL / Redis（JSON 文件先顶）
-- ❌ LazyAgentRegistry（不需要插件化）
-- ❌ 熔断器、异步总结（先不要）
-
-**阶段二交付物：**
-- 真实携程数据能返回
-- AI 推荐是真的 LLM 生成的
-- 前后端都在线上，可分享真实体验
-
----
-
-### 阶段三：架构精细化 + 一键部署（Day 4-8）
-
-**目标：** 把阶段二的"能跑"升级为"可维护、可扩展、可交付"的完整架构。
-
-**做什么（严格按顺序）：**
-
-1. **先接数据库（Day 4）**
-   - 从 JSON 文件迁移到 **PostgreSQL**（`docker-compose.yml` 启）
-   - 建表：`preferences` / `query_history` / `click_history` / `chat_history`
-   - SQLAlchemy 2.0 async + Alembic 迁移
-   - Redis 接入，作为偏好热缓存 + LLM 总结缓存
-
-2. **再重构为 Plan-and-Execute（Day 5-6）**
-   - 引入 **AgentScope** 框架
-   - 把阶段二的 Python 函数拆为 Agent：
-     - `IntentionAgent`（Plan 阶段）
-     - `OrchestrationAgent`（Execute 阶段）
-   - 子 Skill 拆分：`FlightSearchAgent` / `PreferenceMatchAgent` / `DecisionAgent` / `MemoryQueryAgent`
-   - 引入 **LazyAgentRegistry**，扫描 `skills/` 目录懒加载
-
-3. **再加两层记忆系统（Day 6）**
-   - `ShortTermMemory`（Redis 滑动窗口）
-   - `LongTermMemory`（PostgreSQL 持久化）
-   - `Summarizer`（异步 LLM 总结，缓存到 Redis）
-   - `MemoryManager` 统一入口
-
-4. **再加容错机制（Day 7）**
-   - `CircuitBreaker`（LLM 调用 / Selenium 抓取）
-   - `retry_with_backoff`（指数退避）
-   - 优先级并行调度（`asyncio.gather` 同优先级并行）
-
-5. **最后优化细节、一键部署（Day 8）**
-   - 优先级并行调度性能验证
-   - SSE 流式输出体验
-   - `docker-compose.yml` 一键启动所有服务（前端+后端+PG+Redis）
-   - 视觉细节、错误兜底、loading 动画
-   - README 和部署文档
-
-**阶段三交付物：**
-- 完整的 v2.0 架构（本文档前面章节描述的终态）
-- Docker Compose 一键启动
-- 可演示、可扩展（新数据源零侵入接入）
-
----
-
-### 阶段分工速查表
-
-| 能力 | 阶段一 | 阶段二 | 阶段三 |
-|------|-------|-------|-------|
-| 前端页面 | ✅ 静态 Mock | ✅ 对接真实 API | ✅ 细节打磨 |
-| 后端 | ❌ | ✅ FastAPI 裸写 | ✅ + AgentScope |
-| 数据源 | ❌ 前端假数据 | ✅ flights_monitor | ✅ 多源注册表 |
-| LLM 调用 | ❌ | ✅ 一个函数 | ✅ 多 Agent + 多模型 |
-| 记忆系统 | ✅ localStorage | ✅ JSON 文件 | ✅ Redis + PostgreSQL |
-| Plan-Execute | ❌ | ❌ 串行 | ✅ 并行调度 |
-| Skill Plugin | ❌ | ❌ | ✅ LazyAgentRegistry |
-| 容错 | ❌ | ❌ | ✅ 熔断+重试 |
-| 部署 | Vercel | Vercel + Railway | Docker Compose |
-
----
-
-### 阶段一/二和 v2.0 终态架构的关系
-
-**本文档前面（第 0 节~第 13 节）描述的是阶段三完成后的终态架构。**
-
-阶段一、阶段二的实现**刻意简化**，不代表最终形态：
-- 阶段二的"普通 Python 函数"会在阶段三被重构为 AgentScope 的 IntentionAgent/OrchestrationAgent
-- 阶段二的"JSON 文件记忆"会在阶段三被替换为 Redis+PostgreSQL 两层记忆
-- 阶段二的"串行调用"会在阶段三被重构为优先级并行调度
-
-**但核心原则贯穿三个阶段：**
-- ✅ Agent 只决策，Tool 只执行（阶段一是前端判断，阶段二/三是后端分层）
-- ✅ 数据源抽象（阶段一是 mocks/, 阶段二/三是 data_sources/）
-- ✅ 记忆显性化（阶段一 localStorage 展示，阶段二/三 数据库展示）
-
----
-
-**以下是阶段三完成后的终态架构细节。阶段一只看到「阶段一」章节就够，阶段二只看到「阶段二」章节和本文档的第 4 节（Agent/Tool 契约）就够。**
-
----
+**配套文档：** `PRD.md`、`PLAN.md`
 
 ---
 
@@ -291,8 +91,8 @@ PostgreSQL + Redis
 | 框架 | **FastAPI** | Python 异步生态最好 |
 | Agent 框架 | **AgentScope** | 飞书文档同款，消息传递 + Actor 模型 |
 | ORM | **SQLAlchemy 2.0 (async)** | Python 主流 |
-| 数据库 | **PostgreSQL 15** | JSONB + MVCC |
-| 缓存 | **Redis 7** | 短期记忆 + 偏好热缓存 + LLM 总结缓存 |
+| 数据库 | **PostgreSQL 15（Railway 内置）** | JSONB + MVCC，无需单独注册 |
+| 缓存 | **Redis 7（Railway 内置）** | 短期记忆 + 偏好热缓存 + LLM 总结缓存 |
 | 数据源 | **flights_monitor (改造版)** | 携程先跑通，其他平台改造后接入 |
 | LLM | **可插拔多供应商** | DeepSeek / 通义 / 智谱 / OpenAI 等 |
 
@@ -301,7 +101,7 @@ PostgreSQL + Redis
 ## 2. 项目目录结构
 
 ```
-meituan/
+FareSniper/
 ├── frontend/                           # Next.js 前端（纯 UI）
 │   ├── app/
 │   │   ├── page.tsx                    # 首页（对话 + GUI 卡片）
@@ -398,7 +198,6 @@ meituan/
 │   ├── requirements.txt
 │   └── .env                            # DB、Redis、LLM key
 │
-├── docker-compose.yml                  # PostgreSQL + Redis 一键启动
 ├── PRD.md
 └── ARCHITECTURE.md
 ```
@@ -921,118 +720,16 @@ async def retry_with_backoff(fn, max_retries=3, base=1.0, max_delay=30.0):
 
 ---
 
-## 10. 执行步骤（三阶段细化）
+## 10. 执行步骤
 
-### 阶段一：MVP 前端页面部署（Day 1，4-6 小时）
+详见 `PLAN.md`（Steps 1–10，含测试先行要求和文件变更清单）。
 
-| # | 任务 | 输出 | 关键点 |
-|---|------|------|--------|
-| 1.1 | `pnpm create next-app frontend --ts --tailwind --app` | 项目骨架 | - |
-| 1.2 | 安装 shadcn/ui，初始化组件库 | UI 基础 | - |
-| 1.3 | 写 `frontend/mocks/` 假数据（flights.json / preferences.json / hot-deals.json） | 假数据就位 | 5 条真实感航线 |
-| 1.4 | 首页：对话输入框 + 热门低价卡 + 个性化卡片 | app/page.tsx | 先做布局 |
-| 1.5 | 结果页：结果卡片 + AI 建议 + 信号标签 | app/results/page.tsx | - |
-| 1.6 | 个人中心：偏好列表 + 编辑/删除（localStorage） | app/profile/page.tsx | - |
-| 1.7 | 简单关键词路由：对话输入 → 跳转结果页 | 交互闭环 | 不调 LLM |
-| 1.8 | `vercel --prod` 一键部署 | 线上 URL | - |
-
-**阶段一验收：**
-- [ ] 打开 URL 看到首页
-- [ ] 点击卡片跳转结果页
-- [ ] 结果页能看到 AI 建议（写死的）
-- [ ] 个人中心能编辑偏好，刷新不丢
-
----
-
-### 阶段二：真实数据上线并部署（Day 2-3，6-10 小时）
-
-**Day 2：后端裸搭 + 数据源接入（4-6 小时）**
-
-| # | 任务 | 输出 |
-|---|------|------|
-| 2.1 | `backend/` 初始化：`uv init` + FastAPI + httpx + python-dotenv | requirements.txt |
-| 2.2 | clone flights_monitor 到 `backend/third_party/flights_monitor/` | Selenium 可跑 |
-| 2.3 | 写 `backend/data_sources/ctrip_source.py` 封装 flights_monitor | 返回标准化航班数据 |
-| 2.4 | 写 `backend/llm.py`：`parse_intent()` + `generate_recommendation()` | 接 DeepSeek |
-| 2.5 | 写 `backend/memory.py`：读写 `memory.json` 文件 | 偏好可持久化 |
-| 2.6 | 写 `backend/main.py`：FastAPI 3 个路由（/search, /memory, /recommendations） | 后端跑通 |
-| 2.7 | 本地 curl 测试全流程 | ✅ |
-
-**Day 3：前后端对接 + 部署（4 小时）**
-
-| # | 任务 | 输出 |
-|---|------|------|
-| 3.1 | 前端 `lib/api-client.ts` 替换 mocks 调用真实 API | 前后端通 |
-| 3.2 | 部署前端到 Vercel | 前端在线 |
-| 3.3 | 部署后端到 Railway（支持 Chrome + Python） | 后端在线 |
-| 3.4 | 环境变量串起来（API_URL、LLM_KEY、DB 暂无） | 线上跑通 |
-| 3.5 | 热门航线预热脚本（启动时批量跑 flights_monitor） | 首屏快 |
-
-**阶段二验收：**
-- [ ] 输入"五一去三亚"能返回真实携程数据
-- [ ] AI 建议是 LLM 真实生成的
-- [ ] 编辑偏好后下次搜索能看到变化
-- [ ] 线上 URL 可分享
-
-**阶段二明确不做：**
-- ❌ AgentScope（Python 函数串行即可）
-- ❌ PostgreSQL / Redis（JSON 文件）
-- ❌ 多 Agent / 并行调度
-- ❌ 熔断器 / 异步总结
-
----
-
-### 阶段三：架构精细化 + 一键部署（Day 4-8，4-6 天）
-
-**Day 4：数据库接入（先做这个）**
-
-| # | 任务 | 输出 |
-|---|------|------|
-| 4.1 | `docker-compose.yml` 启 PostgreSQL + Redis | 本地双服务 |
-| 4.2 | SQLAlchemy 2.0 async + asyncpg + Alembic 初始化 | ORM 就绪 |
-| 4.3 | 建表：preferences / query_history / click_history / chat_history | schema 就绪 |
-| 4.4 | 从 JSON 文件迁移到 PostgreSQL | 数据搬家 |
-| 4.5 | Redis 接入（偏好热缓存） | 性能提升 |
-
-**Day 5-6：重构为 Plan-and-Execute（引入 AgentScope）**
-
-| # | 任务 | 输出 |
-|---|------|------|
-| 5.1 | 安装 AgentScope，熟悉 AgentBase + Msg + 异步 reply | 框架就绪 |
-| 5.2 | 把阶段二的 `parse_intent()` 重构为 `IntentionAgent`（Plan 阶段） | Plan 输出正确 schedule |
-| 5.3 | 写 `OrchestrationAgent`（Execute 阶段，优先级并行） | Execute 可运行 |
-| 5.4 | 拆 Skill：FlightSearchAgent / PreferenceMatchAgent / DecisionAgent / MemoryQueryAgent | skills/ 完整 |
-| 5.5 | 每个 Skill 写 `SKILL.md` 元数据 | Progressive Disclosure |
-| 5.6 | 写 `LazyAgentRegistry`，扫描 skills/ 目录懒加载 | 插件化 |
-| 5.7 | 5 个 Tool 纯函数（fetch_flights / compare_prices / analyze_history / match_preference / generate_signals） | tools/ 完整 |
-
-**Day 6-7：两层记忆 + 容错**
-
-| # | 任务 | 输出 |
-|---|------|------|
-| 6.1 | ShortTermMemory（Redis 滑动窗口） | 短期记忆 |
-| 6.2 | LongTermMemory（PostgreSQL 持久化） | 长期记忆 |
-| 6.3 | 异步 LLM 总结 + Redis 缓存 | 摘要机制 |
-| 6.4 | MemoryManager 统一入口 | 对外一个接口 |
-| 6.5 | CircuitBreaker（LLM 调用 + Selenium） | 容错 |
-| 6.6 | retry_with_backoff（指数退避） | 重试 |
-| 6.7 | 优先级并行调度（asyncio.gather） | 性能 |
-
-**Day 8：细节优化 + 一键部署**
-
-| # | 任务 | 输出 |
-|---|------|------|
-| 8.1 | SSE 流式返回（AI 建议逐字输出） | 体验感 |
-| 8.2 | 视觉细节、loading、错误兜底 | 可演示 |
-| 8.3 | `docker-compose.yml` 整合前端+后端+PG+Redis | 一键启动 |
-| 8.4 | README + 部署文档 | 可交付 |
-
-**阶段三验收：**
+验收标准：
 - [ ] 完整 Plan-and-Execute 架构跑通
 - [ ] 同优先级 Agent 并行执行（响应时间可度量）
 - [ ] 两层记忆可视化（个人中心能看到短期和长期）
-- [ ] `docker compose up` 一键启动所有服务
 - [ ] 新增数据源零侵入接入（接口稳定）
+- [ ] Railway 画布全服务关联，push 即自动部署
 
 ---
 
@@ -1056,7 +753,7 @@ async def retry_with_backoff(fn, max_retries=3, base=1.0, max_delay=30.0):
 - [ ] flights_monitor 的改造进度：同程/去哪儿/航旅纵横 何时能接入
 - [ ] LLM 模型选型：每个 Agent 对应哪家模型（建议做 A/B 对比）
 - [ ] Selenium 性能瓶颈：是否要改造 flights_monitor 为纯 HTTP 抓取
-- [ ] PostgreSQL / Redis 部署：本地 docker-compose 还是云服务
+- [x] PostgreSQL / Redis 部署：Railway 内置服务，画布添加即可
 
 ---
 
@@ -1072,4 +769,4 @@ async def retry_with_backoff(fn, max_retries=3, base=1.0, max_delay=30.0):
 
 ---
 
-**下一步：确认架构无误后，从 Day 1 的 docker-compose 开始执行。**
+**下一步：确认架构无误后，按 PLAN.md 执行。**

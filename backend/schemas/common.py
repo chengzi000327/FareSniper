@@ -1,40 +1,54 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
-class HealthResponse(BaseModel):
-    status: str = "ok"
-    app: str
+ApiConfidence = Literal["high", "medium", "low"]
 
 
-class RecommendationModel(BaseModel):
-    recommendation: str
-    signals: List[str] = Field(default_factory=list)
-    confidence: str = "medium"
+class ApiMeta(BaseModel):
+    generated_at: str
+    source: Optional[str] = None
+    request_id: Optional[str] = None
+    result_count: Optional[int] = None
+    fallback_mode: Optional[bool] = None
 
 
-class FlightResultModel(BaseModel):
+class DealCardDto(BaseModel):
     id: str
+    system_id: str
     platform: str
-    origin: str
-    destination: str
+    origin_city: str
+    origin_code: str
+    destination_city: str
+    destination_code: str
     depart_date: str
     airline: str
     depart_time: str
     arrive_time: str
     price: int
+    original_price: Optional[int] = None
+    discount_rate: Optional[float] = None
     cabin: Optional[str] = None
-    signals: List[str] = Field(default_factory=list)
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    signals: list[str] = Field(default_factory=list)
+    confidence: ApiConfidence = "medium"
+    verdict: str
+    booking_url: Optional[str] = None
 
 
-class RecommendationCardModel(BaseModel):
+class RecommendationCardDto(BaseModel):
+    id: str
     title: str
     reason: str
     query_hint: str
-    price: Optional[int] = None
-    destination: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    preview_deal: Optional[DealCardDto] = None
+
+
+# ── 向后兼容别名（旧代码引用，Step 8 删除）────────────────────────────────
+
+class HealthResponse(BaseModel):
+    status: str = "ok"
+    app: str

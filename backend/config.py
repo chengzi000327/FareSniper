@@ -15,6 +15,8 @@ class Settings:
     default_user_id: str = os.getenv("DEFAULT_USER_ID", "demo-user")
     default_origin: str = os.getenv("DEFAULT_ORIGIN", "BJS")
     memory_file: Path = Path(os.getenv("MEMORY_FILE", ROOT_DIR / "memory.json"))
+    database_url: str = os.getenv("DATABASE_URL", "")
+    redis_url: str = os.getenv("REDIS_URL", "")
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock")
     llm_api_key: str = os.getenv("LLM_API_KEY", "")
     llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")

@@ -1,35 +1,55 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
-from backend.schemas.common import RecommendationCardModel
+from backend.schemas.common import ApiMeta, RecommendationCardDto
+
+MemoryValue = Union[str, int, list[str]]
 
 
-class PreferenceItemModel(BaseModel):
+class MemoryItemDto(BaseModel):
+    id: str
     field: str
-    value: Any
-    source: str = "manual"
+    label: str
+    value: MemoryValue
+    value_display: str
+    source: Literal["manual", "auto"] = "manual"
     updated_at: str
 
 
-class MemoryResponse(BaseModel):
+class QueryHistoryItemDto(BaseModel):
+    query: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class ClickHistoryItemDto(BaseModel):
+    flight_info: dict[str, Any] = Field(default_factory=dict)
+    created_at: str
+
+
+class MemoryResponseDto(BaseModel):
     user_id: str
-    preferences: List[PreferenceItemModel] = Field(default_factory=list)
-    query_history: List[Dict[str, Any]] = Field(default_factory=list)
-    click_history: List[Dict[str, Any]] = Field(default_factory=list)
+    memories: list[MemoryItemDto] = Field(default_factory=list)
+    query_history: list[QueryHistoryItemDto] = Field(default_factory=list)
+    click_history: list[ClickHistoryItemDto] = Field(default_factory=list)
+    meta: ApiMeta
 
 
 class MemoryPatchRequest(BaseModel):
     user_id: str
     field: str
-    value: Any
-    source: str = "manual"
+    value: MemoryValue
+    source: Literal["manual", "auto"] = "manual"
 
 
-class RecommendationsResponse(BaseModel):
+class RecommendationsResponseDto(BaseModel):
     user_id: str
-    cards: List[RecommendationCardModel] = Field(default_factory=list)
-    source: str = "mock"
-    generated_at: str
+    cards: list[RecommendationCardDto] = Field(default_factory=list)
+    meta: ApiMeta
+
+
+# 向后兼容别名（Step 8 删除）
+MemoryResponse = MemoryResponseDto
+RecommendationsResponse = RecommendationsResponseDto
