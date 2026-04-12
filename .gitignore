@@ -6,6 +6,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 backend/.env
+backend/third_party/flights_monitor/.git.localbackup/
+backend/third_party/flights_monitor/flight_monitor.log
 
 # Node
 frontend/node_modules/
