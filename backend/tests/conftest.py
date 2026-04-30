@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import AsyncGenerator
 
-import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
@@ -14,16 +13,8 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from backend.config import settings  # noqa: E402
 
 
-@pytest.fixture(autouse=True)
-def tmp_memory_file(tmp_path: Path):
-    original = settings.memory_file
-    settings.memory_file = tmp_path / "memory.json"
-    yield settings.memory_file
-    settings.memory_file = original
-
-
 @pytest_asyncio.fixture
-async def client(tmp_memory_file: Path) -> AsyncGenerator[AsyncClient, None]:
+async def client() -> AsyncGenerator[AsyncClient, None]:
     from asgi_lifespan import LifespanManager
     from backend.main import create_app
 
@@ -34,7 +25,7 @@ async def client(tmp_memory_file: Path) -> AsyncGenerator[AsyncClient, None]:
             yield ac
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def db_engine():
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -46,7 +37,7 @@ async def db_engine():
         pass
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def redis_client():
     import redis.asyncio as aioredis
 

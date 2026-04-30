@@ -11,6 +11,7 @@ ApiRecommendationAction = Literal["buy_now", "watch", "skip"]
 
 class SearchRequest(BaseModel):
     user_id: str = "demo-user"
+    session_id: Optional[str] = None
     message: str
 
 
@@ -47,12 +48,11 @@ class SearchRecommendationDto(BaseModel):
 
 class SearchResponseDto(BaseModel):
     user_id: str
-    query: SearchQueryDto
+    query: Optional[SearchQueryDto] = None
     deals: list[DealCardDto] = Field(default_factory=list)
     analysis: SearchAnalysisDto
     recommendation: SearchRecommendationDto
     meta: ApiMeta
 
 
-# 向后兼容别名（Step 8 删除）
 SearchResponse = SearchResponseDto

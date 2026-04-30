@@ -1,0 +1,133 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1100" viewBox="0 0 1800 1100" role="img" aria-labelledby="title desc">
+  <title id="title">FareSniper 后端函数调用图</title>
+  <desc id="desc">搜索链路、记忆链路与推荐链路的后端函数调用关系图</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#fffaf4"/>
+      <stop offset="100%" stop-color="#fffdf9"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#ffefe0"/>
+      <stop offset="100%" stop-color="#fff7ee"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#d8c2ae" flood-opacity="0.28"/>
+    </filter>
+    <marker id="arrow" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="strokeWidth">
+      <path d="M1,1 L13,7 L1,13" fill="none" stroke="#8a6b55" stroke-width="2"/>
+    </marker>
+    <style>
+      .title { font: 700 34px 'PingFang SC','Microsoft YaHei',sans-serif; fill: #4f3422; }
+      .subtitle { font: 500 16px 'PingFang SC','Microsoft YaHei',sans-serif; fill: #8a705d; }
+      .section { font: 700 20px 'PingFang SC','Microsoft YaHei',sans-serif; fill: #6a462f; }
+      .box-title { font: 700 18px 'PingFang SC','Microsoft YaHei',sans-serif; fill: #4f3422; }
+      .box-text { font: 500 14px 'PingFang SC','Microsoft YaHei',sans-serif; fill: #7a6658; }
+      .tag { font: 700 12px 'PingFang SC','Microsoft YaHei',sans-serif; fill: #ff7c2a; letter-spacing: 2px; }
+      .line { stroke: #8a6b55; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+      .ghost-line { stroke: #ccb9a7; stroke-width: 2; fill: none; stroke-dasharray: 8 8; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="1100" rx="32" fill="url(#bg)"/>
+  <text x="80" y="90" class="title">FareSniper 后端函数调用图</text>
+  <text x="80" y="124" class="subtitle">当前主链路以 /search 为核心，/memory 与 /recommendations 走 RecommendationService。</text>
+
+  <rect x="60" y="170" width="1680" height="520" rx="34" fill="#ffffff" stroke="#efe1d5" filter="url(#shadow)"/>
+  <text x="90" y="220" class="section">搜索链路</text>
+  <text x="90" y="246" class="tag">SEARCH FLOW</text>
+
+  <rect x="100" y="290" width="190" height="88" rx="24" fill="url(#accent)" stroke="#f2d7c1"/>
+  <text x="125" y="327" class="box-title">前端请求</text>
+  <text x="125" y="352" class="box-text">POST /api/search</text>
+
+  <rect x="355" y="290" width="230" height="88" rx="24" fill="#fff" stroke="#ead8ca"/>
+  <text x="380" y="327" class="box-title">api/search.py</text>
+  <text x="380" y="352" class="box-text">search_flights(...)</text>
+
+  <rect x="650" y="260" width="265" height="146" rx="28" fill="#fff" stroke="#ead8ca"/>
+  <text x="675" y="302" class="box-title">SearchService.search</text>
+  <text x="675" y="328" class="box-text">1. parse_intent</text>
+  <text x="675" y="352" class="box-text">2. 读取 preferences</text>
+  <text x="675" y="376" class="box-text">3. 查航班 / 历史价 / 生成推荐</text>
+
+  <rect x="995" y="220" width="250" height="92" rx="24" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="1020" y="258" class="box-title">UnifiedLLMClient</text>
+  <text x="1020" y="283" class="box-text">parse_intent(message)</text>
+
+  <rect x="995" y="340" width="250" height="92" rx="24" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="1020" y="378" class="box-title">LongTermMemory</text>
+  <text x="1020" y="403" class="box-text">get_preferences(user_id)</text>
+
+  <rect x="1325" y="220" width="305" height="122" rx="26" fill="#fff" stroke="#ead8ca"/>
+  <text x="1350" y="260" class="box-title">CtripSource.search_flights</text>
+  <text x="1350" y="286" class="box-text">_try_third_party_search()</text>
+  <text x="1350" y="310" class="box-text">失败时 _build_mock_results()</text>
+
+  <rect x="1325" y="380" width="305" height="120" rx="26" fill="#fff" stroke="#ead8ca"/>
+  <text x="1350" y="420" class="box-title">分析与推荐</text>
+  <text x="1350" y="446" class="box-text">compare_prices / analyze_history</text>
+  <text x="1350" y="470" class="box-text">match_preference / generate_signals</text>
+
+  <rect x="1020" y="520" width="270" height="100" rx="24" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="1045" y="560" class="box-title">generate_recommendation</text>
+  <text x="1045" y="586" class="box-text">LLM 生成 action / text / signals</text>
+
+  <rect x="1380" y="540" width="210" height="80" rx="22" fill="#5c3a23"/>
+  <text x="1420" y="588" style="font:700 18px 'PingFang SC','Microsoft YaHei',sans-serif;fill:#fff8f0;">返回 SearchResponse</text>
+
+  <path d="M290 334 L355 334" class="line"/>
+  <path d="M585 334 L650 334" class="line"/>
+  <path d="M915 300 L995 266" class="line"/>
+  <path d="M915 350 L995 386" class="line"/>
+  <path d="M915 334 L1325 280" class="line"/>
+  <path d="M1245 266 L1325 266" class="ghost-line"/>
+  <path d="M1245 386 L1325 440" class="line"/>
+  <path d="M1245 570 L1380 580" class="line"/>
+  <path d="M1630 342 L1630 380" class="ghost-line"/>
+  <path d="M1480 500 L1480 540" class="line"/>
+
+  <rect x="60" y="730" width="820" height="290" rx="34" fill="#ffffff" stroke="#efe1d5" filter="url(#shadow)"/>
+  <text x="90" y="780" class="section">记忆链路</text>
+  <text x="90" y="806" class="tag">MEMORY FLOW</text>
+
+  <rect x="100" y="850" width="180" height="78" rx="22" fill="url(#accent)" stroke="#f2d7c1"/>
+  <text x="125" y="895" class="box-title">GET /api/memory</text>
+
+  <rect x="335" y="850" width="215" height="78" rx="22" fill="#fff" stroke="#ead8ca"/>
+  <text x="360" y="895" class="box-title">RecommendationService</text>
+
+  <rect x="610" y="800" width="220" height="70" rx="20" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="635" y="842" class="box-title">get_preferences</text>
+
+  <rect x="610" y="885" width="220" height="70" rx="20" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="635" y="927" class="box-title">get_recent_queries</text>
+
+  <rect x="610" y="970" width="220" height="70" rx="20" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="635" y="1012" class="box-title">get_recent_clicks</text>
+
+  <path d="M280 889 L335 889" class="line"/>
+  <path d="M550 889 L610 835" class="line"/>
+  <path d="M550 889 L610 920" class="line"/>
+  <path d="M550 889 L610 1005" class="line"/>
+
+  <rect x="920" y="730" width="820" height="290" rx="34" fill="#ffffff" stroke="#efe1d5" filter="url(#shadow)"/>
+  <text x="950" y="780" class="section">推荐链路</text>
+  <text x="950" y="806" class="tag">RECOMMENDATION FLOW</text>
+
+  <rect x="960" y="850" width="230" height="78" rx="22" fill="url(#accent)" stroke="#f2d7c1"/>
+  <text x="985" y="895" class="box-title">GET /api/recommendations</text>
+
+  <rect x="1250" y="850" width="220" height="78" rx="22" fill="#fff" stroke="#ead8ca"/>
+  <text x="1275" y="895" class="box-title">get_cards(user_id)</text>
+
+  <rect x="1530" y="820" width="170" height="70" rx="20" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="1560" y="862" class="box-title">读取偏好</text>
+
+  <rect x="1530" y="915" width="170" height="88" rx="20" fill="#fff8f0" stroke="#f1d3bb"/>
+  <text x="1558" y="955" class="box-title">生成卡片</text>
+  <text x="1556" y="980" class="box-text">静态 + 个性化</text>
+
+  <path d="M1190 889 L1250 889" class="line"/>
+  <path d="M1470 889 L1530 855" class="line"/>
+  <path d="M1470 889 L1530 958" class="line"/>
+</svg>

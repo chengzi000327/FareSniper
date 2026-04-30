@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-携程特价机票逐城精确监控模块
+多平台特价机票逐城精确监控模块
+支持携程、去哪儿、同程、飞猪、航旅纵横五个平台同时抓取。
 自动从携程发现指定城市出发的全国航线，监测节假日特价机票（经济舱 ≤ 4折）
 搜索每个假期的完整日期范围（最早出发日~假期首日, 假期末日~最晚返程日）
 
@@ -27,6 +28,7 @@ from config import (
 )
 from date_utils import get_all_travel_periods, get_periods_for_dates
 from ctrip_api import CtripFlightClient
+from multi_platform import MultiPlatformClient, ALL_PLATFORMS
 from shared import CITY_COORDS, haversine_km, resolve_city, parse_datetime, fmt_datetime_short, fmt_duration_detail
 
 logger = logging.getLogger(__name__)
@@ -336,6 +338,17 @@ def run(args):
 
     print_period_summary(periods)
 
+    # 判断是否启用多平台模式
+    use_multi = getattr(args, "multi_platform", False)
+
+    if use_multi:
+        _run_multi_platform(args, periods, dep_city_code, dep_city_name)
+    else:
+        _run_ctrip_only(args, periods, dep_city_code, dep_city_name)
+
+
+def _run_ctrip_only(args, periods, dep_city_code, dep_city_name):
+    """仅使用携程搜索（原有逻辑）"""
     # 初始化客户端（默认有头模式，--headless 可切换）
     with CtripFlightClient(headless=args.headless) as client:
 
@@ -493,4 +506,112 @@ def run(args):
         else:
             SearchCheckpoint.clear()
             logger.info("搜索全部完成，已清除进度文件")
+
+
+def _run_multi_platform(args, periods, dep_city_code, dep_city_name):
+    """多平台聚合搜索：使用携程发现目的地，然后五平台并行搜索。"""
+    # 先用携程 CtripFlightClient 发现目的地（独立浏览器会话）
+    with CtripFlightClient(headless=args.headless) as ctrip:
+        if not args.headless:
+            ctrip.driver.get("https://www.ctrip.com/")
+            wait_sec = 30
+            print(f"\n[多平台] 已打开携程首页，{wait_sec} 秒后开始搜索...")
+            for remaining in range(wait_sec, 0, -1):
+                print(f"\r  倒计时 {remaining:>2} 秒...", end="", flush=True)
+                time.sleep(1)
+            print()
+
+        destinations = ctrip.discover_destinations(dep_city_code)
+
+    if not destinations:
+        print("未能发现目的地城市，请检查网络连接。")
+        return
+
+    destinations = filter_by_distance(destinations, dep_city_name, MIN_DISTANCE_KM)
+
+    if args.dest_file:
+        try:
+            with open(args.dest_file, "r", encoding="utf-8") as f:
+                preferred = {line.strip() for line in f if line.strip()}
+            destinations = {c: n for c, n in destinations.items() if n in preferred}
+            if not destinations:
+                print("偏好文件中的城市均未在可用航线中找到。")
+                return
+        except FileNotFoundError:
+            print(f"目的地偏好文件不存在: {args.dest_file}")
+            return
+
+    if args.test:
+        destinations = dict(list(destinations.items())[:1])
+
+    multi_client = MultiPlatformClient(headless=args.headless)
+    all_results = []
+
+    print(f"\n[多平台] 开始搜索，目的地 {len(destinations)} 个，平台 {len(ALL_PLATFORMS)} 个\n")
+
+    for period in periods:
+        depart_dates = period["depart_dates"]
+        return_dates = period["return_dates"]
+
+        for city_code, city_name in destinations.items():
+            city_outbound: List[Dict] = []
+            city_inbound: List[Dict] = []
+
+            for d in depart_dates:
+                ds = d.strftime("%Y-%m-%d")
+                logger.info("[多平台] %s -> %s 去程 %s", dep_city_name, city_name, ds)
+                flights, status = multi_client.search_oneway(
+                    dep_city_code, city_code, dep_city_name, city_name, ds
+                )
+                city_outbound.extend(flights)
+
+            for d in return_dates:
+                ds = d.strftime("%Y-%m-%d")
+                logger.info("[多平台] %s -> %s 回程 %s", city_name, dep_city_name, ds)
+                flights, status = multi_client.search_oneway(
+                    city_code, dep_city_code, city_name, dep_city_name, ds
+                )
+                city_inbound.extend(flights)
+
+            cheap_out = [f for f in city_outbound if 0 < f.get("discount_rate", 1) <= MAX_DISCOUNT_RATE]
+            cheap_in = [f for f in city_inbound if 0 < f.get("discount_rate", 1) <= MAX_DISCOUNT_RATE]
+
+            if cheap_out and cheap_in:
+                best_pair = None
+                best_total = float("inf")
+                for out in cheap_out:
+                    out_arr = parse_datetime(out["arr_time"])
+                    if not out_arr:
+                        continue
+                    for inb in cheap_in:
+                        inb_dep = parse_datetime(inb["dep_time"])
+                        if not inb_dep:
+                            continue
+                        if inb_dep >= out_arr + timedelta(hours=24):
+                            pair_price = out["price"] + inb["price"]
+                            if pair_price < best_total:
+                                best_total = pair_price
+                                best_pair = (out, inb)
+
+                if best_pair:
+                    dep_range = f"{depart_dates[0]}~{depart_dates[-1]}"
+                    ret_range = f"{return_dates[0]}~{return_dates[-1]}"
+                    all_results.append({
+                        "city": city_name,
+                        "period_name": period["name"],
+                        "depart_range": dep_range,
+                        "return_range": ret_range,
+                        "best_outbound": best_pair[0],
+                        "best_inbound": best_pair[1],
+                        "total_price": int(best_total),
+                        "outbound_count": len(cheap_out),
+                        "inbound_count": len(cheap_in),
+                    })
+                    logger.info(
+                        "    -> [多平台] %s 特价! 去程 %d 个(来自%s), 最低往返 ¥%d",
+                        city_name, len(cheap_out), best_pair[0].get("platform", "?"), best_total,
+                    )
+
+    print_results(all_results, dep_city_name)
+    logger.info("[多平台] 搜索全部完成")
 

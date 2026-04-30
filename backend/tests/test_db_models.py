@@ -35,21 +35,21 @@ async def test_user_preference_crud(db_session: AsyncSession):
     """UserPreference 创建 → 读取 → 验证字段完整。"""
     pref = UserPreference(
         id="test-user-1",
-        price_anchor=3000,
-        preferred_origins=["PEK", "SHA"],
-        preferred_destinations=["NRT", "ICN"],
-        cabin_preference="economy",
-        extra={"theme": "dark"},
+        budget=3000,
+        frequent_cities=["东京", "首尔"],
+        preferred_airlines=["中国国航"],
+        constraints=["avoid_redeye"],
+        travel_scenes=["holiday"],
     )
     db_session.add(pref)
     await db_session.flush()
 
     fetched = await db_session.get(UserPreference, "test-user-1")
     assert fetched is not None
-    assert fetched.price_anchor == 3000
-    assert "PEK" in fetched.preferred_origins
-    assert fetched.cabin_preference == "economy"
-    assert fetched.extra["theme"] == "dark"
+    assert fetched.budget == 3000
+    assert "东京" in fetched.frequent_cities
+    assert "中国国航" in fetched.preferred_airlines
+    assert "avoid_redeye" in fetched.constraints
     assert fetched.updated_at is not None
 
 

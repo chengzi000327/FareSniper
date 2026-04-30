@@ -14,6 +14,13 @@ class ApiMeta(BaseModel):
     request_id: Optional[str] = None
     result_count: Optional[int] = None
     fallback_mode: Optional[bool] = None
+    clarify_count: Optional[int] = None
+
+
+class PriceItemDto(BaseModel):
+    name: str
+    price: int
+    lowest: Optional[bool] = None
 
 
 class DealCardDto(BaseModel):
@@ -33,14 +40,15 @@ class DealCardDto(BaseModel):
     baggage_fee: int = 0
     has_baggage: bool = False
     recommend_score: str = ""
-    prices: list[dict] = Field(default_factory=list)
+    prices: list[PriceItemDto] = Field(default_factory=list)
     original_price: Optional[int] = None
     discount_rate: Optional[float] = None
     cabin: Optional[str] = None
     signals: list[str] = Field(default_factory=list)
     confidence: ApiConfidence = "medium"
-    verdict: str
+    verdict: str = ""
     booking_url: Optional[str] = None
+    h5_fallback_url: Optional[str] = None
 
 
 class RecommendationCardDto(BaseModel):
@@ -51,8 +59,6 @@ class RecommendationCardDto(BaseModel):
     tags: list[str] = Field(default_factory=list)
     preview_deal: Optional[DealCardDto] = None
 
-
-# ── 向后兼容别名（旧代码引用，Step 8 删除）────────────────────────────────
 
 class HealthResponse(BaseModel):
     status: str = "ok"

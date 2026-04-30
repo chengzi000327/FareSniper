@@ -199,6 +199,11 @@ def init_browser(headless=False, intercept_js=FUZZYSEARCH_INTERCEPT_JS):
     返回 (driver, tmp_profile_dir)。
     """
     logger.info("启动 Chrome 浏览器 (headless=%s)...", headless)
+
+    # 防止系统代理（如 Clash/V2Ray）拦截 ChromeDriver ↔ Python 的 localhost 通信
+    os.environ.setdefault("no_proxy", "127.0.0.1,localhost")
+    os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost")
+
     options = Options()
 
     tmp_profile = None
@@ -215,6 +220,8 @@ def init_browser(headless=False, intercept_js=FUZZYSEARCH_INTERCEPT_JS):
     options.add_argument("--window-size=1920,1080")
     options.add_argument(f"--user-agent={CHROME_UA}")
     options.add_argument("--disable-blink-features=AutomationControlled")
+    # 不让 Chrome 自身走系统代理，避免 Bad Gateway
+    options.add_argument("--no-proxy-server")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
 

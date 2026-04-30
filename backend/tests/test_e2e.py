@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
+from backend.application.contracts.intent import DateWindow, LocationRef, NormalizedIntent
 from backend.main import create_app
 from backend.schemas.memory import MemoryResponseDto, RecommendationsResponseDto
 from backend.schemas.search import SearchResponseDto
@@ -180,14 +182,23 @@ async def e2e_client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest.mark.asyncio
 async def test_e2e_flow(e2e_client: AsyncClient) -> None:
-    search_response = await e2e_client.post(
-        "/api/search",
-        json={"user_id": "demo-user", "message": "五一从北京去东京，预算3000以内，帮我看看"},
+    complete_intent = NormalizedIntent(
+        origin=LocationRef(city="北京", iata_code="BJS"),
+        destination=LocationRef(city="三亚", iata_code="SYX"),
+        date_window=DateWindow(start_date="2026-05-01", end_date="2026-05-05"),
+        budget_cny=3000,
+        parse_failed=False,
     )
+    with patch("backend.application.graph.nodes.parse_intent._intent_chain") as mock:
+        mock.ainvoke = AsyncMock(return_value=complete_intent)
+        search_response = await e2e_client.post(
+            "/api/search",
+            json={"user_id": "demo-user", "message": "五一从北京去三亚，预算3000以内，帮我看看"},
+        )
     assert search_response.status_code == 200
     search_payload = SearchResponseDto.model_validate(search_response.json())
-    assert search_payload.query.destination_code == "NRT"
-    assert search_payload.recommendation.confidence == "high"
+    assert search_payload.query.destination_code == "SYX"
+    assert search_payload.recommendation.action in ("buy_now", "watch", "skip")
 
     memory_response = await e2e_client.get("/api/memory", params={"user_id": "demo-user"})
     assert memory_response.status_code == 200

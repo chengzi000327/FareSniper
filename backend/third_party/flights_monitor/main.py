@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-携程特价机票工具 - 统一入口
+多平台特价机票工具 - 统一入口
 
 子命令:
     discover  FuzzySearch 全国特价概览（一次请求获取全部目的地）
-    monitor   逐城精确特价监控（支持断点续搜、折扣过滤）
+    monitor   逐城精确特价监控（支持断点续搜、折扣过滤、多平台）
 
 用法:
     python main.py discover --from 上海 --max-price 500
     python main.py monitor --from 北京 --holidays-only
+    python main.py monitor --from 北京 --multi-platform   # 五平台聚合
     python main.py discover --help
     python main.py monitor --help
 """
@@ -149,6 +150,10 @@ def build_parser():
         help="无头模式运行（默认关闭，因 monitor 需要登录）",
     )
     mp.add_argument("--fresh", action="store_true", help="忽略断点，强制从头开始搜索")
+    mp.add_argument(
+        "--multi-platform", dest="multi_platform", action="store_true",
+        help="启用多平台聚合模式：携程+去哪儿+同程+飞猪+航旅纵横（同时搜索5个平台）",
+    )
 
     return parser
 

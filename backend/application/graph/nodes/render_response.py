@@ -1,0 +1,143 @@
+"""Render graph state into the frontend response contract."""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from datetime import datetime, timezone
+
+from backend.application.contracts.decision import FrontendResponse
+from backend.application.graph.state import WorkflowState
+
+
+def _now() -> str:
+    return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+async def render_response(state: WorkflowState) -> WorkflowState:
+    search_result = state.get("search_result")
+    decision = state.get("decision")
+    intent = state.get("intent")
+    pref_result = state.get("pref_result")
+
+    deals = []
+    if search_result:
+        for c in search_result.candidates:
+            deal = c.model_dump()
+            deal["id"] = f"deal-{c.flight_no}-{c.depart_date}"
+            deal["system_id"] = f"{c.flight_no}-{c.depart_date}"
+            deal["platform"] = next((p.platform for p in c.prices if p.lowest), "")
+            deal["origin_city"] = c.origin_city or (
+                intent.origin.city if intent and intent.origin else ""
+            )
+            deal["destination_city"] = c.destination_city or (
+                intent.destination.city if intent and intent.destination else ""
+            )
+            deal["depart_time"] = c.depart_time
+            deal["arrive_time"] = c.arrive_time
+            deal["price"] = c.lowest_price
+            deal["prices"] = [
+                {"name": p["platform"], "price": p["price"], "lowest": p.get("lowest", False)}
+                for p in deal.get("prices", [])
+            ]
+            deals.append(deal)
+
+    prices = [c.lowest_price for c in (search_result.candidates if search_result else [])]
+    pref_reasons: list[str] = []
+    if pref_result:
+        for p in pref_result.items:
+            pref_reasons.extend(p.reasons)
+
+    avg_90d_vals = [
+        c.history_avg_90d
+        for c in (search_result.candidates if search_result else [])
+        if c.history_avg_90d
+    ]
+    best = search_result.candidates[0] if search_result and search_result.candidates else None
+    best_avg = best.history_avg_90d if best else None
+    best_price = best.lowest_price if best else 0
+    lower_than_avg = (
+        round((best_avg - best_price) / best_avg, 4)
+        if best_avg and best_price
+        else None
+    )
+
+    analysis = {
+        "min_price": min(prices) if prices else None,
+        "max_price": max(prices) if prices else None,
+        "avg_price": int(sum(prices) / len(prices)) if prices else None,
+        "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
+        "lower_than_avg": lower_than_avg,
+        "price_spread_pct": None,
+        "match_score": round(
+            len([p for p in (pref_result.items if pref_result else []) if p.matched])
+            / max(len(deals), 1),
+            2,
+        ),
+        "within_budget": bool(decision and "符合心理价位" in decision.signals),
+        "matched_preferences": list(set(pref_reasons)),
+    }
+
+    query_summary = None
+    if intent and not intent.parse_failed:
+        query_summary = {
+            "raw_text": intent.raw_text,
+            "normalized_text": intent.raw_text,
+            "origin_city": intent.origin.city if intent.origin else "",
+            "origin_code": intent.origin.iata_code if intent.origin else "",
+            "destination_city": intent.destination.city if intent.destination else "",
+            "destination_code": intent.destination.iata_code if intent.destination else "",
+            "date_start": intent.date_window.start_date if intent.date_window else "",
+            "date_end": intent.date_window.end_date if intent.date_window else "",
+            "budget": intent.budget_cny,
+        }
+
+    recommendation = {}
+    if decision:
+        recommendation = {
+            "action": decision.action.value,
+            "text": decision.text,
+            "confidence": decision.confidence,
+            "signals": decision.signals,
+        }
+
+    resp = FrontendResponse(
+        user_id=state["request_user_id"],
+        query=query_summary,
+        deals=deals,
+        analysis=analysis,
+        recommendation=recommendation,
+        meta={
+            "generated_at": _now(),
+            "source": "mock",
+            "request_id": str(uuid.uuid4()),
+            "result_count": len(deals),
+            "fallback_mode": False,
+        },
+    )
+
+    session_factory = state.get("_session_factory")
+    if session_factory and intent and not intent.parse_failed:
+        asyncio.create_task(
+            _async_memory_writeback(
+                user_id=state["request_user_id"],
+                message=state["request_message"],
+                intent=intent,
+                session_factory=session_factory,
+            )
+        )
+
+    return {**state, "response": resp}
+
+
+async def _async_memory_writeback(user_id, message, intent, session_factory):
+    try:
+        from backend.services.memory_learner import (
+            learn_from_query_history,
+            learn_from_search,
+        )
+
+        await learn_from_search(user_id, intent.model_dump(), session_factory)
+        await learn_from_query_history(user_id, session_factory)
+    except Exception:
+        pass

@@ -6,15 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.db.models import ChatHistory, ClickHistory, QueryHistory, UserPreference
+from backend.db.models import ClickHistory, QueryHistory, UserPreference
 
 FIELD_LABELS = {
-    "price_anchor": "心理价位",
-    "preferred_origins": "常用出发地",
-    "preferred_destinations": "想去的地方",
-    "frequent_destinations": "常去目的地",
-    "travel_window": "出行时间偏好",
-    "cabin_preference": "舱位偏好",
+    "budget": "心理价位",
+    "frequent_cities": "常去城市",
+    "preferred_airlines": "偏好航司",
+    "constraints": "出行习惯",
+    "travel_scenes": "出行场景",
 }
 
 
@@ -31,23 +30,19 @@ class LongTermMemory:
         if result is None:
             return None
         return {
-            "price_anchor": result.price_anchor,
-            "preferred_origins": result.preferred_origins or [],
-            "preferred_destinations": result.preferred_destinations or [],
-            "frequent_destinations": result.frequent_destinations or [],
-            "travel_window": result.travel_window,
-            "cabin_preference": result.cabin_preference,
-            "extra": result.extra or {},
+            "budget": result.budget,
+            "frequent_cities": result.frequent_cities or [],
+            "preferred_airlines": result.preferred_airlines or [],
+            "constraints": result.constraints or [],
+            "travel_scenes": result.travel_scenes or [],
         }
 
     async def upsert_preferences(self, user_id: str, data: dict[str, Any]) -> None:
+        mapped = self._map_pref_fields(data)
         stmt = (
             insert(UserPreference)
-            .values(id=user_id, **self._map_pref_fields(data))
-            .on_conflict_do_update(
-                index_elements=["id"],
-                set_=self._map_pref_fields(data),
-            )
+            .values(id=user_id, **mapped)
+            .on_conflict_do_update(index_elements=["id"], set_=mapped)
         )
         await self._s.execute(stmt)
         await self._s.flush()
@@ -68,9 +63,11 @@ class LongTermMemory:
             .order_by(QueryHistory.created_at.desc())
             .limit(limit)
         )
-        result = await self._s.execute(stmt)
-        rows = result.scalars().all()
-        return [{"query_text": r.query_text, "intent": r.intent, "created_at": str(r.created_at)} for r in rows]
+        rows = (await self._s.execute(stmt)).scalars().all()
+        return [
+            {"query_text": r.query_text, "intent": r.intent, "created_at": str(r.created_at)}
+            for r in rows
+        ]
 
     # ── Click History ─────────────────────────────────────────────────────
 
@@ -86,21 +83,15 @@ class LongTermMemory:
             .order_by(ClickHistory.clicked_at.desc())
             .limit(limit)
         )
-        result = await self._s.execute(stmt)
-        rows = result.scalars().all()
-        return [{"flight_data": r.flight_data, "clicked_at": str(r.clicked_at)} for r in rows]
+        rows = (await self._s.execute(stmt)).scalars().all()
+        return [
+            {"flight_data": r.flight_data, "clicked_at": str(r.clicked_at)}
+            for r in rows
+        ]
 
     # ── Internal ──────────────────────────────────────────────────────────
 
     @staticmethod
     def _map_pref_fields(data: dict[str, Any]) -> dict[str, Any]:
-        mapping = {
-            "price_anchor": "price_anchor",
-            "preferred_origins": "preferred_origins",
-            "preferred_destinations": "preferred_destinations",
-            "frequent_destinations": "frequent_destinations",
-            "travel_window": "travel_window",
-            "cabin_preference": "cabin_preference",
-            "extra": "extra",
-        }
-        return {v: data[k] for k, v in mapping.items() if k in data}
+        allowed = {"budget", "frequent_cities", "preferred_airlines", "constraints", "travel_scenes"}
+        return {k: v for k, v in data.items() if k in allowed}

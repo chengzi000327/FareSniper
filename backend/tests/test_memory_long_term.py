@@ -5,26 +5,34 @@ preferences / query_history / click_history CRUD
 from __future__ import annotations
 
 import pytest
+import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from backend.config import settings
 from backend.memory.long_term import LongTermMemory
 
+pytestmark = pytest.mark.asyncio(loop_scope="module")
 
-@pytest.fixture
-async def db_session():
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def db_engine():
     engine = create_async_engine(settings.database_url, echo=False)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield engine
+    try:
+        await engine.dispose()
+    except Exception:
+        pass
+
+
+@pytest_asyncio.fixture(loop_scope="module")
+async def db_session(db_engine):
+    factory = async_sessionmaker(db_engine, expire_on_commit=False)
     async with factory() as session:
         yield session
         try:
             await session.rollback()
         except Exception:
             pass
-    try:
-        await engine.dispose()
-    except Exception:
-        pass
 
 
 @pytest.fixture
@@ -35,25 +43,29 @@ def ltm(db_session: AsyncSession):
 async def test_upsert_and_get_preferences(ltm: LongTermMemory):
     """upsert 偏好 → get 能读到，字段正确。"""
     await ltm.upsert_preferences("ltm-test-user", {
-        "price_anchor": 4000,
-        "preferred_origins": ["PEK"],
-        "cabin_preference": "economy",
+        "budget": 4000,
+        "frequent_cities": ["东京"],
+        "preferred_airlines": ["中国国航"],
+        "constraints": ["avoid_redeye"],
+        "travel_scenes": ["holiday"],
     })
 
     pref = await ltm.get_preferences("ltm-test-user")
     assert pref is not None
-    assert pref["price_anchor"] == 4000
-    assert "PEK" in pref["preferred_origins"]
-    assert pref["cabin_preference"] == "economy"
+    assert pref["budget"] == 4000
+    assert "东京" in pref["frequent_cities"]
+    assert "中国国航" in pref["preferred_airlines"]
+    assert "avoid_redeye" in pref["constraints"]
+    assert "holiday" in pref["travel_scenes"]
 
 
 async def test_upsert_is_idempotent(ltm: LongTermMemory):
     """第二次 upsert 更新字段，不新增行。"""
-    await ltm.upsert_preferences("ltm-test-user", {"price_anchor": 3000})
-    await ltm.upsert_preferences("ltm-test-user", {"price_anchor": 5000})
+    await ltm.upsert_preferences("ltm-test-user", {"budget": 3000})
+    await ltm.upsert_preferences("ltm-test-user", {"budget": 5000})
 
     pref = await ltm.get_preferences("ltm-test-user")
-    assert pref["price_anchor"] == 5000
+    assert pref["budget"] == 5000
 
 
 async def test_add_query_history(ltm: LongTermMemory):

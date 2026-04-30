@@ -16,13 +16,11 @@ class UserPreference(Base):
     __tablename__ = "user_preferences"
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # user_id
-    price_anchor: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    preferred_origins: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
-    preferred_destinations: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
-    frequent_destinations: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
-    travel_window: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    cabin_preference: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    extra: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default="{}")
+    budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    frequent_cities: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
+    preferred_airlines: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
+    constraints: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
+    travel_scenes: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -59,8 +57,38 @@ class ChatHistory(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     session_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    role: Mapped[str] = mapped_column(String, nullable=False)  # "user" | "assistant"
+    role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PriceAlert(Base):
+    __tablename__ = "price_alerts"
+
+    alert_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    flight_id: Mapped[str] = mapped_column(String, nullable=False)
+    origin_city: Mapped[str] = mapped_column(String, nullable=False)
+    destination_city: Mapped[str] = mapped_column(String, nullable=False)
+    depart_date: Mapped[str] = mapped_column(String, nullable=False)
+    current_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_price: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default="active")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
