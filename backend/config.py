@@ -27,7 +27,9 @@ class Settings(BaseSettings):
     default_user_id: str = Field(default="demo-user")
     default_origin: str = Field(default="BJS")
 
-    cors_origins: List[str] = Field(default_factory=list)
+    cors_origins: List[str] = Field(
+        default_factory=lambda: ["https://faresniper.app", "http://localhost:3000"]
+    )
 
     database_url: str = Field(default="")
     test_database_url: str = Field(default="")
