@@ -45,3 +45,41 @@ def build_search_graph():
 
 
 search_graph = build_search_graph()
+
+
+# ── Launch-plan ReAct factory (TG-05 · Task 4) ──────────────────────────────
+# build_graph() returns a fresh compiled graph with a single placeholder
+# node — TG-08 will replace the body with the ReAct agent + tool router +
+# render_response wiring. get_graph() memoises one compiled instance for the
+# FastAPI lifespan to consume; tests can call build_graph() directly to get
+# an isolated copy that's safe to mutate.
+
+_compiled_graph = None
+
+
+def build_graph():
+    """Compile a fresh launch-plan graph.
+
+    Today this is a no-op skeleton (entry → END through a passthrough node).
+    Exposing it now lets TG-05 · Task 1 wire it into the lifespan and TG-08
+    drop in the real ReAct loop without touching the call sites.
+    """
+    sg = StateGraph(WorkflowState)
+    sg.add_node("__placeholder__", lambda state: state)
+    sg.set_entry_point("__placeholder__")
+    sg.add_edge("__placeholder__", END)
+    return sg.compile()
+
+
+def get_graph():
+    """Return the singleton compiled graph used at runtime."""
+    global _compiled_graph
+    if _compiled_graph is None:
+        _compiled_graph = build_graph()
+    return _compiled_graph
+
+
+def reset_graph_cache() -> None:
+    """Test-only helper: drop the singleton so the next get_graph() rebuilds."""
+    global _compiled_graph
+    _compiled_graph = None
