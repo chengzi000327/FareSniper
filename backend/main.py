@@ -6,8 +6,10 @@ from typing import AsyncGenerator
 import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from backend.__version__ import PRD_VERSION, PRODUCT_NAME, __version__
 from backend.api.alerts import router as alerts_router
 from backend.api.memory import router as memory_router
 from backend.api.recommendations import router as recommendations_router
@@ -60,7 +62,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title=settings.app_name, lifespan=lifespan)
+    app = FastAPI(title=PRODUCT_NAME, version=__version__, lifespan=lifespan)
+
+    def _custom_openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=PRODUCT_NAME,
+            version=__version__,
+            routes=app.routes,
+        )
+        schema["info"]["x-prd-version"] = PRD_VERSION
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = _custom_openapi  # type: ignore[method-assign]
 
     app.add_middleware(
         CORSMiddleware,
@@ -72,7 +88,7 @@ def create_app() -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def healthcheck() -> HealthResponse:
-        return HealthResponse(app=settings.app_name)
+        return HealthResponse(app=PRODUCT_NAME)
 
     app.include_router(session_router, prefix=settings.api_prefix)
     app.include_router(search_router, prefix=settings.api_prefix)
