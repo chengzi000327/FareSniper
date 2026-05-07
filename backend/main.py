@@ -18,6 +18,7 @@ from backend.api.push_subscriptions import router as push_subscriptions_router
 from backend.api.recommendations import router as recommendations_router
 from backend.api.search import router as search_router
 from backend.api.session import router as session_router
+from backend.api.track_jump import router as track_jump_router
 from backend.application.graph.factory import get_graph
 from backend.config import settings
 from backend.db.models import Base
@@ -129,6 +130,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(price_history_router, prefix=settings.api_prefix)
     app.include_router(push_subscriptions_router, prefix=settings.api_prefix)
+    app.include_router(track_jump_router, prefix=settings.api_prefix)
 
     return app
 

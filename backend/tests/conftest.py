@@ -266,3 +266,23 @@ def captured_langfuse():
     from backend.tests._fakes.langfuse import CapturedLangfuse
 
     return CapturedLangfuse()
+
+
+def _mint_jwt(sub: str) -> str:
+    """Helper for tests that need a valid Bearer token."""
+    import jwt as _jwt
+
+    return _jwt.encode(
+        {"sub": sub}, settings.jwt_secret, algorithm=settings.jwt_algorithm
+    )
+
+
+@pytest.fixture
+def valid_jwt_for_u1() -> str:
+    return _mint_jwt("u1")
+
+
+@pytest.fixture
+def jwt_for():
+    """Yield a factory that mints a Bearer JWT for any user_id."""
+    return _mint_jwt
