@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.__version__ import PRD_VERSION, PRODUCT_NAME, __version__
 from backend.api.alerts import router as alerts_router
+from backend.api.auth import router as auth_router
 from backend.api.memory import router as memory_router
+from backend.api.price_history import router as price_history_router
+from backend.api.push_subscriptions import router as push_subscriptions_router
 from backend.api.recommendations import router as recommendations_router
 from backend.api.search import router as search_router
 from backend.api.session import router as session_router
@@ -95,6 +98,9 @@ def create_app() -> FastAPI:
     app.include_router(memory_router, prefix=settings.api_prefix)
     app.include_router(recommendations_router, prefix=settings.api_prefix)
     app.include_router(alerts_router, prefix=settings.api_prefix)
+    app.include_router(auth_router, prefix=settings.api_prefix)
+    app.include_router(price_history_router, prefix=settings.api_prefix)
+    app.include_router(push_subscriptions_router, prefix=settings.api_prefix)
 
     return app
 

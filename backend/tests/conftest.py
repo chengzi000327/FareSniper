@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import AsyncGenerator, Optional
 
@@ -17,6 +18,13 @@ from sqlalchemy.ext.asyncio import (
 
 # .env を backend/tests より 2 階層上の backend/.env から読む
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
+# Tests must always have a non-trivial JWT secret so HMAC-SHA256 doesn't
+# emit a 0-byte-key warning. setdefault preserves any prod value already
+# present in .env.
+os.environ.setdefault(
+    "JWT_SECRET", "faresniper-test-only-secret-not-for-production-use"
+)
 
 from backend.config import settings  # noqa: E402
 
