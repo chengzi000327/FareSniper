@@ -1,12 +1,9 @@
-"""Verify the analytics_events table is materialised on the configured DB.
+"""Verify the analytics_events table is materialised on the test PG.
 
-The ORM model that registers the table on ``Base.metadata`` lands in
-TG-03 · Task 2 (``event_repo.py``); until then ``seeded_pg`` cannot
-build the table on its SQLite copy. The migration itself, however, has
-already been applied to the live Railway database, so this test simply
-inspects the live engine and asserts the columns are present. Once
-Task 2 introduces the ORM, ``seeded_pg`` will also pick the table up
-and a parallel SQLite-backed assertion can be added.
+The schema is bootstrapped on the test PG via
+``DATABASE_URL=$TEST_DATABASE_URL alembic -c backend/alembic.ini upgrade head``
+once per environment; ``seeded_pg`` then truncates rows but leaves schema
+intact for each test.
 """
 from __future__ import annotations
 
@@ -18,8 +15,8 @@ EXPECTED_COLUMNS = {"id", "event_name", "user_id", "payload", "created_at"}
 
 
 @pytest.mark.asyncio
-async def test_analytics_events_columns_on_live_db(db_engine):
-    async with db_engine.begin() as conn:
+async def test_analytics_events_columns(seeded_pg):
+    async with seeded_pg.begin() as conn:
         cols = await conn.run_sync(
             lambda c: {col["name"] for col in inspect(c).get_columns("analytics_events")}
         )

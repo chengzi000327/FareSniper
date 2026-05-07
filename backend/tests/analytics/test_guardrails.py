@@ -6,6 +6,7 @@ from backend.analytics.guardrails import (
     GuardrailReport,
     THRESHOLDS,
     classify_breaches,
+    compute_guardrails,
 )
 
 
@@ -48,3 +49,24 @@ def test_multiple_breaches_recorded_in_stable_order():
     )
     classify_breaches(rep)
     assert rep.breached == ["deeplink_failure", "ai_misleading", "p95_latency"]
+
+
+@pytest.mark.asyncio
+async def test_alarm_when_deeplink_failure_above_5pct(seeded_pg_with_events):
+    rep = await compute_guardrails(window_minutes=60)
+    # 16/20 events have deeplink_ok='false' → 0.80 ≫ 0.05 threshold
+    assert rep.deeplink_failure_rate >= 0.05
+    assert "deeplink_failure" in rep.breached
+    # 1/20 events flagged as misleading → 0.05 > 0.03 threshold
+    assert rep.ai_misleading_rate > 0
+    assert "ai_misleading" in rep.breached
+    # latency ramps from 1500 to 2450ms; p95 stays under the 3000 ceiling
+    assert rep.p95_latency_ms < 3000
+    assert "p95_latency" not in rep.breached
+
+
+@pytest.mark.asyncio
+async def test_no_alarm_when_no_events(seeded_pg):
+    rep = await compute_guardrails(window_minutes=60)
+    assert rep.deeplink_failure_rate == 0.0
+    assert rep.breached == []

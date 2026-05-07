@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     cors_origins: List[str] = Field(default_factory=list)
 
     database_url: str = Field(default="")
+    test_database_url: str = Field(default="")
     redis_url: str = Field(default="")
 
     model_base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1")

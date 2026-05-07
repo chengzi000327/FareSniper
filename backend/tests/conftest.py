@@ -8,13 +8,12 @@ import pytest_asyncio
 from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import AIMessage
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.ext.compiler import compiles
 
 # .env を backend/tests より 2 階層上の backend/.env から読む
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -22,15 +21,19 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 from backend.config import settings  # noqa: E402
 
 
-# ── PG-only column types compiled to SQLite-compatible JSON for seeded_pg ──
-@compiles(ARRAY, "sqlite")
-def _compile_array_sqlite(_type, _compiler, **_kw):
-    return "JSON"
-
-
-@compiles(JSONB, "sqlite")
-def _compile_jsonb_sqlite(_type, _compiler, **_kw):
-    return "JSON"
+def _require_test_database_url() -> str:
+    if not settings.test_database_url:
+        raise RuntimeError(
+            "TEST_DATABASE_URL is not configured. Provision a Railway test PG "
+            "service (separate from prod), set the +asyncpg DSN in backend/.env, "
+            "and never reuse DATABASE_URL — tests will pollute production data."
+        )
+    if settings.test_database_url == settings.database_url:
+        raise RuntimeError(
+            "TEST_DATABASE_URL must point at a DIFFERENT database than "
+            "DATABASE_URL. Provision a dedicated Railway test PG."
+        )
+    return settings.test_database_url
 
 
 @pytest_asyncio.fixture
@@ -47,7 +50,15 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest_asyncio.fixture
 async def db_engine():
-    engine = create_async_engine(settings.database_url, echo=False)
+    """Engine connected to the **test** PG (never prod).
+
+    Existing call sites that use ``db_engine`` were originally targeting the
+    prod database; we rerouted them at the same time we introduced this
+    fixture, so tests cannot accidentally read or write live data. If you
+    truly need to query prod, instantiate an engine explicitly with
+    ``settings.database_url``.
+    """
+    engine = create_async_engine(_require_test_database_url(), echo=False)
     yield engine
     try:
         await engine.dispose()
@@ -67,25 +78,48 @@ async def redis_client():
         pass
 
 
+# Tables wiped between tests. Order matters only if FKs cascade — TRUNCATE
+# ... CASCADE handles the rest.
+_TRUNCATE_TARGETS = [
+    "analytics_events",
+    "click_history",
+    "chat_history",
+    "query_history",
+    "user_preferences",
+    "price_alerts",
+    "sessions",
+]
+
+
+async def _truncate_all(engine) -> None:
+    """Empty every test-PG table without dropping schema or views."""
+    async with engine.begin() as conn:
+        rows = await conn.execute(
+            text(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public' AND tablename != 'alembic_version'"
+            )
+        )
+        tables = [row[0] for row in rows]
+        if tables:
+            quoted = ", ".join(f'"{t}"' for t in tables)
+            await conn.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
+
+
 @pytest_asyncio.fixture
 async def seeded_pg():
-    """Isolated SQLite-in-memory engine bound into ``infrastructure.db.base``.
+    """Isolated PG engine bound into ``infrastructure.db.base``.
 
-    Rebinds the canonical ``engine`` / ``SessionLocal`` symbols on
-    ``backend.infrastructure.db.base`` for the duration of the test so any
-    repo module that does ``from backend.infrastructure.db.base import ...``
-    transparently uses the throwaway SQLite database. Existing tables in
-    ``backend.db.models`` are created up-front.
-
-    Scenario fixtures (`seeded_pg_with_*`) and the `enable_flag` helper from
-    the original plan are intentionally NOT defined here — they will land in
-    the TG that introduces their backing repo modules.
+    Connects to the dedicated Railway test PG (``settings.test_database_url``).
+    The schema must already be at alembic head — bootstrap it once with
+    ``DATABASE_URL=$TEST_DATABASE_URL alembic -c backend/alembic.ini upgrade head``.
+    Each test starts with every table truncated, but the schema itself
+    (tables, indexes, views, constraints) stays intact, so PG-only views
+    such as ``v_monthly_qpc`` are queryable.
     """
     from backend.infrastructure.db import base as db_base
 
-    test_engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:", future=True
-    )
+    test_engine = create_async_engine(_require_test_database_url(), future=True)
     test_session_factory = async_sessionmaker(
         test_engine, expire_on_commit=False, class_=AsyncSession
     )
@@ -95,8 +129,7 @@ async def seeded_pg():
     db_base.engine = test_engine
     db_base.SessionLocal = test_session_factory
 
-    async with test_engine.begin() as conn:
-        await conn.run_sync(db_base.Base.metadata.create_all)
+    await _truncate_all(test_engine)
 
     try:
         yield test_engine
@@ -104,6 +137,34 @@ async def seeded_pg():
         db_base.engine = saved_engine
         db_base.SessionLocal = saved_session
         await test_engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def seeded_pg_with_events(seeded_pg):
+    """Pre-populates analytics_events with mixed deeplink_ok / latency rows.
+
+    Used by guardrail tests that need a real PG path through FILTER and
+    percentile_cont. The rows are crafted so ``deeplink_failure_rate``
+    crosses the 5% threshold — 16 of 20 events have ``deeplink_ok=false``.
+    """
+    from backend.analytics.events import EventName
+    from backend.analytics.track import track
+
+    payloads = []
+    for i in range(20):
+        payloads.append(
+            {
+                "flight_no": f"MU{5000 + i}",
+                "platform": "ctrip",
+                "price": 480 + i,
+                "deeplink_ok": "false" if i < 16 else "true",
+                "misleading": "true" if i < 1 else "false",
+                "latency_ms": 1500 + i * 50,
+            }
+        )
+    for payload in payloads:
+        await track(EventName.PURCHASE_JUMPED, user_id="u1", payload=payload)
+    return seeded_pg
 
 
 @pytest_asyncio.fixture

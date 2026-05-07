@@ -1,7 +1,6 @@
 """Persistence layer for analytics events."""
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Union
 
 from sqlalchemy import Column, DateTime, Integer, JSON, String, func, select
@@ -19,10 +18,12 @@ class AnalyticsEvent(Base):
     event_name = Column(String, nullable=False, index=True)
     user_id = Column(String, nullable=False, index=True)
     payload = Column(JSON, nullable=False)
+    # The migration column is TIMESTAMP WITHOUT TIME ZONE, so we let PG
+    # populate created_at via ``server_default=func.now()`` instead of
+    # supplying a tz-aware Python default that asyncpg would reject.
     created_at = Column(
         DateTime,
         nullable=False,
-        default=lambda: datetime.now(UTC),
         server_default=func.now(),
         index=True,
     )

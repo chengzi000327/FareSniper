@@ -52,7 +52,7 @@ _AGGREGATE_SQL = text(
             0
         ) AS p95
     FROM analytics_events
-    WHERE created_at > now() - (:m || ' minutes')::interval
+    WHERE created_at > now() - make_interval(mins => :m)
     """
 )
 

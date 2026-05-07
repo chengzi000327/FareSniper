@@ -22,12 +22,12 @@ async def test_seeded_pg_provides_async_engine(seeded_pg):
 
 
 @pytest.mark.asyncio
-async def test_seeded_pg_creates_existing_tables(seeded_pg):
+async def test_seeded_pg_has_canonical_legacy_tables(seeded_pg):
     async with seeded_pg.connect() as conn:
         result = await conn.execute(
             text(
-                "SELECT name FROM sqlite_master "
-                "WHERE type='table' AND name='user_preferences'"
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public' AND tablename = 'user_preferences'"
             )
         )
         assert result.scalar_one_or_none() == "user_preferences"
