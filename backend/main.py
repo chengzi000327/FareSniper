@@ -18,6 +18,7 @@ from backend.api.push_subscriptions import router as push_subscriptions_router
 from backend.api.recommendations import router as recommendations_router
 from backend.api.search import router as search_router
 from backend.api.session import router as session_router
+from backend.application.graph.factory import get_graph
 from backend.config import settings
 from backend.db.models import Base
 from backend.schemas.common import HealthResponse
@@ -26,9 +27,29 @@ from backend.services.recommendation_service import RecommendationService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # ── 启动：初始化基础设施 ──────────────────────────────
-    engine = create_async_engine(settings.database_url, echo=False) if settings.database_url else None
-    redis_client = aioredis.from_url(settings.redis_url, decode_responses=True) if settings.redis_url else None
+    # ── 启动：编译 graph、连接 PG/Redis ──────────────────
+    graph = get_graph()
+    app.state.graph = graph
+    app.state.graph_compiled = graph is not None
+
+    engine = (
+        create_async_engine(settings.database_url, echo=False)
+        if settings.database_url
+        else None
+    )
+    redis_client = (
+        aioredis.from_url(settings.redis_url, decode_responses=True)
+        if settings.redis_url
+        else None
+    )
+
+    redis_ok = False
+    if redis_client is not None:
+        try:
+            await redis_client.ping()
+            redis_ok = True
+        except Exception:
+            redis_ok = False
 
     if engine:
         try:
@@ -37,7 +58,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             pass
 
-    session_factory = async_sessionmaker(engine, expire_on_commit=False) if engine else None
+    session_factory = (
+        async_sessionmaker(engine, expire_on_commit=False) if engine else None
+    )
 
     # ── 服务层 ────────────────────────────────────────────
     recommendation_service = RecommendationService(
@@ -47,6 +70,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.engine = engine
     app.state.redis_client = redis_client
+    app.state.redis_ok = redis_ok
     app.state.session_factory = session_factory
     app.state.recommendation_service = recommendation_service
 
@@ -91,7 +115,11 @@ def create_app() -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def healthcheck() -> HealthResponse:
-        return HealthResponse(app=PRODUCT_NAME)
+        return HealthResponse(
+            app=PRODUCT_NAME,
+            graph_compiled=bool(getattr(app.state, "graph_compiled", False)),
+            redis_ok=bool(getattr(app.state, "redis_ok", False)),
+        )
 
     app.include_router(session_router, prefix=settings.api_prefix)
     app.include_router(search_router, prefix=settings.api_prefix)

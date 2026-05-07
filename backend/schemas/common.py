@@ -63,3 +63,5 @@ class RecommendationCardDto(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     app: str
+    graph_compiled: bool = False
+    redis_ok: bool = False
