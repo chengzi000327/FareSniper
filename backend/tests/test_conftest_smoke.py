@@ -43,3 +43,19 @@ async def test_fake_redis_round_trip(fake_redis):
 async def test_fake_redis_setex_expires(fake_redis):
     await fake_redis.setex("k", 60, "v")
     assert await fake_redis.get("k") == "v"
+
+
+@pytest.mark.asyncio
+async def test_stub_chat_model_for_search_emits_tool_call(stub_chat_model_for_search):
+    msg = await stub_chat_model_for_search.ainvoke([{"role": "user", "content": "x"}])
+    assert any(tc["name"] == "search_flights" for tc in msg.tool_calls)
+
+
+def test_captured_langfuse_records_scores(captured_langfuse):
+    captured_langfuse.score(name="x", value=0.1)
+    assert captured_langfuse.scores[-1] == {"name": "x", "value": 0.1}
+
+
+def test_captured_langfuse_get_prompt_returns_stub(captured_langfuse):
+    p = captured_langfuse.get_prompt("react_agent")
+    assert p.prompt == "stub"

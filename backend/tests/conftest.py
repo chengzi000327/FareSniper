@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
+import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
 from httpx import ASGITransport, AsyncClient
+from langchain_core.messages import AIMessage
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -120,3 +122,62 @@ async def fake_redis():
         yield fake
     finally:
         await fake.close()
+
+
+class _StubChatModel:
+    """Minimal LangChain-shaped chat model returning a canned AIMessage.
+
+    Production wiring will plug this into ``backend.infrastructure.llm.models``
+    once the ``build_chat_model(role)`` factory exists. For now the stub is
+    self-contained — tests that need to bypass LLM calls can request the
+    fixtures below.
+    """
+
+    def __init__(
+        self,
+        tool_calls: Optional[list[dict]] = None,
+        content: str = "",
+    ) -> None:
+        self._tool_calls = tool_calls or []
+        self._content = content
+        self.model = "stub-chat"
+
+    def bind_tools(self, _tools):
+        return self
+
+    def with_config(self, _cfg):
+        return self
+
+    async def ainvoke(self, _messages):
+        return AIMessage(content=self._content, tool_calls=self._tool_calls)
+
+
+@pytest.fixture
+def stub_chat_model_for_search() -> _StubChatModel:
+    return _StubChatModel(
+        tool_calls=[
+            {
+                "id": "c1",
+                "name": "search_flights",
+                "args": {
+                    "origin": "BJS",
+                    "destination": "SHA",
+                    "depart_date": "2026-05-08",
+                },
+            }
+        ]
+    )
+
+
+@pytest.fixture
+def stub_chat_judge_buy_now() -> _StubChatModel:
+    return _StubChatModel(
+        content='{"verdict":"buy_now","advice":"历史低价建议尽快下单","signals":["历史低价"]}'
+    )
+
+
+@pytest.fixture
+def captured_langfuse():
+    from backend.tests._fakes.langfuse import CapturedLangfuse
+
+    return CapturedLangfuse()
