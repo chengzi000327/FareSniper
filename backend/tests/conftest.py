@@ -140,6 +140,22 @@ async def seeded_pg():
 
 
 @pytest_asyncio.fixture
+async def enable_flag(seeded_pg):
+    """Convenience helper to flip a feature flag inside a test.
+
+    Yields ``await enable_flag(name, rollout_pct=100)``. Hidden behind a
+    ``seeded_pg`` dependency so the truncate runs first; otherwise prod
+    seed rows would survive into the test scope.
+    """
+    from backend.infrastructure.db.feature_flag_repo import set_flag
+
+    async def _enable(name: str, *, rollout_pct: int = 100) -> None:
+        await set_flag(name, True, rollout_pct=rollout_pct)
+
+    return _enable
+
+
+@pytest_asyncio.fixture
 async def seeded_pg_with_events(seeded_pg):
     """Pre-populates analytics_events with mixed deeplink_ok / latency rows.
 
