@@ -50,6 +50,23 @@ class NormalizedIntent(BaseContract):
     parse_failed: bool = False
 
 
+from dataclasses import dataclass, field as dc_field
+
+
+@dataclass
+class SlotBundle:
+    intent: str | None = None
+    origin: str | None = None
+    destination: str | None = None
+    depart_date: str | None = None
+    return_date: str | None = None
+    cabin_class: str | None = None
+    passengers: int = 1
+    budget: int | None = None
+    constraints: list[str] = dc_field(default_factory=list)
+    target_price: int | None = None
+
+
 def is_intent_complete(intent: NormalizedIntent) -> bool:
     """Return whether the required search slots are present."""
     return (
