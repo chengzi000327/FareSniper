@@ -288,6 +288,45 @@ def jwt_for():
     return _mint_jwt
 
 
+class _FakePush:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    async def send(self, user_id: str, title: str, body: str, subscription: dict):
+        self.calls.append(
+            {"user_id": user_id, "title": title, "body": body, "sub": subscription}
+        )
+
+
+@pytest.fixture
+def fake_push(monkeypatch):
+    import backend.workers.push_dispatcher as pd
+
+    fp = _FakePush()
+    monkeypatch.setattr(pd, "send_push", fp.send)
+    try:
+        import backend.workers.alert_checker as ac
+
+        monkeypatch.setattr(ac, "send_push", fp.send)
+    except ImportError:
+        pass
+    return fp
+
+
+@pytest_asyncio.fixture
+async def seeded_pg_with_low_price(seeded_pg):
+    """seeded_pg with a BJS→SYX deal at price=300 in flight_cache."""
+    from backend.infrastructure.db.flight_cache import write_cached_deals
+
+    await write_cached_deals(
+        origin="BJS",
+        destination="SYX",
+        depart_date="2026-05-01",
+        deals=[{"flight_no": "MU001", "price": 300, "platform": "ctrip"}],
+    )
+    return seeded_pg
+
+
 @pytest_asyncio.fixture
 async def seeded_pg_with_memory(seeded_pg):
     """seeded_pg with u1's budget_ceiling=500 pre-loaded in memories."""
