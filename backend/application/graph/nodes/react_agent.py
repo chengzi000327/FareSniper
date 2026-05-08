@@ -22,8 +22,8 @@ async def react_agent(state: dict) -> dict:
 
         await track(
             EventName.INTENT_PARSED,
-            state.get("request_user_id", ""),
-            {"intent_complete": bool(ai.tool_calls), "parse_failed": False},
+            user_id=state.get("request_user_id", ""),
+            payload={"intent_complete": bool(ai.tool_calls), "parse_failed": False},
         )
     except Exception:
         pass
