@@ -155,3 +155,29 @@ export const api = {
   getRecommendations: (userId = 'demo-user'): Promise<RecommendationsResponseDto> =>
     fetch(`${BASE}/api/recommendations?user_id=${userId}`).then((r) => r.json()),
 }
+
+export interface ChatSearchRequest {
+  message: string;
+  session_id?: string | null;
+}
+
+export interface FallbackDirective {
+  ui: "modal";
+  fields: string[];
+  reason: string;
+}
+
+export interface ChatSearchResponse {
+  session_id: string;
+  recommendation?: { text: string };
+  fallback?: FallbackDirective | null;
+}
+
+export const searchApi = {
+  search: (req: ChatSearchRequest): Promise<ChatSearchResponse> =>
+    fetch(`${BASE}/api/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }).then((r) => r.json()),
+};
