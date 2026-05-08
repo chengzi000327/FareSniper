@@ -1,81 +1,46 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel
 
-from fastapi import APIRouter, Query, Request
-
-from backend.schemas.alerts import (
-    AlertCreateRequest,
-    AlertCreateResponseDto,
-    AlertItemDto,
-    AlertsListResponseDto,
-)
+from backend.api._deps import current_user_id
+from backend.infrastructure.db.alert_repo import create_alert, list_alerts
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
-@router.post("", response_model=AlertCreateResponseDto)
-async def create_alert(payload: AlertCreateRequest, request: Request) -> AlertCreateResponseDto:
-    alert_id = str(uuid.uuid4())
-    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    session_factory = getattr(request.app.state, "session_factory", None)
-    if session_factory:
-        try:
-            from backend.db.models import PriceAlert
-            async with session_factory() as db:
-                db.add(PriceAlert(
-                    alert_id=alert_id,
-                    user_id=payload.user_id,
-                    flight_id=payload.flight_id,
-                    origin_city=payload.origin_city,
-                    destination_city=payload.destination_city,
-                    depart_date=payload.depart_date,
-                    current_price=payload.current_price,
-                    target_price=payload.target_price,
-                    status="active",
-                ))
-                await db.commit()
-        except Exception:
-            pass
-
-    return AlertCreateResponseDto(alert_id=alert_id, status="active", created_at=now)
+class CreateAlertReq(BaseModel):
+    origin: str
+    destination: str
+    depart_date: str
+    target_price: int
 
 
-@router.get("", response_model=AlertsListResponseDto)
-async def list_alerts(
-    request: Request,
-    user_id: str = Query(default="demo-user"),
-) -> AlertsListResponseDto:
-    alerts: list[AlertItemDto] = []
+@router.post("", status_code=201)
+async def create(req: CreateAlertReq, uid: str = Depends(current_user_id)):
+    aid = await create_alert(
+        uid,
+        origin=req.origin,
+        destination=req.destination,
+        depart_date=req.depart_date,
+        target_price=req.target_price,
+    )
+    return {"id": aid}
 
-    session_factory = getattr(request.app.state, "session_factory", None)
-    if session_factory:
-        try:
-            from sqlalchemy import select
-            from backend.db.models import PriceAlert
-            async with session_factory() as db:
-                stmt = (
-                    select(PriceAlert)
-                    .where(PriceAlert.user_id == user_id)
-                    .order_by(PriceAlert.created_at.desc())
-                )
-                rows = (await db.execute(stmt)).scalars().all()
-                alerts = [
-                    AlertItemDto(
-                        alert_id=r.alert_id,
-                        origin_city=r.origin_city,
-                        destination_city=r.destination_city,
-                        depart_date=r.depart_date,
-                        current_price=r.current_price,
-                        target_price=r.target_price,
-                        status=r.status,
-                        created_at=str(r.created_at),
-                    )
-                    for r in rows
-                ]
-        except Exception:
-            pass
 
-    return AlertsListResponseDto(user_id=user_id, alerts=alerts)
+@router.get("")
+async def list_(uid: str = Depends(current_user_id)):
+    rows = await list_alerts(uid)
+    return {
+        "alerts": [
+            {
+                "id": a.id,
+                "origin": a.origin,
+                "destination": a.destination,
+                "depart_date": a.depart_date,
+                "target_price": a.target_price,
+                "status": a.status,
+            }
+            for a in rows
+        ]
+    }
