@@ -1,36 +1,32 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
-from fastapi import APIRouter, Request
+import jwt
+from fastapi import APIRouter
 from pydantic import BaseModel
+
+from backend.config import settings
+from backend.infrastructure.db.user_repo import allocate_anonymous
 
 router = APIRouter(prefix="/session", tags=["session"])
 
 
-class SessionCreateRequest(BaseModel):
-    user_id: str = "demo-user"
+class SessionReq(BaseModel):
+    user_id: str | None = None
 
 
-class SessionCreateResponse(BaseModel):
+class SessionRsp(BaseModel):
+    user_id: str
     session_id: str
-    created_at: str
+    access_token: str
 
 
-@router.post("", response_model=SessionCreateResponse)
-async def create_session(payload: SessionCreateRequest, request: Request) -> SessionCreateResponse:
-    session_id = str(uuid.uuid4())
-    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    session_factory = getattr(request.app.state, "session_factory", None)
-    if session_factory:
-        try:
-            from backend.db.models import Session as SessionModel
-            async with session_factory() as db:
-                db.add(SessionModel(session_id=session_id, user_id=payload.user_id))
-                await db.commit()
-        except Exception:
-            pass
-
-    return SessionCreateResponse(session_id=session_id, created_at=now)
+@router.post("", response_model=SessionRsp)
+async def create_session(req: SessionReq) -> SessionRsp:
+    user_id = req.user_id or await allocate_anonymous()
+    session_id = f"s_{uuid.uuid4().hex[:12]}"
+    token = jwt.encode(
+        {"sub": user_id, "anon": True}, settings.jwt_secret, algorithm="HS256"
+    )
+    return SessionRsp(user_id=user_id, session_id=session_id, access_token=token)
