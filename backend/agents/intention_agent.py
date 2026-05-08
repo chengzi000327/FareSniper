@@ -48,11 +48,16 @@ class IntentionAgent(FareSniperAgent):
         return await self._heuristic_intent(text)
 
     async def _heuristic_intent(self, text: str) -> dict[str, Any]:
-        """无 LLM 时的启发式解析，直接委托给 llm.client 里的逻辑。"""
-        from backend.llm.client import UnifiedLLMClient
-
-        client = UnifiedLLMClient(provider="mock", api_key="")
-        return await client.parse_intent(text)
+        """无 LLM 时的轻量启发式解析。"""
+        return {
+            "origin": None,
+            "destination": None,
+            "depart_date": None,
+            "return_date": None,
+            "passengers": 1,
+            "cabin": "economy",
+            "raw": text,
+        }
 
     def _build_plan(self, intent: dict[str, Any]) -> list[str]:
         """根据 intent 决定执行哪些 skill。简单策略：始终走完整链路。"""
