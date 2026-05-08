@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends
 
-from backend.schemas.memory import RecommendationsResponseDto
+from backend.api._deps import current_user_id
+from backend.application.contracts.recommendations import RecommendationsResponseDto
+from backend.application.services.recommendation_service import build_recommendations
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 
 
 @router.get("", response_model=RecommendationsResponseDto)
 async def get_recommendations(
-    request: Request,
-    user_id: str = Query(default="demo-user"),
+    uid: str = Depends(current_user_id),
 ) -> RecommendationsResponseDto:
-    result = await request.app.state.recommendation_service.get_cards(user_id)
-    return RecommendationsResponseDto.model_validate(result)
+    return await build_recommendations(uid)

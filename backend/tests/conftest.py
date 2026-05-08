@@ -283,6 +283,12 @@ def valid_jwt_for_u1() -> str:
 
 
 @pytest.fixture
+def valid_jwt_for_anon_new() -> str:
+    """JWT for a brand-new anonymous user with no memories."""
+    return _mint_jwt("anon_newuser_xyz")
+
+
+@pytest.fixture
 def jwt_for():
     """Yield a factory that mints a Bearer JWT for any user_id."""
     return _mint_jwt
