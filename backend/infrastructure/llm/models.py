@@ -13,6 +13,11 @@ def get_judge_model():
     return _build(settings.model_judge)
 
 
+def build_chat_model(role: str = "agent"):
+    """Unified factory for all roles: agent, intent, judge."""
+    return _build(settings.model_intent)
+
+
 def _build(model_name: str):
     if not settings.model_api_key or settings.model_api_key in ("", "mock"):
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
