@@ -289,6 +289,15 @@ def jwt_for():
 
 
 @pytest_asyncio.fixture
+async def seeded_pg_with_memory(seeded_pg):
+    """seeded_pg with u1's budget_ceiling=500 pre-loaded in memories."""
+    from backend.infrastructure.db.memory_repo import upsert_memory
+
+    await upsert_memory("u1", "budget_ceiling", 500, source="user")
+    return seeded_pg
+
+
+@pytest_asyncio.fixture
 async def seeded_pg_with_cache(seeded_pg):
     """seeded_pg with one BJS→SHA deal pre-loaded in flight_cache."""
     from backend.infrastructure.db.flight_cache import write_cached_deals
