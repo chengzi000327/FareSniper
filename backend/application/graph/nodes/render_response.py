@@ -22,38 +22,40 @@ async def render_response(state: WorkflowState) -> WorkflowState:
 
     deals = []
     if search_result:
-        for c in search_result.candidates:
-            deal = c.model_dump()
-            deal["id"] = f"deal-{c.flight_no}-{c.depart_date}"
-            deal["system_id"] = f"{c.flight_no}-{c.depart_date}"
-            deal["platform"] = next((p.platform for p in c.prices if p.lowest), "")
-            deal["origin_city"] = c.origin_city or (
-                intent.origin.city if intent and intent.origin else ""
-            )
-            deal["destination_city"] = c.destination_city or (
-                intent.destination.city if intent and intent.destination else ""
-            )
-            deal["depart_time"] = c.depart_time
-            deal["arrive_time"] = c.arrive_time
-            deal["price"] = c.lowest_price
-            deal["prices"] = [
-                {"name": p["platform"], "price": p["price"], "lowest": p.get("lowest", False)}
-                for p in deal.get("prices", [])
-            ]
-            deals.append(deal)
+        # New ReAct graph: search_result is a dict from tool_router
+        if isinstance(search_result, dict):
+            deals = list(search_result.get("deals", []))
+        else:
+            # Old DAG graph: search_result is FlightSearchResult with .candidates
+            for c in search_result.candidates:
+                deal = c.model_dump()
+                deal["id"] = f"deal-{c.flight_no}-{c.depart_date}"
+                deal["system_id"] = f"{c.flight_no}-{c.depart_date}"
+                deal["platform"] = next((p.platform for p in c.prices if p.lowest), "")
+                deal["origin_city"] = c.origin_city or (
+                    intent.origin.city if intent and intent.origin else ""
+                )
+                deal["destination_city"] = c.destination_city or (
+                    intent.destination.city if intent and intent.destination else ""
+                )
+                deal["depart_time"] = c.depart_time
+                deal["arrive_time"] = c.arrive_time
+                deal["price"] = c.lowest_price
+                deal["prices"] = [
+                    {"name": p["platform"], "price": p["price"], "lowest": p.get("lowest", False)}
+                    for p in deal.get("prices", [])
+                ]
+                deals.append(deal)
 
-    prices = [c.lowest_price for c in (search_result.candidates if search_result else [])]
+    prices = [c.lowest_price for c in (search_result.candidates if search_result and not isinstance(search_result, dict) else [])]
     pref_reasons: list[str] = []
     if pref_result:
         for p in pref_result.items:
             pref_reasons.extend(p.reasons)
 
-    avg_90d_vals = [
-        c.history_avg_90d
-        for c in (search_result.candidates if search_result else [])
-        if c.history_avg_90d
-    ]
-    best = search_result.candidates[0] if search_result and search_result.candidates else None
+    _candidates = search_result.candidates if search_result and not isinstance(search_result, dict) else []
+    avg_90d_vals = [c.history_avg_90d for c in _candidates if c.history_avg_90d]
+    best = _candidates[0] if _candidates else None
     best_avg = best.history_avg_90d if best else None
     best_price = best.lowest_price if best else 0
     lower_than_avg = (
@@ -102,7 +104,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         }
 
     resp = FrontendResponse(
-        user_id=state["request_user_id"],
+        user_id=state.get("request_user_id", ""),
         query=query_summary,
         deals=deals,
         analysis=analysis,
@@ -112,7 +114,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "source": "mock",
             "request_id": str(uuid.uuid4()),
             "result_count": len(deals),
-            "fallback_mode": False,
+            "fallback_mode": state.get("fallback_triggered", False),
         },
     )
 
