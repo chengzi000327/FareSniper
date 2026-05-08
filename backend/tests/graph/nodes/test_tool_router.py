@@ -17,6 +17,18 @@ def _make_fake_tool(name: str, return_value):
     return _FakeTool()
 
 
+def _make_asserting_tool(name: str, expected_args: dict, return_value):
+    class _FakeTool:
+        def __init__(self):
+            self.name = name
+
+        async def ainvoke(self, args):
+            assert args == expected_args
+            return return_value
+
+    return _FakeTool()
+
+
 @pytest.mark.asyncio
 async def test_executes_search_flights_tool_call(monkeypatch):
     """search_flights tool call must produce a ToolMessage."""
@@ -75,3 +87,28 @@ async def test_unknown_tool_returns_error_tool_message(monkeypatch):
     )
     out = await tr.tool_router({"messages": [ai], "clarify_count": 0, "request_user_id": "u1"})
     assert "not implemented" in out["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_get_preferences_injects_user_id_with_tool_schema(monkeypatch):
+    import backend.application.graph.nodes.tool_router as tr
+
+    fake = _make_asserting_tool(
+        "get_preferences",
+        {"user_id": "u1"},
+        {"budget_ceiling": 800},
+    )
+    monkeypatch.setattr(tr, "load_available_tools", lambda: [fake])
+
+    ai = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "c4",
+                "name": "get_preferences",
+                "args": {"user_id": "attacker"},
+            }
+        ],
+    )
+    out = await tr.tool_router({"messages": [ai], "clarify_count": 0, "request_user_id": "u1"})
+    assert isinstance(out["messages"][-1], ToolMessage)

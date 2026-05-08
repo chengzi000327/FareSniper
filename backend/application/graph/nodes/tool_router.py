@@ -31,7 +31,8 @@ async def tool_router(state: dict) -> dict:
         args = dict(tc["args"])
         if tc["name"] in INJECT_USER_ID_TOOLS:
             args.pop("user_id", None)
-            args["injected_user_id"] = state.get("request_user_id", "")
+            injected_key = "injected_user_id" if tc["name"] == "set_alert" else "user_id"
+            args[injected_key] = state.get("request_user_id", "")
 
         result = await tool.ainvoke(args)
         out_msgs.append(
