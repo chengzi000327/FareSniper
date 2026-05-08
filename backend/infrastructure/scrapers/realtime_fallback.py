@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from backend.infrastructure.scrapers.base_scraper import ScrapeQuery
+from backend.infrastructure.scrapers.ctrip_scraper import CtripScraper
+
+_scraper = CtripScraper()
+
 
 async def scrape_realtime(
     *, origin: str, destination: str, depart_date: str
 ) -> list[dict]:
-    """Real-time scrape fallback when cache misses.
-
-    In production this launches multi-platform scrapers inline.
-    Returns empty list when scrapers are unavailable (test/dev env).
-    """
-    return []
+    """Cache-miss fallback: query only the fastest single platform to stay under 3s."""
+    return await _scraper.fetch(
+        ScrapeQuery(origin=origin, destination=destination, depart_date=depart_date)
+    )
