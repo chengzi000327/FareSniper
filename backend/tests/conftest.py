@@ -386,6 +386,15 @@ async def seeded_pg_empty(seeded_pg):
     return seeded_pg
 
 
+@pytest_asyncio.fixture
+async def seeded_pg_with_history(seeded_pg):
+    """seeded_pg with one BJS→SYX price snapshot pre-loaded."""
+    from backend.infrastructure.db.price_history_repo import write_snapshot
+
+    await write_snapshot("BJS", "SYX", 480)
+    return seeded_pg
+
+
 @pytest.fixture
 def stub_realtime(monkeypatch):
     """Replace scrape_realtime with a deterministic stub returning one deal."""

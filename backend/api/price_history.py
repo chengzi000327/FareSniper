@@ -1,17 +1,19 @@
-"""Price-history curve endpoint.
-
-TG-09i implements the read against ``price_history_repo`` once that
-table lands. Today this is a placeholder so frontend wiring (TG-13) can
-target a stable URL.
-"""
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter
+
+from backend.application.contracts.price_history import PriceHistoryDto, PricePoint
+from backend.infrastructure.db.price_history_repo import read_history
 
 router = APIRouter(tags=["price_history"])
 
 
-@router.get("/price_history", status_code=status.HTTP_501_NOT_IMPLEMENTED)
-async def get_price_history(origin: str | None = None, destination: str | None = None) -> dict:
-    """Implemented in TG-09i · Task ?."""
-    return {"detail": "not_implemented", "origin": origin, "destination": destination}
+@router.get("/price_history", response_model=PriceHistoryDto)
+async def get_price_history(
+    origin: str, destination: str, days: int = 30
+) -> PriceHistoryDto:
+    rows = await read_history(origin, destination, days)
+    return PriceHistoryDto(
+        route=f"{origin}-{destination}",
+        points=[PricePoint(at=r.snapshot_at.isoformat(), price=r.min_price) for r in rows],
+    )
