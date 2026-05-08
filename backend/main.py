@@ -127,10 +127,30 @@ def create_app() -> FastAPI:
 
     @app.get("/health", response_model=HealthResponse, tags=["system"])
     async def healthcheck() -> HealthResponse:
+        from sqlalchemy import text as sa_text
+
+        pg_ok = False
+        engine = getattr(app.state, "engine", None)
+        if engine is not None:
+            try:
+                async with engine.connect() as conn:
+                    await conn.execute(sa_text("SELECT 1"))
+                pg_ok = True
+            except Exception:
+                pass
+
+        scheduler = getattr(app.state, "scheduler", None)
+        scheduler_ok = scheduler is not None and getattr(scheduler, "running", False)
+
+        langfuse_ok = bool(settings.langfuse_public_key)
+
         return HealthResponse(
             app=PRODUCT_NAME,
             graph_compiled=bool(getattr(app.state, "graph_compiled", False)),
             redis_ok=bool(getattr(app.state, "redis_ok", False)),
+            postgres_ok=pg_ok,
+            scheduler_ok=scheduler_ok,
+            langfuse_ok=langfuse_ok,
         )
 
     app.include_router(session_router, prefix=settings.api_prefix)

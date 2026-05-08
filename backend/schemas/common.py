@@ -65,3 +65,6 @@ class HealthResponse(BaseModel):
     app: str
     graph_compiled: bool = False
     redis_ok: bool = False
+    postgres_ok: bool = False
+    scheduler_ok: bool = False
+    langfuse_ok: bool = False
