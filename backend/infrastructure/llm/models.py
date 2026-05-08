@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
-from backend.config import settings
+from backend.config import get_settings
 
 
 def get_intent_model():
-    return _build(settings.model_intent)
+    return _build(get_settings().model_intent)
 
 
 def get_judge_model():
-    return _build(settings.model_judge)
+    return _build(get_settings().model_judge)
 
 
 def build_chat_model(role: str = "agent"):
     """Unified factory for all roles: agent, intent, judge."""
-    return _build(settings.model_intent)
+    s = get_settings()
+    model_name = s.model_agent if role == "agent" else s.model_judge
+    return _build(model_name)
 
 
 def _build(model_name: str):
-    if not settings.model_api_key or settings.model_api_key in ("", "mock"):
+    s = get_settings()
+    if not s.model_api_key or s.model_api_key in ("", "mock"):
         from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
         return FakeListChatModel(
@@ -31,19 +34,11 @@ def _build(model_name: str):
             ]
         )
 
-    if "qwen" in model_name.lower():
-        try:
-            from langchain_community.chat_models.tongyi import ChatTongyi
-
-            return ChatTongyi(model=model_name, dashscope_api_key=settings.model_api_key)
-        except ImportError:
-            pass
-
     from langchain_openai import ChatOpenAI
 
     return ChatOpenAI(
         model=model_name,
-        api_key=settings.model_api_key,
-        base_url=settings.model_base_url,
+        api_key=s.model_api_key,
+        base_url=s.model_base_url,
         temperature=0.2,
     )
