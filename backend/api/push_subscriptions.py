@@ -1,17 +1,23 @@
-"""WebPush subscription persistence endpoint.
-
-TG-12 · Task 6+ replaces this with the real persistence into
-``push_subscription_repo``. Until then frontends can register against a
-stable URL that simply 501s.
-"""
+"""WebPush subscription persistence endpoint."""
 from __future__ import annotations
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, Response
+from pydantic import BaseModel
+
+from backend.api._deps import current_user_id
+from backend.infrastructure.db.push_subscription_repo import upsert_subscription
 
 router = APIRouter(prefix="/push", tags=["push"])
 
 
-@router.post("/subscriptions", status_code=status.HTTP_501_NOT_IMPLEMENTED)
-async def save_subscription() -> dict:
-    """Implemented in TG-12 · Task 6+ once push_subscription_repo lands."""
-    return {"detail": "not_implemented"}
+class PushSubscriptionReq(BaseModel):
+    subscription: dict
+
+
+@router.post("/subscriptions", status_code=204)
+async def save_subscription(
+    req: PushSubscriptionReq,
+    uid: str = Depends(current_user_id),
+) -> Response:
+    await upsert_subscription(uid, req.subscription)
+    return Response(status_code=204)
