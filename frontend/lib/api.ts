@@ -95,15 +95,23 @@ export const searchApi = {
 };
 
 export const memoryApi = {
-  get: () => http<{ memories: unknown[]; query_history: unknown[] }>("/api/memory"),
+  get: () => http<{ memories: MemoryItemDto[]; query_history: QueryHistoryItemDto[] }>("/api/memory"),
   patch: (body: { field: string; value: unknown }) =>
     http("/api/memory", { method: "PATCH", body: JSON.stringify(body) }),
   del: (field: string) =>
     http(`/api/memory/${encodeURIComponent(field)}`, { method: "DELETE" }),
 };
 
+export interface RecCardDto {
+  id?: string;
+  reason?: string;
+  preview_deal?: DealCardDto;
+  query_hint?: string;
+  [key: string]: unknown;
+}
+
 export const recApi = {
-  list: () => http<{ personalized: boolean; cards: unknown[] }>("/api/recommendations"),
+  list: () => http<{ personalized: boolean; cards: RecCardDto[] }>("/api/recommendations"),
 };
 
 export const alertsApi = {
@@ -154,4 +162,27 @@ export const pushApi = {
       method: "POST",
       body: JSON.stringify({ subscription }),
     }),
+};
+
+export interface MemoryItemDto {
+  field: string;
+  label: string;
+  value_display: string;
+  source: "manual" | "auto" | string;
+  [key: string]: unknown;
+}
+
+export interface QueryHistoryItemDto {
+  id: string;
+  query: unknown;
+  created_at: string;
+  [key: string]: unknown;
+}
+
+/** 向后兼容的聚合 api 对象，供旧组件使用 */
+export const api = {
+  search: (message: string) =>
+    searchApi.search({ session_id: null, message }),
+  getRecommendations: () => recApi.list(),
+  getMemory: () => memoryApi.get(),
 };

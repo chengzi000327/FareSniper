@@ -35,12 +35,12 @@ export function ExplorePage() {
           .map((c) => {
             const deal = c.preview_deal!
             return {
-              id: c.id,
+              id: c.id ?? deal.system_id,
               from: deal.origin_city,
               to: deal.destination_city,
               price: String(deal.price),
               date: deal.depart_date,
-              reason: c.reason,
+              reason: c.reason ?? "",
               image: `https://picsum.photos/seed/${deal.destination_code}/400/300`,
               cardData: dealToCardProps(deal),
             }

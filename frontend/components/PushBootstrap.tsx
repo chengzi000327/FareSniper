@@ -29,7 +29,7 @@ export default function PushBootstrap() {
       const existing = await reg.pushManager.getSubscription();
       const sub = existing ?? await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid),
+        applicationServerKey: urlBase64ToUint8Array(vapid).buffer as ArrayBuffer,
       });
       const token = localStorage.getItem("fs_token");
       if (!token) return;

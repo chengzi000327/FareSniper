@@ -22,7 +22,7 @@ export function ChatPage() {
     const fetchQuestions = async () => {
       try {
         const resp = await api.getRecommendations()
-        const hints = resp.cards.map((c) => c.query_hint).filter(Boolean)
+        const hints = resp.cards.map((c) => c.query_hint).filter((h): h is string => !!h)
         if (hints.length > 0) {
           setRecommendedQuestions(hints.slice(0, 4))
           return
@@ -56,10 +56,11 @@ export function ChatPage() {
 
     try {
       const resp = await api.search(value)
-      const bestDeal = resp.deals[0]
+      const deals = resp.deals ?? []
+      const bestDeal = deals[0]
       const assistantText =
         resp.recommendation?.text ||
-        (bestDeal ? `为您找到 ${resp.deals.length} 个航班，最低价 ¥${bestDeal.price}` : '暂未找到符合条件的航班，请换个搜索词试试。')
+        (bestDeal ? `为您找到 ${deals.length} 个航班，最低价 ¥${bestDeal.price}` : '暂未找到符合条件的航班，请换个搜索词试试。')
 
       setMessages((prev) => {
         const filtered = prev.filter((m) => !('isSpecial' in m && m.isSpecial))

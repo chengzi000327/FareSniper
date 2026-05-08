@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { vi } from "vitest";
+import { vi, beforeEach } from "vitest";
 
 const _store: Record<string, string> = {};
 const fakeLocalStorage = {
