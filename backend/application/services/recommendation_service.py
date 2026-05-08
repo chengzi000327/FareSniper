@@ -3,11 +3,26 @@ from __future__ import annotations
 from backend.application.contracts.recommendations import RecCard, RecommendationsResponseDto
 from backend.infrastructure.db.flight_cache import read_cached_deals
 from backend.infrastructure.db.memory_repo import list_memories
+from backend.infrastructure.redis.session_store import _redis
 
 HOT_ROUTES = [("BJS", "SYX"), ("SHA", "CTU"), ("CAN", "HGH")]
+CACHE_TTL = 60
 
 
 async def build_recommendations(user_id: str) -> RecommendationsResponseDto:
+    key = f"rec:{user_id}"
+    try:
+        raw = await _redis().get(key)
+        if raw:
+            return RecommendationsResponseDto.model_validate_json(raw)
+        rsp = await _build_recommendations_uncached(user_id)
+        await _redis().setex(key, CACHE_TTL, rsp.model_dump_json())
+        return rsp
+    except Exception:
+        return await _build_recommendations_uncached(user_id)
+
+
+async def _build_recommendations_uncached(user_id: str) -> RecommendationsResponseDto:
     mems = await list_memories(user_id)
     if not mems:
         cards = [
