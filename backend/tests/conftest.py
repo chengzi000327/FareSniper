@@ -294,6 +294,30 @@ def jwt_for():
     return _mint_jwt
 
 
+class _FakeSms:
+    def __init__(self):
+        self._codes: dict[str, str] = {}
+
+    def last_code_for(self, phone: str) -> str:
+        return self._codes[phone]
+
+    async def send(self, phone: str, text: str) -> None:
+        import re
+
+        m = re.search(r"\d{6}", text)
+        if m:
+            self._codes[phone] = m.group(0)
+
+
+@pytest.fixture
+def fake_sms(monkeypatch):
+    import backend.api.auth as auth_mod
+
+    fs = _FakeSms()
+    monkeypatch.setattr(auth_mod, "send_sms", fs.send)
+    return fs
+
+
 class _FakePush:
     def __init__(self):
         self.calls: list[dict] = []

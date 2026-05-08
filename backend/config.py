@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     jwt_algorithm: str = Field(default="HS256")
     jwt_expires_minutes: int = Field(default=60 * 24 * 30)
 
+    sms_provider: str = Field(default="aliyun")
+    sms_aliyun_endpoint: str = Field(default="https://dysmsapi.aliyuncs.com")
+    sms_aliyun_access_key_id: str = Field(default="")
+    sms_twilio_sid: str = Field(default="")
+    sms_twilio_token: str = Field(default="")
+    sms_twilio_from: str = Field(default="")
+
     vapid_private_key: str = Field(default="")
     vapid_public_key: str = Field(default="")
     vapid_subject: str = Field(default="mailto:ops@faresniper.app")
