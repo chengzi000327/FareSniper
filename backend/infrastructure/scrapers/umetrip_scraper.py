@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from bs4 import BeautifulSoup
+
 from backend.infrastructure.scrapers.base_scraper import BaseScraper, ScrapeQuery, _launch_browser
 
 
@@ -37,4 +39,28 @@ class UmetripScraper(BaseScraper):
                     "source": "fake",
                 }
             ]
-        return []
+        soup = BeautifulSoup(html, "html.parser")
+        deals = []
+        for node in soup.select(".flight-item"):
+            try:
+                deals.append(
+                    {
+                        "flight_no": node.select_one(".flight-no").get_text(strip=True),
+                        "price": int(
+                            node.select_one(".price")
+                            .get_text(strip=True)
+                            .replace("¥", "")
+                        ),
+                        "platform": self.platform,
+                        "airline": node.select_one(".airline").get_text(strip=True),
+                        "depart_time": node.select_one(".depart").get_text(strip=True),
+                        "arrive_time": node.select_one(".arrive").get_text(strip=True),
+                        "origin": q.origin,
+                        "destination": q.destination,
+                        "depart_date": q.depart_date,
+                        "source": "scrape",
+                    }
+                )
+            except (AttributeError, ValueError):
+                continue
+        return deals
