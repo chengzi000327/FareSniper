@@ -1,0 +1,11 @@
+[[services]]
+name = "backend"
+startCommand = "alembic -c backend/alembic.ini upgrade head && uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+
+[[services]]
+name = "worker"
+startCommand = "python -m backend.workers.run_all"
+
+[[services]]
+name = "frontend"
+startCommand = "npm --prefix frontend run start -- -p $PORT"
