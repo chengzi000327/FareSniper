@@ -18,6 +18,7 @@ from backend.api.push_subscriptions import router as push_subscriptions_router
 from backend.api.recommendations import router as recommendations_router
 from backend.api.search import router as search_router
 from backend.api.session import router as session_router
+from backend.api.flight_status import router as flight_status_router
 from backend.api.track import router as track_router
 from backend.infrastructure.observability.latency_mw import record_latency
 from backend.api.track_jump import router as track_jump_router
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(push_subscriptions_router, prefix=settings.api_prefix)
     app.include_router(track_jump_router, prefix=settings.api_prefix)
     app.include_router(track_router, prefix=settings.api_prefix)
+    app.include_router(flight_status_router, prefix=settings.api_prefix)
 
     return app
 
