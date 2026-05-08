@@ -33,6 +33,7 @@ class DecisionResult(BaseContract):
 
 class FrontendResponse(BaseContract):
     user_id: str
+    session_id: str | None = None
     query: dict[str, Any] | None = None
     deals: list[dict[str, Any]] = Field(default_factory=list)
     analysis: dict[str, Any] = Field(default_factory=dict)

@@ -1,35 +1,37 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends
+from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 
-from backend.application.graph.state import WorkflowState
-from backend.schemas.search import SearchRequest, SearchResponseDto
+from backend.api._deps import current_user_id
+from backend.application.contracts.decision import FrontendResponse
+from backend.application.graph.factory import get_graph
 
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-@router.post("", response_model=SearchResponseDto)
-async def search_flights(payload: SearchRequest, request: Request) -> SearchResponseDto:
-    from backend.application.graph.factory import search_graph
+class SearchReq(BaseModel):
+    session_id: str | None = None
+    message: str
 
-    initial: WorkflowState = {
-        "request_user_id": payload.user_id,
-        "request_session_id": payload.session_id,
-        "request_message": payload.message,
-        "context": None,
-        "clarify_count": 0,
-        "intent": None,
-        "search_result": None,
-        "pref_result": None,
-        "decision": None,
-        "response": None,
-        "errors": [],
-        "_session_factory": getattr(request.app.state, "session_factory", None),
-        "_redis_client": getattr(request.app.state, "redis_client", None),
-    }
 
-    final = await search_graph.ainvoke(
-        initial,
-        config={"run_name": f"search:{payload.user_id}", "recursion_limit": 15},
+@router.post("", response_model=FrontendResponse)
+async def search(
+    req: SearchReq, uid: str = Depends(current_user_id)
+) -> FrontendResponse:
+    graph = get_graph()
+    out = await graph.ainvoke(
+        {
+            "request_user_id": uid,
+            "request_session_id": req.session_id,
+            "messages": [HumanMessage(content=req.message)],
+            "clarify_count": 0,
+            "fallback_triggered": False,
+            "errors": [],
+        },
+        config={"recursion_limit": 15},
     )
-    return SearchResponseDto.model_validate(final["response"].model_dump())
+    rsp: FrontendResponse = out["response"]
+    rsp.session_id = out.get("request_session_id")
+    return rsp
