@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import logging
 from typing import AsyncGenerator
 
 import redis.asyncio as aioredis
@@ -29,6 +30,12 @@ from backend.db.models import Base
 from backend.schemas.common import HealthResponse
 from backend.services.recommendation_service import RecommendationService
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger("faresniper.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -54,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await redis_client.ping()
             redis_ok = True
         except Exception:
+            logger.exception("redis_ping_failed")
             redis_ok = False
 
     if engine:
@@ -61,6 +69,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
         except Exception:
+            logger.exception("database_init_failed")
             pass
 
     session_factory = (
@@ -75,6 +84,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     scheduler = build_scheduler()
     scheduler.start()
+    logger.info(
+        "app_startup graph_compiled=%s redis_ok=%s postgres_configured=%s scheduler_running=%s",
+        app.state.graph_compiled,
+        redis_ok,
+        bool(engine),
+        scheduler.running,
+    )
 
     app.state.engine = engine
     app.state.redis_client = redis_client

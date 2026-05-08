@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 from langchain_core.messages import ToolMessage
 
 from backend.application.graph.tools import load_available_tools
 
 INJECT_USER_ID_TOOLS = {"set_alert", "get_preferences"}
+logger = logging.getLogger("faresniper.graph.tool_router")
 
 
 async def tool_router(state: dict) -> dict:
@@ -16,8 +19,15 @@ async def tool_router(state: dict) -> dict:
     delta: dict = {"messages": out_msgs}
 
     for tc in last.tool_calls or []:
+        request_id = state.get("request_id", "")
         tool = tools_by_name.get(tc["name"])
         if tool is None:
+            logger.warning(
+                "tool_missing request_id=%s tool=%s user_id=%s",
+                request_id,
+                tc["name"],
+                state.get("request_user_id", ""),
+            )
             out_msgs.append(
                 ToolMessage(
                     content=f'{{"error":"tool {tc["name"]} not implemented yet"}}',
@@ -34,7 +44,31 @@ async def tool_router(state: dict) -> dict:
             injected_key = "injected_user_id" if tc["name"] == "set_alert" else "user_id"
             args[injected_key] = state.get("request_user_id", "")
 
-        result = await tool.ainvoke(args)
+        logger.info(
+            "tool_start request_id=%s tool=%s user_id=%s args_keys=%s",
+            request_id,
+            tc["name"],
+            state.get("request_user_id", ""),
+            sorted(args.keys()),
+        )
+        try:
+            result = await tool.ainvoke(args)
+        except Exception:
+            logger.exception(
+                "tool_failed request_id=%s tool=%s user_id=%s args_keys=%s",
+                request_id,
+                tc["name"],
+                state.get("request_user_id", ""),
+                sorted(args.keys()),
+            )
+            raise
+        logger.info(
+            "tool_done request_id=%s tool=%s user_id=%s result_type=%s",
+            request_id,
+            tc["name"],
+            state.get("request_user_id", ""),
+            type(result).__name__,
+        )
         out_msgs.append(
             ToolMessage(content=str(result), tool_call_id=tc["id"], name=tc["name"])
         )
