@@ -1,40 +1,35 @@
-"""
-Step 8 Memory API 测试
-"""
+"""Memory API regression tests (JWT auth)."""
 from __future__ import annotations
 
-import pytest
 
-
-async def test_get_memory_returns_200(client):
-    resp = await client.get("/api/memory", params={"user_id": "demo-user"})
+async def test_get_memory_returns_200(seeded_pg, client, valid_jwt_for_u1):
+    resp = await client.get(
+        "/api/memory", headers={"authorization": f"Bearer {valid_jwt_for_u1}"}
+    )
     assert resp.status_code == 200
 
 
-async def test_get_memory_schema(client):
-    """响应符合 MemoryResponseDto 结构，含 memories 字段。"""
-    from backend.schemas.memory import MemoryResponseDto
+async def test_get_memory_schema(seeded_pg, client, valid_jwt_for_u1):
+    resp = await client.get(
+        "/api/memory", headers={"authorization": f"Bearer {valid_jwt_for_u1}"}
+    )
+    body = resp.json()
+    assert "memories" in body
+    assert "query_history" in body
 
-    resp = await client.get("/api/memory", params={"user_id": "demo-user"})
-    dto = MemoryResponseDto.model_validate(resp.json())
-    assert dto.user_id == "demo-user"
-    assert hasattr(dto, "memories")
 
-
-async def test_patch_memory(client):
-    """PATCH /memory 更新偏好后能读到变更。"""
-    resp = await client.patch("/api/memory", json={
-        "user_id": "demo-user",
-        "field": "price_anchor",
-        "value": 3000,
-        "source": "manual",
-    })
+async def test_patch_memory(seeded_pg, client, valid_jwt_for_u1):
+    resp = await client.patch(
+        "/api/memory",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        json={"field": "price_anchor", "value": 3000},
+    )
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["user_id"] == "demo-user"
 
 
-async def test_delete_memory_field(client):
-    """DELETE /memory/{field} 删除指定偏好字段返回 200。"""
-    resp = await client.delete("/api/memory/price_anchor", params={"user_id": "demo-user"})
-    assert resp.status_code == 200
+async def test_delete_memory_field(seeded_pg, client, valid_jwt_for_u1):
+    resp = await client.delete(
+        "/api/memory/price_anchor",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+    )
+    assert resp.status_code == 204
