@@ -21,6 +21,7 @@ from backend.api.session import router as session_router
 from backend.api.track_jump import router as track_jump_router
 from backend.application.graph.factory import get_graph
 from backend.config import settings
+from backend.workers.scheduler import build_scheduler
 from backend.db.models import Base
 from backend.schemas.common import HealthResponse
 from backend.services.recommendation_service import RecommendationService
@@ -69,13 +70,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         redis_client=redis_client,
     )
 
+    scheduler = build_scheduler()
+    scheduler.start()
+
     app.state.engine = engine
     app.state.redis_client = redis_client
     app.state.redis_ok = redis_ok
     app.state.session_factory = session_factory
     app.state.recommendation_service = recommendation_service
+    app.state.scheduler = scheduler
 
     yield
+
+    scheduler.shutdown(wait=False)
 
     if redis_client:
         try:
