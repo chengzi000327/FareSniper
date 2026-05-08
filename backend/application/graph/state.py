@@ -2,29 +2,38 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
+from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
-from backend.application.context.assembler import ContextEnvelope
 from backend.application.contracts.decision import DecisionResult, FrontendResponse
-from backend.application.contracts.intent import NormalizedIntent
+from backend.application.contracts.intent import SlotBundle
 from backend.application.contracts.preference import PreferenceMatchResult
 from backend.application.contracts.search import FlightSearchResult
 from backend.application.contracts.workflow import WorkflowError
 
 
-class WorkflowState(TypedDict):
+class WorkflowState(TypedDict, total=False):
+    # ── ReAct graph fields (TG-08) ──────────────────────────────────────────
+    messages: Annotated[list, add_messages]
+    accumulated_slots: SlotBundle | None
+    fallback_triggered: bool
+    alert_result: dict | None
+
+    # ── Common fields ────────────────────────────────────────────────────────
     request_user_id: str
     request_session_id: str | None
-    request_message: str
-    context: ContextEnvelope | None
     clarify_count: int
-    intent: NormalizedIntent | None
     search_result: FlightSearchResult | None
     pref_result: PreferenceMatchResult | None
     decision: DecisionResult | None
     response: FrontendResponse | None
     errors: list[WorkflowError]
+
+    # ── Legacy DAG fields (removed in TG-19) ─────────────────────────────────
+    request_message: str
+    context: Any
+    intent: Any
     _session_factory: Any
     _redis_client: Any
