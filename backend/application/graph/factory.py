@@ -57,17 +57,36 @@ search_graph = build_search_graph()
 _compiled_graph = None
 
 
-def build_graph():
-    """Compile a fresh launch-plan graph.
+def _route_after_react(state: dict) -> str:
+    last = state["messages"][-1] if state.get("messages") else None
+    if last and getattr(last, "tool_calls", None):
+        return "tool_router"
+    return "render_response"
 
-    Today this is a no-op skeleton (entry → END through a passthrough node).
-    Exposing it now lets TG-05 · Task 1 wire it into the lifespan and TG-08
-    drop in the real ReAct loop without touching the call sites.
-    """
+
+def build_graph():
+    """Compile the ReAct agent graph: bootstrap → react ↔ tool_router → render."""
+    from backend.application.graph.nodes.bootstrap_session import bootstrap_session
+    from backend.application.graph.nodes.react_agent import react_agent
+    from backend.application.graph.nodes.tool_router import tool_router
+    from backend.application.graph.nodes.render_response import render_response
+
     sg = StateGraph(WorkflowState)
-    sg.add_node("__placeholder__", lambda state: state)
-    sg.set_entry_point("__placeholder__")
-    sg.add_edge("__placeholder__", END)
+    sg.add_node("bootstrap_session", bootstrap_session)
+    sg.add_node("react_agent", react_agent)
+    sg.add_node("tool_router", tool_router)
+    sg.add_node("render_response", render_response)
+
+    sg.set_entry_point("bootstrap_session")
+    sg.add_edge("bootstrap_session", "react_agent")
+    sg.add_conditional_edges(
+        "react_agent",
+        _route_after_react,
+        {"tool_router": "tool_router", "render_response": "render_response"},
+    )
+    sg.add_edge("tool_router", "react_agent")
+    sg.add_edge("render_response", END)
+
     return sg.compile()
 
 
