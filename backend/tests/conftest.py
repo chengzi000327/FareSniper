@@ -372,3 +372,37 @@ def stub_realtime(monkeypatch):
         monkeypatch.setattr(sf, "scrape_realtime", _stub)
     except ImportError:
         pass
+
+
+@pytest.fixture
+def stub_playwright(monkeypatch):
+    """Replace _launch_browser with a FakeBrowser so scrapers never start Chromium.
+
+    FakeBrowser.new_page().content() returns '<html></html>', which causes each
+    scraper's _parse() to take the deterministic placeholder branch and tag
+    every deal with source='fake'.  multi_platform.scrape_all_routes then
+    refuses to write those into flight_cache.
+    """
+    import backend.infrastructure.scrapers.base_scraper as bs
+
+    class _FakeBrowser:
+        class _FakePage:
+            async def goto(self, url: str, **kwargs) -> None:
+                pass
+
+            async def wait_for_selector(self, selector: str, **kwargs) -> None:
+                pass
+
+            async def content(self) -> str:
+                return "<html></html>"
+
+        async def new_page(self):
+            return self._FakePage()
+
+        async def close(self) -> None:
+            pass
+
+    async def _fake_launch():
+        return _FakeBrowser()
+
+    monkeypatch.setattr(bs, "_browser_factory", _fake_launch)
