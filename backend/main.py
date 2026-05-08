@@ -22,6 +22,7 @@ from backend.api.session import router as session_router
 from backend.api.flight_status import router as flight_status_router
 from backend.api.track import router as track_router
 from backend.infrastructure.observability.latency_mw import record_latency
+from backend.infrastructure.redis import session_store
 from backend.api.track_jump import router as track_jump_router
 from backend.application.graph.factory import get_graph
 from backend.config import settings
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if settings.redis_url
         else None
     )
+    session_store._pool = redis_client
 
     redis_ok = False
     if redis_client is not None:
@@ -108,6 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await redis_client.aclose()
         except Exception:
             pass
+    session_store._pool = None
     if engine:
         try:
             await engine.dispose()

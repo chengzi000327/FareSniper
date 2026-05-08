@@ -32,3 +32,14 @@ async def test_bootstrap_restores_accumulated_slots(fake_redis, monkeypatch):
     state = {"request_user_id": "u1", "request_session_id": "s_existing", "messages": []}
     out = await bootstrap_session(state)
     assert out["accumulated_slots"].origin == "BJS"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_degrades_when_redis_unavailable(monkeypatch):
+    import backend.infrastructure.redis.session_store as ss
+
+    monkeypatch.setattr(ss, "_pool", None)
+    state = {"request_user_id": "u1", "request_session_id": None, "messages": []}
+    out = await bootstrap_session(state)
+    assert out["request_session_id"].startswith("s_")
+    assert isinstance(out["accumulated_slots"], SlotBundle)

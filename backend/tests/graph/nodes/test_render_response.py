@@ -60,3 +60,20 @@ async def test_render_carries_fallback_in_meta():
     rsp = out["response"]
     assert rsp.meta.get("fallback_mode") is True
     assert rsp.deals == []
+
+
+@pytest.mark.asyncio
+async def test_render_accepts_react_preference_dict():
+    state = {
+        "search_result": {"deals": [{"flight_no": "MU5137", "price": 480}]},
+        "pref_result": {
+            "filtered": [{"flight_no": "MU5137", "reasons": ["符合预算"]}],
+            "boosted": [],
+        },
+        "decision": None,
+        "request_user_id": "u1",
+    }
+    out = await render_response(state)
+    rsp = out["response"]
+    assert rsp.analysis["match_score"] == 1.0
+    assert "符合预算" in rsp.analysis["matched_preferences"]

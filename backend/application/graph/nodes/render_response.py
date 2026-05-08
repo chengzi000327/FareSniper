@@ -50,8 +50,12 @@ async def render_response(state: WorkflowState) -> WorkflowState:
     prices = [c.lowest_price for c in (search_result.candidates if search_result and not isinstance(search_result, dict) else [])]
     pref_reasons: list[str] = []
     if pref_result:
-        for p in pref_result.items:
-            pref_reasons.extend(p.reasons)
+        if isinstance(pref_result, dict):
+            for p in pref_result.get("filtered", []) + pref_result.get("boosted", []):
+                pref_reasons.extend(p.get("reasons", []))
+        else:
+            for p in pref_result.items:
+                pref_reasons.extend(p.reasons)
 
     _candidates = search_result.candidates if search_result and not isinstance(search_result, dict) else []
     avg_90d_vals = [c.history_avg_90d for c in _candidates if c.history_avg_90d]
@@ -71,11 +75,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
         "lower_than_avg": lower_than_avg,
         "price_spread_pct": None,
-        "match_score": round(
-            len([p for p in (pref_result.items if pref_result else []) if p.matched])
-            / max(len(deals), 1),
-            2,
-        ),
+        "match_score": _match_score(pref_result, len(deals)),
         "within_budget": bool(decision and "符合心理价位" in decision.signals),
         "matched_preferences": list(set(pref_reasons)),
     }
@@ -130,6 +130,19 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         )
 
     return {**state, "response": resp}
+
+
+def _match_score(pref_result, deal_count: int) -> float:
+    if not pref_result:
+        return 0.0
+    if isinstance(pref_result, dict):
+        filtered = pref_result.get("filtered", [])
+        boosted = pref_result.get("boosted", [])
+        return round((len(filtered) + len(boosted)) / max(deal_count, 1), 2)
+    return round(
+        len([p for p in pref_result.items if p.matched]) / max(deal_count, 1),
+        2,
+    )
 
 
 async def _async_memory_writeback(user_id, message, intent, session_factory):

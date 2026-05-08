@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from backend.application.context.assembler import assemble_context
 from backend.application.graph.state import WorkflowState
+
+logger = logging.getLogger("faresniper.graph.bootstrap_session")
 
 
 async def bootstrap_session_context(state: WorkflowState) -> WorkflowState:
@@ -40,8 +44,16 @@ from backend.infrastructure.redis.session_store import load_slots, save_slots  #
 async def bootstrap_session(state: dict) -> dict:
     """Initialize or restore session: allocate session_id and load accumulated slots."""
     sid = state.get("request_session_id") or f"s_{uuid.uuid4().hex[:12]}"
-    slots = await load_slots(sid) or SlotBundle()
-    await save_slots(sid, slots)
+    try:
+        slots = await load_slots(sid) or SlotBundle()
+        await save_slots(sid, slots)
+    except Exception:
+        logger.exception(
+            "session_store_unavailable request_id=%s session_id=%s",
+            state.get("request_id", ""),
+            sid,
+        )
+        slots = SlotBundle()
     return {
         "request_session_id": sid,
         "accumulated_slots": slots,
