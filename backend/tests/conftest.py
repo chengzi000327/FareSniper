@@ -286,3 +286,41 @@ def valid_jwt_for_u1() -> str:
 def jwt_for():
     """Yield a factory that mints a Bearer JWT for any user_id."""
     return _mint_jwt
+
+
+@pytest_asyncio.fixture
+async def seeded_pg_with_cache(seeded_pg):
+    """seeded_pg with one BJS→SHA deal pre-loaded in flight_cache."""
+    from backend.infrastructure.db.flight_cache import write_cached_deals
+
+    await write_cached_deals(
+        origin="BJS",
+        destination="SHA",
+        depart_date="2026-05-08",
+        deals=[{"flight_no": "MU5137", "price": 480, "platform": "ctrip"}],
+    )
+    return seeded_pg
+
+
+@pytest_asyncio.fixture
+async def seeded_pg_empty(seeded_pg):
+    """seeded_pg with no flight_cache rows — forces realtime fallback."""
+    return seeded_pg
+
+
+@pytest.fixture
+def stub_realtime(monkeypatch):
+    """Replace scrape_realtime with a deterministic stub returning one deal."""
+    import backend.infrastructure.scrapers.realtime_fallback as rf
+
+    async def _stub(*, origin, destination, depart_date):
+        return [{"flight_no": "XX001", "price": 300, "platform": "stub"}]
+
+    monkeypatch.setattr(rf, "scrape_realtime", _stub)
+    # Also patch through to the tool module if it was already imported
+    try:
+        import backend.application.graph.tools.search_flights as sf
+
+        monkeypatch.setattr(sf, "scrape_realtime", _stub)
+    except ImportError:
+        pass
