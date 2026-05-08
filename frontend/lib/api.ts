@@ -1,159 +1,69 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000'
+const BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+
+function getToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem("fs_token");
+}
+
+async function ensureSession(): Promise<string> {
+  let token = getToken();
+  if (token) return token;
+  const r = await fetch(`${BASE}/api/session`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  if (!r.ok) throw new Error(`session bootstrap failed: ${r.status}`);
+  const body = await r.json();
+  window.localStorage.setItem("fs_token", body.access_token);
+  window.localStorage.setItem("fs_user_id", body.user_id);
+  return body.access_token;
+}
+
+async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = await ensureSession();
+  const r = await fetch(`${BASE}${path}`, {
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${token}`,
+      ...(init?.headers || {}),
+    },
+    ...init,
+  });
+  if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// ── Types ────────────────────────────────────────────────────────────────────
 
 export interface PriceItem {
-  name: string
-  price: number
-  lowest?: boolean
+  name: string;
+  price: number;
+  lowest?: boolean;
 }
 
 export interface DealCardDto {
-  id: string
-  system_id: string
-  platform: string
-  origin_city: string
-  origin_code: string
-  destination_city: string
-  destination_code: string
-  depart_date: string
-  airline: string
-  depart_time: string
-  arrive_time: string
-  price: number
-  tax: number
-  baggage_fee: number
-  has_baggage: boolean
-  recommend_score: string
-  prices: PriceItem[]
-  original_price?: number
-  discount_rate?: number
-  cabin?: string
-  signals: string[]
-  confidence: 'high' | 'medium' | 'low'
-  verdict: string
-  booking_url?: string
-}
-
-export interface SearchQueryDto {
-  raw_text: string
-  normalized_text: string
-  origin_city: string
-  origin_code: string
-  destination_city: string
-  destination_code: string
-  date_start: string
-  date_end: string
-  budget?: number
-}
-
-export interface SearchAnalysisDto {
-  min_price?: number
-  max_price?: number
-  avg_price?: number
-  avg_90d?: number
-  lower_than_avg?: number
-  price_spread_pct?: number
-  match_score: number
-  within_budget: boolean
-  matched_preferences: string[]
-}
-
-export interface SearchRecommendationDto {
-  action: 'buy_now' | 'watch' | 'skip'
-  text: string
-  confidence: 'high' | 'medium' | 'low'
-  signals: string[]
-}
-
-export interface ApiMeta {
-  generated_at: string
-  source?: string
-  request_id?: string
-  result_count?: number
-  fallback_mode?: boolean
-}
-
-export interface SearchResponseDto {
-  user_id: string
-  query: SearchQueryDto
-  deals: DealCardDto[]
-  analysis: SearchAnalysisDto
-  recommendation: SearchRecommendationDto
-  meta: ApiMeta
-}
-
-export interface MemoryItemDto {
-  id: string
-  field: string
-  label: string
-  value: string | number | string[]
-  value_display: string
-  source: 'manual' | 'auto'
-  updated_at: string
-}
-
-export interface QueryHistoryItemDto {
-  query: Record<string, unknown>
-  created_at: string
-}
-
-export interface ClickHistoryItemDto {
-  flight_info: Record<string, unknown>
-  created_at: string
-}
-
-export interface MemoryResponseDto {
-  user_id: string
-  memories: MemoryItemDto[]
-  query_history: QueryHistoryItemDto[]
-  click_history: ClickHistoryItemDto[]
-  meta: ApiMeta
-}
-
-export interface RecommendationCardDto {
-  id: string
-  title: string
-  reason: string
-  query_hint: string
-  tags: string[]
-  preview_deal?: DealCardDto
-}
-
-export interface RecommendationsResponseDto {
-  user_id: string
-  cards: RecommendationCardDto[]
-  meta: ApiMeta
-}
-
-export const api = {
-  search: (message: string, userId = 'demo-user'): Promise<SearchResponseDto> =>
-    fetch(`${BASE}/api/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, message }),
-    }).then((r) => r.json()),
-
-  getMemory: (userId = 'demo-user'): Promise<MemoryResponseDto> =>
-    fetch(`${BASE}/api/memory?user_id=${userId}`).then((r) => r.json()),
-
-  patchMemory: (
-    userId: string,
-    field: string,
-    value: string | number | string[],
-    source: 'manual' | 'auto' = 'manual',
-  ): Promise<MemoryResponseDto> =>
-    fetch(`${BASE}/api/memory`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, field, value, source }),
-    }).then((r) => r.json()),
-
-  deleteMemoryField: (userId: string, field: string): Promise<MemoryResponseDto> =>
-    fetch(`${BASE}/api/memory/${field}?user_id=${userId}`, {
-      method: 'DELETE',
-    }).then((r) => r.json()),
-
-  getRecommendations: (userId = 'demo-user'): Promise<RecommendationsResponseDto> =>
-    fetch(`${BASE}/api/recommendations?user_id=${userId}`).then((r) => r.json()),
+  id: string;
+  system_id: string;
+  platform: string;
+  origin_city: string;
+  origin_code: string;
+  destination_city: string;
+  destination_code: string;
+  depart_date: string;
+  airline: string;
+  depart_time: string;
+  arrive_time: string;
+  price: number;
+  tax: number;
+  baggage_fee: number;
+  has_baggage: boolean;
+  recommend_score: string;
+  prices: PriceItem[];
+  original_price?: number;
+  discount_rate?: number;
+  cabin?: string;
+  signals: string[];
 }
 
 export interface ChatSearchRequest {
@@ -169,15 +79,79 @@ export interface FallbackDirective {
 
 export interface ChatSearchResponse {
   session_id: string;
-  recommendation?: { text: string };
+  deals?: DealCardDto[];
+  recommendation?: { text: string; action?: string; confidence?: string };
   fallback?: FallbackDirective | null;
 }
 
+// ── API clients ──────────────────────────────────────────────────────────────
+
 export const searchApi = {
-  search: (req: ChatSearchRequest): Promise<ChatSearchResponse> =>
-    fetch(`${BASE}/api/search`, {
+  search: (body: { session_id: string | null; message: string }) =>
+    http<ChatSearchResponse>("/api/search", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-    }).then((r) => r.json()),
+      body: JSON.stringify(body),
+    }),
+};
+
+export const memoryApi = {
+  get: () => http<{ memories: unknown[]; query_history: unknown[] }>("/api/memory"),
+  patch: (body: { field: string; value: unknown }) =>
+    http("/api/memory", { method: "PATCH", body: JSON.stringify(body) }),
+  del: (field: string) =>
+    http(`/api/memory/${encodeURIComponent(field)}`, { method: "DELETE" }),
+};
+
+export const recApi = {
+  list: () => http<{ personalized: boolean; cards: unknown[] }>("/api/recommendations"),
+};
+
+export const alertsApi = {
+  create: (body: {
+    origin: string;
+    destination: string;
+    depart_date: string;
+    target_price: number;
+  }) => http("/api/alerts", { method: "POST", body: JSON.stringify(body) }),
+  list: () => http<{ alerts: unknown[] }>("/api/alerts"),
+};
+
+export const authApi = {
+  requestOtp: (phone: string) =>
+    fetch(`${BASE}/api/auth/otp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ phone }),
+    }),
+  verify: async (phone: string, code: string) => {
+    const token = getToken();
+    const r = await fetch(`${BASE}/api/auth/verify`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ phone, code }),
+    });
+    if (!r.ok) throw new Error(`verify failed: ${r.status}`);
+    const body = await r.json();
+    window.localStorage.setItem("fs_token", body.access_token);
+    window.localStorage.setItem("fs_user_id", body.user_id);
+    return body as { access_token: string; user_id: string };
+  },
+};
+
+export const priceHistoryApi = {
+  get: (origin: string, destination: string, days = 30) =>
+    http<{ route: string; points: { at: string; price: number }[] }>(
+      `/api/price_history?origin=${origin}&destination=${destination}&days=${days}`
+    ),
+};
+
+export const pushApi = {
+  saveSubscription: (subscription: PushSubscriptionJSON) =>
+    http("/api/push/subscriptions", {
+      method: "POST",
+      body: JSON.stringify({ subscription }),
+    }),
 };
