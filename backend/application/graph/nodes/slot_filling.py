@@ -72,6 +72,8 @@ def route_after_slot_filling(state: WorkflowState) -> str:
     )
     if definition and definition.handler_name != "search_flights":
         return "dynamic_intent_response"
+    if not definition:
+        return "dynamic_intent_response"
     return "run_slot_search"
 
 
@@ -225,6 +227,8 @@ def _dynamic_intent_text(intent_name: str | None) -> str:
         return "已识别为查看偏好意图，偏好读取接口还在接入中。"
     if intent_name == "update_preference":
         return "已识别为更新偏好意图，偏好写入接口还在接入中。"
+    if intent_name == "smalltalk":
+        return "我是 FareSniper，帮你查机票、比价、看价格信号，也可以记住你的出行偏好。"
     return "已识别到新的动态意图，对应处理器还在接入中。"
 
 

@@ -7,6 +7,33 @@ from backend.application.contracts.intent_registry import IntentDefinition
 
 DEFAULT_INTENTS: list[IntentDefinition] = [
     IntentDefinition(
+        name="smalltalk",
+        description="闲聊、问候、身份介绍和非任务型对话",
+        required_slots=[],
+        optional_slots=[],
+        slot_schema={},
+        handler_name="smalltalk",
+        keywords=[
+            "你好",
+            "您好",
+            "hello",
+            "hi",
+            "你是谁",
+            "你叫什么",
+            "介绍一下",
+            "你能做什么",
+            "谢谢",
+            "再见",
+        ],
+        examples=[
+            "你是谁？",
+            "你好",
+            "你能做什么",
+            "谢谢你",
+        ],
+        priority=130,
+    ),
+    IntentDefinition(
         name="search_flight",
         description="查询机票、航班和价格",
         required_slots=["origin", "destination", "depart_date"],

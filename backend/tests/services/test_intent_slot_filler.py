@@ -81,3 +81,10 @@ def test_dynamic_required_slots_drive_alert_slot_filling():
     assert slots.depart_date == "2026-05-10"
     assert slots.target_price == 500
     assert missing_required_slots(slots, DEFAULT_INTENTS) == []
+
+
+def test_smalltalk_does_not_fall_back_to_search_slots():
+    slots = fill_slots("你是谁？", intent_definitions=DEFAULT_INTENTS)
+
+    assert slots.intent == "smalltalk"
+    assert missing_required_slots(slots, DEFAULT_INTENTS) == []

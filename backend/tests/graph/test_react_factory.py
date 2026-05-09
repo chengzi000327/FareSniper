@@ -130,5 +130,38 @@ async def test_build_graph_routes_dynamic_non_search_intent(monkeypatch):
     assert result["response"].meta["handler_name"] == "set_alert"
 
 
+@pytest.mark.asyncio
+async def test_build_graph_handles_smalltalk(monkeypatch):
+    import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.slot_filling as sf
+    from backend.application.services.default_intents import DEFAULT_INTENTS
+
+    async def _fake_load(sid):
+        return None
+
+    async def _fake_save(sid, slots):
+        return None
+
+    monkeypatch.setattr(bs, "load_slots", _fake_load)
+    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
+
+    from backend.application.graph.factory import build_graph
+
+    g = build_graph()
+    result = await g.ainvoke(
+        {
+            "messages": [HumanMessage(content="你是谁？")],
+            "request_message": "你是谁？",
+            "request_user_id": "u1",
+        }
+    )
+
+    assert result["response"].deals == []
+    assert result["response"].meta["intent"] == "smalltalk"
+    assert result["response"].recommendation["action"] == "smalltalk"
+    assert "FareSniper" in result["response"].recommendation["text"]
+
+
 async def _async_value(value):
     return value

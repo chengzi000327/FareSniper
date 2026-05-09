@@ -127,7 +127,7 @@ def missing_required_slots(
     """Return missing required slots for the matched dynamic intent."""
     definitions = intent_definitions or DEFAULT_INTENTS
     if not slots or not slots.intent:
-        return list(REQUIRED_SEARCH_SLOTS)
+        return []
     required_slots = required_slots_for(definitions, slots.intent)
     if not required_slots and slots.intent == "search_flight":
         required_slots = list(REQUIRED_SEARCH_SLOTS)
@@ -207,6 +207,8 @@ def looks_like_flight_search(text: str, slots: SlotBundle | None = None) -> bool
     normalized = _normalize_text(text)
     if slots and slots.intent == "search_flight":
         return True
+    if slots and slots.intent and slots.intent != "search_flight":
+        return False
     if any(keyword in normalized for keyword in FLIGHT_KEYWORDS):
         return True
     if len(_extract_cities(normalized)) >= 2:
