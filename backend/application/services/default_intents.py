@@ -7,12 +7,12 @@ from backend.application.contracts.intent_registry import IntentDefinition
 
 DEFAULT_INTENTS: list[IntentDefinition] = [
     IntentDefinition(
-        name="smalltalk",
+        name="chitchat",
         description="闲聊、问候、身份介绍和非任务型对话",
         required_slots=[],
         optional_slots=[],
         slot_schema={},
-        handler_name="smalltalk",
+        handler_name="chitchat",
         keywords=[
             "你好",
             "您好",

@@ -227,8 +227,8 @@ def _dynamic_intent_text(intent_name: str | None) -> str:
         return "已识别为查看偏好意图，偏好读取接口还在接入中。"
     if intent_name == "update_preference":
         return "已识别为更新偏好意图，偏好写入接口还在接入中。"
-    if intent_name == "smalltalk":
-        return "我是 FareSniper，帮你查机票、比价、看价格信号，也可以记住你的出行偏好。"
+    if intent_name in {"chitchat", "smalltalk"}:
+        return "我是 FareSniper，你的机票决策助手。你可以直接告诉我出发地、目的地和时间，我会帮你比价、看价格信号，并判断现在值不值得买。"
     return "已识别到新的动态意图，对应处理器还在接入中。"
 
 

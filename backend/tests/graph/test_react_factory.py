@@ -131,7 +131,7 @@ async def test_build_graph_routes_dynamic_non_search_intent(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_build_graph_handles_smalltalk(monkeypatch):
+async def test_build_graph_handles_chitchat(monkeypatch):
     import backend.application.graph.nodes.bootstrap_session as bs
     import backend.application.graph.nodes.slot_filling as sf
     from backend.application.services.default_intents import DEFAULT_INTENTS
@@ -158,8 +158,8 @@ async def test_build_graph_handles_smalltalk(monkeypatch):
     )
 
     assert result["response"].deals == []
-    assert result["response"].meta["intent"] == "smalltalk"
-    assert result["response"].recommendation["action"] == "smalltalk"
+    assert result["response"].meta["intent"] == "chitchat"
+    assert result["response"].recommendation["action"] == "chitchat"
     assert "FareSniper" in result["response"].recommendation["text"]
 
 

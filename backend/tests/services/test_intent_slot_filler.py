@@ -83,8 +83,8 @@ def test_dynamic_required_slots_drive_alert_slot_filling():
     assert missing_required_slots(slots, DEFAULT_INTENTS) == []
 
 
-def test_smalltalk_does_not_fall_back_to_search_slots():
+def test_chitchat_does_not_fall_back_to_search_slots():
     slots = fill_slots("你是谁？", intent_definitions=DEFAULT_INTENTS)
 
-    assert slots.intent == "smalltalk"
+    assert slots.intent == "chitchat"
     assert missing_required_slots(slots, DEFAULT_INTENTS) == []
