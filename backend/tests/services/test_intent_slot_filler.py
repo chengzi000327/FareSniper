@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+from datetime import date
+
+from backend.application.contracts.intent import SlotBundle
+from backend.application.services.intent_slot_filler import (
+    build_clarify_question,
+    fill_slots,
+    missing_required_slots,
+    slots_to_intent,
+)
+
+
+def test_extracts_complete_route_with_relative_date():
+    slots = fill_slots("明天北京到三亚，预算1000以内，直飞", today=date(2026, 5, 9))
+
+    assert slots.intent == "search_flight"
+    assert slots.origin == "北京"
+    assert slots.destination == "三亚"
+    assert slots.depart_date == "2026-05-10"
+    assert slots.budget == 1000
+    assert "direct_only" in slots.constraints
+    assert missing_required_slots(slots) == []
+
+
+def test_merges_multi_turn_slot_context():
+    first = fill_slots("下周末去三亚", today=date(2026, 5, 9))
+    second = fill_slots("北京", first, today=date(2026, 5, 9))
+
+    assert first.destination == "三亚"
+    assert first.origin is None
+    assert second.origin == "北京"
+    assert second.destination == "三亚"
+    assert second.depart_date == "2026-05-16"
+    assert missing_required_slots(second) == []
+
+
+def test_clarify_question_carries_known_destination():
+    slots = SlotBundle(intent="search_flight", destination="三亚", depart_date="2026-05-16")
+
+    assert build_clarify_question(slots, ["origin"]) == "5月16日去三亚，从哪里出发？"
+
+
+def test_slots_to_intent_uses_chinese_city_and_airport_code():
+    slots = SlotBundle(
+        intent="search_flight",
+        origin="北京",
+        destination="三亚",
+        depart_date="2026-05-10",
+    )
+
+    intent = slots_to_intent(slots, "明天北京到三亚")
+
+    assert intent.origin.city == "北京"
+    assert intent.origin.iata_code == "BJS"
+    assert intent.destination.city == "三亚"
+    assert intent.destination.iata_code == "SYX"
+    assert intent.date_window.start_date == "2026-05-10"
+    assert intent.parse_failed is False

@@ -1,31 +1,29 @@
-"""TG-08 Task 6: build_graph() wires the full ReAct loop."""
+"""Runtime graph wires the PRD slot-filling flow."""
 
 from __future__ import annotations
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
 
-def test_build_graph_has_react_nodes():
-    """build_graph() compiled graph contains all ReAct node names."""
+def test_build_graph_has_slot_filling_nodes():
+    """build_graph() compiled graph contains all slot-filling node names."""
     from backend.application.graph.factory import build_graph
 
     g = build_graph()
     node_names = set(g.get_graph().nodes.keys())
     assert "bootstrap_session" in node_names
-    assert "react_agent" in node_names
-    assert "tool_router" in node_names
+    assert "fill_intent_slots" in node_names
+    assert "clarify_response" in node_names
+    assert "run_slot_search" in node_names
     assert "render_response" in node_names
 
 
 @pytest.mark.asyncio
-async def test_build_graph_end_to_end_no_tool_calls(monkeypatch):
-    """Graph runs to render_response when LLM emits no tool calls."""
+async def test_build_graph_clarifies_missing_origin(monkeypatch):
+    """Graph asks for one missing slot before search."""
     import backend.application.graph.nodes.bootstrap_session as bs
-    import backend.application.graph.nodes.react_agent as ra
-    from backend.application.graph.nodes.bootstrap_session import SlotBundle
 
-    # Stub Redis calls in bootstrap_session
     async def _fake_load(sid):
         return None
 
@@ -35,25 +33,61 @@ async def test_build_graph_end_to_end_no_tool_calls(monkeypatch):
     monkeypatch.setattr(bs, "load_slots", _fake_load)
     monkeypatch.setattr(bs, "save_slots", _fake_save)
 
-    class _NoToolChat:
-        model = "stub"
+    from backend.application.graph.factory import build_graph
 
-        def bind_tools(self, _tools):
-            return self
+    g = build_graph()
+    result = await g.ainvoke(
+        {
+            "messages": [HumanMessage(content="明天去三亚")],
+            "request_message": "明天去三亚",
+            "request_user_id": "u1",
+        }
+    )
+    assert "response" in result
+    assert result["response"] is not None
+    assert result["response"].deals == []
+    assert result["response"].meta["missing_slots"] == ["origin"]
+    assert "从哪里出发" in result["response"].recommendation["text"]
 
-        async def ainvoke(self, _messages):
-            return AIMessage(content="没有找到相关航班")
 
-    monkeypatch.setattr(ra, "build_chat_model", lambda role: _NoToolChat())
+@pytest.mark.asyncio
+async def test_build_graph_searches_when_slots_complete(monkeypatch):
+    """Graph calls search only after required slots are complete."""
+    import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.slot_filling as sf
+
+    async def _fake_load(sid):
+        return None
+
+    async def _fake_save(sid, slots):
+        return None
+
+    async def _fake_search(args):
+        return {
+            "deals": [{"flight_no": "MU5137", "price": 480}],
+            "source": "cache",
+        }
+
+    class _FakeSearchTool:
+        async def ainvoke(self, args):
+            return await _fake_search(args)
+
+    monkeypatch.setattr(bs, "load_slots", _fake_load)
+    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(sf, "search_flights", _FakeSearchTool())
 
     from backend.application.graph.factory import build_graph
 
     g = build_graph()
     result = await g.ainvoke(
         {
-            "messages": [HumanMessage(content="查一下北京到上海的航班")],
+            "messages": [HumanMessage(content="明天北京到三亚")],
+            "request_message": "明天北京到三亚",
             "request_user_id": "u1",
         }
     )
-    assert "response" in result
-    assert result["response"] is not None
+
+    assert result["response"].deals == [{"flight_no": "MU5137", "price": 480}]
+    assert result["response"].query["origin_city"] == "北京"
+    assert result["response"].query["destination_city"] == "三亚"
+    assert result["response"].meta["source"] == "cache"

@@ -4,20 +4,21 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from backend.application.graph.nodes.bootstrap_session import bootstrap_session_context
-from backend.application.graph.nodes.clarify import clarify_response
-from backend.application.graph.nodes.fetch_flights import run_flight_search
-from backend.application.graph.nodes.judge_value import synthesize_decision
-from backend.application.graph.nodes.match_preferences import run_preference_match
-from backend.application.graph.nodes.parse_intent import (
-    parse_user_intent,
-    route_after_intent,
-)
-from backend.application.graph.nodes.render_response import render_response
 from backend.application.graph.state import WorkflowState
 
 
 def build_search_graph():
+    from backend.application.graph.nodes.bootstrap_session import bootstrap_session_context
+    from backend.application.graph.nodes.clarify import clarify_response
+    from backend.application.graph.nodes.fetch_flights import run_flight_search
+    from backend.application.graph.nodes.judge_value import synthesize_decision
+    from backend.application.graph.nodes.match_preferences import run_preference_match
+    from backend.application.graph.nodes.parse_intent import (
+        parse_user_intent,
+        route_after_intent,
+    )
+    from backend.application.graph.nodes.render_response import render_response
+
     graph = StateGraph(WorkflowState)
 
     graph.add_node("bootstrap_session_context", bootstrap_session_context)
@@ -44,7 +45,27 @@ def build_search_graph():
     return graph.compile()
 
 
-search_graph = build_search_graph()
+class _LazySearchGraph:
+    """Legacy DAG wrapper that avoids LLM initialization during module import."""
+
+    _compiled = None
+
+    def _get(self):
+        if self._compiled is None:
+            self._compiled = build_search_graph()
+        return self._compiled
+
+    async def ainvoke(self, *args, **kwargs):
+        return await self._get().ainvoke(*args, **kwargs)
+
+    def invoke(self, *args, **kwargs):
+        return self._get().invoke(*args, **kwargs)
+
+    def get_graph(self, *args, **kwargs):
+        return self._get().get_graph(*args, **kwargs)
+
+
+search_graph = _LazySearchGraph()
 
 
 # ── Launch-plan ReAct factory (TG-05 · Task 4) ──────────────────────────────
@@ -65,26 +86,35 @@ def _route_after_react(state: dict) -> str:
 
 
 def build_graph():
-    """Compile the ReAct agent graph: bootstrap → react ↔ tool_router → render."""
+    """Compile the PRD slot-filling graph: bootstrap → fill slots → clarify/search → render."""
     from backend.application.graph.nodes.bootstrap_session import bootstrap_session
-    from backend.application.graph.nodes.react_agent import react_agent
-    from backend.application.graph.nodes.tool_router import tool_router
     from backend.application.graph.nodes.render_response import render_response
+    from backend.application.graph.nodes.slot_filling import (
+        fill_intent_slots,
+        route_after_slot_filling,
+        run_slot_search,
+        slot_clarify_response,
+    )
 
     sg = StateGraph(WorkflowState)
     sg.add_node("bootstrap_session", bootstrap_session)
-    sg.add_node("react_agent", react_agent)
-    sg.add_node("tool_router", tool_router)
+    sg.add_node("fill_intent_slots", fill_intent_slots)
+    sg.add_node("clarify_response", slot_clarify_response)
+    sg.add_node("run_slot_search", run_slot_search)
     sg.add_node("render_response", render_response)
 
     sg.set_entry_point("bootstrap_session")
-    sg.add_edge("bootstrap_session", "react_agent")
+    sg.add_edge("bootstrap_session", "fill_intent_slots")
     sg.add_conditional_edges(
-        "react_agent",
-        _route_after_react,
-        {"tool_router": "tool_router", "render_response": "render_response"},
+        "fill_intent_slots",
+        route_after_slot_filling,
+        {
+            "clarify_response": "clarify_response",
+            "run_slot_search": "run_slot_search",
+        },
     )
-    sg.add_edge("tool_router", "react_agent")
+    sg.add_edge("clarify_response", END)
+    sg.add_edge("run_slot_search", "render_response")
     sg.add_edge("render_response", END)
 
     return sg.compile()

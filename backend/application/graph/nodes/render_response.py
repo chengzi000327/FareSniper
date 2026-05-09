@@ -21,10 +21,12 @@ async def render_response(state: WorkflowState) -> WorkflowState:
     pref_result = state.get("pref_result")
 
     deals = []
+    result_source = "mock"
     if search_result:
         # New ReAct graph: search_result is a dict from tool_router
         if isinstance(search_result, dict):
             deals = list(search_result.get("deals", []))
+            result_source = search_result.get("source", "tool")
         else:
             # Old DAG graph: search_result is FlightSearchResult with .candidates
             for c in search_result.candidates:
@@ -47,7 +49,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 ]
                 deals.append(deal)
 
-    prices = [c.lowest_price for c in (search_result.candidates if search_result and not isinstance(search_result, dict) else [])]
+    prices = _extract_prices(search_result, deals)
     pref_reasons: list[str] = []
     if pref_result:
         if isinstance(pref_result, dict):
@@ -102,6 +104,20 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "confidence": decision.confidence,
             "signals": decision.signals,
         }
+    elif deals:
+        recommendation = {
+            "action": "watch",
+            "text": f"为你找到 {len(deals)} 个航班，最低价 ¥{min(prices)}。" if prices else f"为你找到 {len(deals)} 个航班。",
+            "confidence": "medium",
+            "signals": [],
+        }
+    elif search_result:
+        recommendation = {
+            "action": "watch",
+            "text": "暂时没有找到符合条件的航班，可以换个日期或路线再试。",
+            "confidence": "low",
+            "signals": ["no_deals"],
+        }
 
     resp = FrontendResponse(
         user_id=state.get("request_user_id", ""),
@@ -111,10 +127,11 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         recommendation=recommendation,
         meta={
             "generated_at": _now(),
-            "source": "mock",
+            "source": result_source,
             "request_id": str(uuid.uuid4()),
             "result_count": len(deals),
             "fallback_mode": state.get("fallback_triggered", False),
+            "missing_slots": state.get("missing_slots", []),
         },
     )
 
@@ -123,7 +140,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         asyncio.create_task(
             _async_memory_writeback(
                 user_id=state["request_user_id"],
-                message=state["request_message"],
+                message=state.get("request_message", ""),
                 intent=intent,
                 session_factory=session_factory,
             )
@@ -143,6 +160,23 @@ def _match_score(pref_result, deal_count: int) -> float:
         len([p for p in pref_result.items if p.matched]) / max(deal_count, 1),
         2,
     )
+
+
+def _extract_prices(search_result, deals: list[dict]) -> list[int]:
+    if search_result and not isinstance(search_result, dict):
+        return [c.lowest_price for c in search_result.candidates]
+    prices: list[int] = []
+    for deal in deals:
+        price = deal.get("price") or deal.get("lowest_price")
+        if isinstance(price, (int, float)):
+            prices.append(int(price))
+            continue
+        nested_prices = deal.get("prices") or []
+        for item in nested_prices:
+            nested_price = item.get("price") if isinstance(item, dict) else None
+            if isinstance(nested_price, (int, float)):
+                prices.append(int(nested_price))
+    return prices
 
 
 async def _async_memory_writeback(user_id, message, intent, session_factory):

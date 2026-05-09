@@ -20,6 +20,7 @@ class WorkflowState(TypedDict, total=False):
     accumulated_slots: SlotBundle | None
     fallback_triggered: bool
     alert_result: dict | None
+    missing_slots: list[str]
 
     # ── Common fields ────────────────────────────────────────────────────────
     request_user_id: str

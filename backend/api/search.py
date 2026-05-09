@@ -41,6 +41,7 @@ async def search(
                 "request_id": request_id,
                 "request_user_id": uid,
                 "request_session_id": req.session_id,
+                "request_message": req.message,
                 "messages": [HumanMessage(content=req.message)],
                 "clarify_count": 0,
                 "fallback_triggered": False,
