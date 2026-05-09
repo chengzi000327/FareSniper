@@ -20,3 +20,25 @@ def test_judge_role_uses_model_judge_env(monkeypatch):
     m = build_chat_model(role="judge")
     assert getattr(m, "model", None) == "deepseek-chat-test" or getattr(m, "model_name", None) == "deepseek-chat-test"
     get_settings.cache_clear()
+
+
+def test_chat_model_disables_thinking_by_default(monkeypatch):
+    monkeypatch.setenv("MODEL_AGENT", "deepseek-v4-flash")
+    monkeypatch.setenv("MODEL_BASE_URL", "https://example/v1")
+    monkeypatch.setenv("MODEL_API_KEY", "sk-test")
+    monkeypatch.delenv("MODEL_THINKING", raising=False)
+    get_settings.cache_clear()
+    m = build_chat_model(role="agent")
+    assert m.extra_body == {"thinking": {"type": "disabled"}}
+    get_settings.cache_clear()
+
+
+def test_chat_model_allows_thinking_env_override(monkeypatch):
+    monkeypatch.setenv("MODEL_AGENT", "deepseek-v4-flash")
+    monkeypatch.setenv("MODEL_BASE_URL", "https://example/v1")
+    monkeypatch.setenv("MODEL_API_KEY", "sk-test")
+    monkeypatch.setenv("MODEL_THINKING", "enabled")
+    get_settings.cache_clear()
+    m = build_chat_model(role="agent")
+    assert m.extra_body == {"thinking": {"type": "enabled"}}
+    get_settings.cache_clear()

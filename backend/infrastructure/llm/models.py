@@ -36,9 +36,14 @@ def _build(model_name: str):
 
     from langchain_openai import ChatOpenAI
 
+    extra_body = None
+    if s.model_thinking in ("enabled", "disabled"):
+        extra_body = {"thinking": {"type": s.model_thinking}}
+
     return ChatOpenAI(
         model=model_name,
         api_key=s.model_api_key,
         base_url=s.model_base_url,
         temperature=0.2,
+        extra_body=extra_body,
     )

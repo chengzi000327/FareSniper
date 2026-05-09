@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     model_intent: str = Field(default="qwen-turbo")
     model_judge: str = Field(default="qwen-plus")
     model_agent: str = Field(default="qwen-plus")
+    model_thinking: str = Field(default="disabled")
 
     llm_provider: str = Field(default="mock")
     llm_api_key: str = Field(default="")
