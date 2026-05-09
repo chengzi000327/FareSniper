@@ -93,6 +93,7 @@ def build_graph():
         fill_intent_slots,
         route_after_slot_filling,
         run_slot_search,
+        dynamic_intent_response,
         slot_clarify_response,
     )
 
@@ -100,6 +101,7 @@ def build_graph():
     sg.add_node("bootstrap_session", bootstrap_session)
     sg.add_node("fill_intent_slots", fill_intent_slots)
     sg.add_node("clarify_response", slot_clarify_response)
+    sg.add_node("dynamic_intent_response", dynamic_intent_response)
     sg.add_node("run_slot_search", run_slot_search)
     sg.add_node("render_response", render_response)
 
@@ -111,9 +113,11 @@ def build_graph():
         {
             "clarify_response": "clarify_response",
             "run_slot_search": "run_slot_search",
+            "dynamic_intent_response": "dynamic_intent_response",
         },
     )
     sg.add_edge("clarify_response", END)
+    sg.add_edge("dynamic_intent_response", END)
     sg.add_edge("run_slot_search", "render_response")
     sg.add_edge("render_response", END)
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 
 from backend.application.contracts.intent import SlotBundle
+from backend.application.services.default_intents import DEFAULT_INTENTS
+from backend.application.services.intent_registry import match_intent
 from backend.application.services.intent_slot_filler import (
     build_clarify_question,
     fill_slots,
@@ -57,3 +59,25 @@ def test_slots_to_intent_uses_chinese_city_and_airport_code():
     assert intent.destination.iata_code == "SYX"
     assert intent.date_window.start_date == "2026-05-10"
     assert intent.parse_failed is False
+
+
+def test_dynamic_registry_matches_alert_before_search():
+    match = match_intent("北京到三亚低于500提醒我", DEFAULT_INTENTS)
+
+    assert match is not None
+    assert match.intent_name == "set_alert"
+
+
+def test_dynamic_required_slots_drive_alert_slot_filling():
+    slots = fill_slots(
+        "明天北京到三亚低于500提醒我",
+        today=date(2026, 5, 9),
+        intent_definitions=DEFAULT_INTENTS,
+    )
+
+    assert slots.intent == "set_alert"
+    assert slots.origin == "北京"
+    assert slots.destination == "三亚"
+    assert slots.depart_date == "2026-05-10"
+    assert slots.target_price == 500
+    assert missing_required_slots(slots, DEFAULT_INTENTS) == []

@@ -8,6 +8,7 @@ from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
 from backend.application.contracts.decision import DecisionResult, FrontendResponse
+from backend.application.contracts.intent_registry import IntentDefinition
 from backend.application.contracts.intent import SlotBundle
 from backend.application.contracts.preference import PreferenceMatchResult
 from backend.application.contracts.search import FlightSearchResult
@@ -21,6 +22,7 @@ class WorkflowState(TypedDict, total=False):
     fallback_triggered: bool
     alert_result: dict | None
     missing_slots: list[str]
+    intent_definitions: list[IntentDefinition]
 
     # ── Common fields ────────────────────────────────────────────────────────
     request_user_id: str

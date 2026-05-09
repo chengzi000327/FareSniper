@@ -14,24 +14,21 @@ from backend.application.contracts.intent import (
     NormalizedIntent,
     SlotBundle,
 )
+from backend.application.contracts.intent_registry import IntentDefinition
+from backend.application.services.default_intents import DEFAULT_INTENTS
+from backend.application.services.intent_registry import (
+    find_intent_definition,
+    match_intent,
+    required_slots_for,
+)
 from backend.utils.airport_codes import CITY_TO_AIRPORT, city_to_code
 
 REQUIRED_SEARCH_SLOTS = ("origin", "destination", "depart_date")
-FLIGHT_KEYWORDS = (
-    "机票",
-    "航班",
-    "飞机",
-    "飞",
-    "出发",
-    "起飞",
-    "到",
-    "去",
-    "回",
-    "往返",
-    "单程",
-    "票",
-    "价格",
-    "便宜",
+FLIGHT_KEYWORDS = tuple(
+    keyword
+    for definition in DEFAULT_INTENTS
+    if definition.name == "search_flight"
+    for keyword in definition.keywords
 )
 ORIGIN_MARKERS = ("从", "自", "由")
 DESTINATION_MARKERS = ("到", "去", "飞", "回")
@@ -56,12 +53,23 @@ def fill_slots(
     accumulated: SlotBundle | None = None,
     *,
     today: date | None = None,
+    intent_definitions: list[IntentDefinition] | None = None,
 ) -> SlotBundle:
     """Extract slots from the latest user text and merge with session slots."""
     base = accumulated or SlotBundle()
-    extracted = extract_slots(text, base, today=today)
+    definitions = intent_definitions or DEFAULT_INTENTS
+    intent_match = match_intent(text, definitions, base)
+    extracted = extract_slots(
+        text,
+        base,
+        today=today,
+        intent_definitions=definitions,
+        matched_intent=intent_match.intent_name if intent_match else None,
+    )
     merged = merge_slot_bundle(base, extracted)
-    if merged.intent is None and looks_like_flight_search(text, merged):
+    if merged.intent is None and intent_match:
+        merged = replace(merged, intent=intent_match.intent_name)
+    elif merged.intent is None and looks_like_flight_search(text, merged):
         merged = replace(merged, intent="search_flight")
     return merged
 
@@ -71,22 +79,30 @@ def extract_slots(
     accumulated: SlotBundle | None = None,
     *,
     today: date | None = None,
+    intent_definitions: list[IntentDefinition] | None = None,
+    matched_intent: str | None = None,
 ) -> SlotBundle:
     """Extract only the newly mentioned slots from one user message."""
     normalized = _normalize_text(text)
     current = accumulated or SlotBundle()
+    definitions = intent_definitions or DEFAULT_INTENTS
+    intent_match = match_intent(normalized, definitions, current)
+    intent_name = matched_intent or (intent_match.intent_name if intent_match else None)
     cities = _extract_cities(normalized)
     origin, destination = _infer_origin_destination(normalized, cities, current)
     depart_date = _extract_depart_date(normalized, today=today)
     budget = _extract_budget(normalized)
+    target_price = _extract_target_price(normalized)
     constraints = _extract_constraints(normalized)
 
     return SlotBundle(
-        intent="search_flight" if looks_like_flight_search(normalized, current) else None,
+        intent=intent_name
+        or ("search_flight" if looks_like_flight_search(normalized, current) else None),
         origin=origin,
         destination=destination,
         depart_date=depart_date,
         budget=budget,
+        target_price=target_price,
         constraints=constraints,
     )
 
@@ -104,19 +120,31 @@ def merge_slot_bundle(accumulated: SlotBundle, new_slots: SlotBundle) -> SlotBun
     return SlotBundle(**data)
 
 
-def missing_required_slots(slots: SlotBundle | None) -> list[str]:
-    """Return missing required slots for search_flight in PRD order."""
-    if not slots or slots.intent != "search_flight":
+def missing_required_slots(
+    slots: SlotBundle | None,
+    intent_definitions: list[IntentDefinition] | None = None,
+) -> list[str]:
+    """Return missing required slots for the matched dynamic intent."""
+    definitions = intent_definitions or DEFAULT_INTENTS
+    if not slots or not slots.intent:
         return list(REQUIRED_SEARCH_SLOTS)
+    required_slots = required_slots_for(definitions, slots.intent)
+    if not required_slots and slots.intent == "search_flight":
+        required_slots = list(REQUIRED_SEARCH_SLOTS)
     missing: list[str] = []
-    for name in REQUIRED_SEARCH_SLOTS:
+    for name in required_slots:
         if not getattr(slots, name, None):
             missing.append(name)
     return missing
 
 
-def slots_to_intent(slots: SlotBundle, raw_text: str) -> NormalizedIntent:
+def slots_to_intent(
+    slots: SlotBundle,
+    raw_text: str,
+    intent_definitions: list[IntentDefinition] | None = None,
+) -> NormalizedIntent:
     """Convert accumulated slots into the normalized intent contract."""
+    missing = missing_required_slots(slots, intent_definitions)
     return NormalizedIntent(
         origin=_location(slots.origin),
         destination=_location(slots.destination),
@@ -125,12 +153,12 @@ def slots_to_intent(slots: SlotBundle, raw_text: str) -> NormalizedIntent:
         else None,
         budget_cny=slots.budget,
         constraints=[],
-        ambiguities=missing_required_slots(slots),
+        ambiguities=missing,
         intent_confidence=IntentConfidence.high
-        if not missing_required_slots(slots)
+        if not missing
         else IntentConfidence.medium,
         raw_text=raw_text,
-        parse_failed=slots.intent != "search_flight",
+        parse_failed=slots.intent is None,
     )
 
 
@@ -160,6 +188,17 @@ def build_clarify_question(slots: SlotBundle | None, missing: list[str]) -> str:
         elif destination:
             route = f"去{destination}"
         return f"{route}哪天出发？" if route else "哪天出发？"
+    if first == "target_price":
+        route = ""
+        if origin and destination:
+            route = f"{origin}到{destination}"
+        elif destination:
+            route = f"去{destination}"
+        return f"{route}低于多少钱提醒你？" if route else "低于多少钱提醒你？"
+    if first == "preference_value":
+        return "想让我记住什么偏好？"
+    if first == "preference_field":
+        return "想更新哪类偏好？"
     return "还差一点信息，能补充一下吗？"
 
 
@@ -175,6 +214,16 @@ def looks_like_flight_search(text: str, slots: SlotBundle | None = None) -> bool
     if _extract_depart_date(normalized) and _extract_cities(normalized):
         return True
     return False
+
+
+def intent_definition_for(
+    slots: SlotBundle | None,
+    intent_definitions: list[IntentDefinition] | None = None,
+) -> IntentDefinition | None:
+    if not slots:
+        return None
+    definitions = intent_definitions or DEFAULT_INTENTS
+    return find_intent_definition(definitions, slots.intent)
 
 
 def _normalize_text(text: str) -> str:
@@ -300,6 +349,15 @@ def _extract_budget(text: str) -> int | None:
     match = re.search(r"预算\s*(\d{2,5})", text)
     if match:
         return int(match.group(1))
+    return None
+
+
+def _extract_target_price(text: str) -> int | None:
+    match = re.search(r"(?:低于|降到|少于|不超过|到)\s*(\d{2,5})\s*元?", text)
+    if match:
+        return int(match.group(1))
+    if "提醒" in text or "蹲" in text:
+        return _extract_budget(text)
     return None
 
 

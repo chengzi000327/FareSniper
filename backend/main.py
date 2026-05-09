@@ -11,6 +11,7 @@ from fastapi.openapi.utils import get_openapi
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.__version__ import PRD_VERSION, PRODUCT_NAME, __version__
+from backend.api.admin_intents import router as admin_intents_router
 from backend.api.alerts import router as alerts_router
 from backend.api.auth import router as auth_router
 from backend.api.memory import router as memory_router
@@ -30,6 +31,9 @@ from backend.workers.scheduler import build_scheduler
 from backend.db.models import Base
 from backend.schemas.common import HealthResponse
 from backend.services.recommendation_service import RecommendationService
+
+# Register dynamic intent tables before startup create_all runs.
+import backend.infrastructure.db.intent_registry_repo  # noqa: F401,E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -183,6 +187,7 @@ def create_app() -> FastAPI:
     app.include_router(track_jump_router, prefix=settings.api_prefix)
     app.include_router(track_router, prefix=settings.api_prefix)
     app.include_router(flight_status_router, prefix=settings.api_prefix)
+    app.include_router(admin_intents_router, prefix=settings.api_prefix)
 
     return app
 

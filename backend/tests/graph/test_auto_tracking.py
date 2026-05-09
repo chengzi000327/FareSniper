@@ -10,6 +10,8 @@ async def test_intent_parsed_emitted(monkeypatch, seeded_pg):
     """Running the graph with a stubbed LLM emits INTENT_PARSED to PG."""
     import backend.application.graph.nodes.bootstrap_session as bs
     import backend.application.graph.nodes.react_agent as ra
+    import backend.application.graph.nodes.slot_filling as sf
+    from backend.application.services.default_intents import DEFAULT_INTENTS
     from backend.infrastructure.db.event_repo import count_events
     from backend.analytics.events import EventName
 
@@ -21,6 +23,7 @@ async def test_intent_parsed_emitted(monkeypatch, seeded_pg):
 
     monkeypatch.setattr(bs, "load_slots", _fake_load)
     monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
 
     class _NoToolChat:
         model = "stub"
@@ -46,6 +49,10 @@ async def test_intent_parsed_emitted(monkeypatch, seeded_pg):
         }
     )
     assert await count_events(EventName.INTENT_PARSED, user_id="u1") >= 1
+
+
+async def _async_value(value):
+    return value
 
 
 @pytest.mark.asyncio

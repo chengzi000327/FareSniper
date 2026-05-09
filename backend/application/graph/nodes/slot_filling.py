@@ -12,9 +12,11 @@ from backend.application.graph.tools.search_flights import search_flights
 from backend.application.services.intent_slot_filler import (
     build_clarify_question,
     fill_slots,
+    intent_definition_for,
     missing_required_slots,
     slots_to_intent,
 )
+from backend.application.services.intent_registry import load_intent_registry
 from backend.infrastructure.redis.session_store import save_slots
 
 logger = logging.getLogger("faresniper.graph.slot_filling")
@@ -23,9 +25,14 @@ logger = logging.getLogger("faresniper.graph.slot_filling")
 async def fill_intent_slots(state: WorkflowState) -> WorkflowState:
     """Parse intent slots from the latest turn and persist accumulated slots."""
     text = _latest_user_text(state)
-    slots = fill_slots(text, state.get("accumulated_slots"))
-    intent = slots_to_intent(slots, text)
-    missing = missing_required_slots(slots)
+    intent_definitions = await load_intent_registry()
+    slots = fill_slots(
+        text,
+        state.get("accumulated_slots"),
+        intent_definitions=intent_definitions,
+    )
+    intent = slots_to_intent(slots, text, intent_definitions)
+    missing = missing_required_slots(slots, intent_definitions)
     session_id = state.get("request_session_id")
 
     if session_id:
@@ -50,6 +57,7 @@ async def fill_intent_slots(state: WorkflowState) -> WorkflowState:
         "accumulated_slots": slots,
         "intent": intent,
         "missing_slots": missing,
+        "intent_definitions": intent_definitions,
     }
 
 
@@ -58,13 +66,22 @@ def route_after_slot_filling(state: WorkflowState) -> str:
     missing = state.get("missing_slots") or []
     if missing:
         return "clarify_response"
+    definition = intent_definition_for(
+        state.get("accumulated_slots"),
+        state.get("intent_definitions"),
+    )
+    if definition and definition.handler_name != "search_flights":
+        return "dynamic_intent_response"
     return "run_slot_search"
 
 
 async def slot_clarify_response(state: WorkflowState) -> WorkflowState:
     """Return a single-slot follow-up question and keep partial slots in meta."""
     slots = state.get("accumulated_slots")
-    missing = state.get("missing_slots") or missing_required_slots(slots)
+    missing = state.get("missing_slots") or missing_required_slots(
+        slots,
+        state.get("intent_definitions"),
+    )
     question = build_clarify_question(slots, missing)
     response = FrontendResponse(
         user_id=state.get("request_user_id", ""),
@@ -94,15 +111,56 @@ async def slot_clarify_response(state: WorkflowState) -> WorkflowState:
             "fallback_mode": False,
             "missing_slots": missing,
             "accumulated_slots": _slot_dict(slots),
+            "intent": slots.intent if slots else None,
         },
     )
     return {"messages": [AIMessage(content=question)], "response": response}
 
 
+async def dynamic_intent_response(state: WorkflowState) -> WorkflowState:
+    """Handle dynamic intents that are recognized but do not yet have a runtime handler."""
+    slots = state.get("accumulated_slots")
+    definition = intent_definition_for(slots, state.get("intent_definitions"))
+    text = _dynamic_intent_text(definition.name if definition else None)
+    response = FrontendResponse(
+        user_id=state.get("request_user_id", ""),
+        session_id=state.get("request_session_id"),
+        query=_query_from_slots(slots),
+        deals=[],
+        analysis={
+            "min_price": None,
+            "max_price": None,
+            "avg_price": None,
+            "avg_90d": None,
+            "lower_than_avg": None,
+            "price_spread_pct": None,
+            "match_score": 0.0,
+            "within_budget": False,
+            "matched_preferences": [],
+        },
+        recommendation={
+            "action": definition.handler_name if definition else "recognized_intent",
+            "text": text,
+            "confidence": "medium",
+            "signals": ["dynamic_intent_recognized"],
+        },
+        meta={
+            "source": "dynamic_intent",
+            "result_count": 0,
+            "fallback_mode": False,
+            "missing_slots": [],
+            "accumulated_slots": _slot_dict(slots),
+            "intent": definition.name if definition else None,
+            "handler_name": definition.handler_name if definition else None,
+        },
+    )
+    return {"messages": [AIMessage(content=text)], "response": response}
+
+
 async def run_slot_search(state: WorkflowState) -> WorkflowState:
     """Execute the flight-search tool from completed accumulated slots."""
     slots = state.get("accumulated_slots")
-    missing = missing_required_slots(slots)
+    missing = missing_required_slots(slots, state.get("intent_definitions"))
     if not slots or missing:
         return {"missing_slots": missing}
 
@@ -141,6 +199,7 @@ def _query_from_slots(slots) -> dict | None:
         "date_start": slots.depart_date or "",
         "date_end": slots.return_date or "",
         "budget": slots.budget,
+        "target_price": slots.target_price,
     }
 
 
@@ -154,8 +213,19 @@ def _slot_dict(slots) -> dict:
         "depart_date": slots.depart_date,
         "return_date": slots.return_date,
         "budget": slots.budget,
+        "target_price": slots.target_price,
         "constraints": slots.constraints,
     }
+
+
+def _dynamic_intent_text(intent_name: str | None) -> str:
+    if intent_name == "set_alert":
+        return "已识别为低价提醒意图，提醒创建接口还在接入中。"
+    if intent_name == "check_preference":
+        return "已识别为查看偏好意图，偏好读取接口还在接入中。"
+    if intent_name == "update_preference":
+        return "已识别为更新偏好意图，偏好写入接口还在接入中。"
+    return "已识别到新的动态意图，对应处理器还在接入中。"
 
 
 async def _track_intent(

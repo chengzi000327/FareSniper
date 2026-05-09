@@ -38,6 +38,7 @@ _REPO_MODULES = [
     "backend.infrastructure.db.price_history_repo",
     "backend.infrastructure.db.promotion_repo",
     "backend.infrastructure.db.session_meta_repo",
+    "backend.infrastructure.db.intent_registry_repo",
 ]
 for mod in _REPO_MODULES:
     try:

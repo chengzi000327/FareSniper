@@ -23,6 +23,8 @@ def test_build_graph_has_slot_filling_nodes():
 async def test_build_graph_clarifies_missing_origin(monkeypatch):
     """Graph asks for one missing slot before search."""
     import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.slot_filling as sf
+    from backend.application.services.default_intents import DEFAULT_INTENTS
 
     async def _fake_load(sid):
         return None
@@ -32,6 +34,7 @@ async def test_build_graph_clarifies_missing_origin(monkeypatch):
 
     monkeypatch.setattr(bs, "load_slots", _fake_load)
     monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
 
     from backend.application.graph.factory import build_graph
 
@@ -55,6 +58,7 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
     """Graph calls search only after required slots are complete."""
     import backend.application.graph.nodes.bootstrap_session as bs
     import backend.application.graph.nodes.slot_filling as sf
+    from backend.application.services.default_intents import DEFAULT_INTENTS
 
     async def _fake_load(sid):
         return None
@@ -74,6 +78,7 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
 
     monkeypatch.setattr(bs, "load_slots", _fake_load)
     monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
     monkeypatch.setattr(sf, "search_flights", _FakeSearchTool())
 
     from backend.application.graph.factory import build_graph
@@ -91,3 +96,39 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
     assert result["response"].query["origin_city"] == "北京"
     assert result["response"].query["destination_city"] == "三亚"
     assert result["response"].meta["source"] == "cache"
+
+
+@pytest.mark.asyncio
+async def test_build_graph_routes_dynamic_non_search_intent(monkeypatch):
+    import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.slot_filling as sf
+    from backend.application.services.default_intents import DEFAULT_INTENTS
+
+    async def _fake_load(sid):
+        return None
+
+    async def _fake_save(sid, slots):
+        return None
+
+    monkeypatch.setattr(bs, "load_slots", _fake_load)
+    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
+
+    from backend.application.graph.factory import build_graph
+
+    g = build_graph()
+    result = await g.ainvoke(
+        {
+            "messages": [HumanMessage(content="明天北京到三亚低于500提醒我")],
+            "request_message": "明天北京到三亚低于500提醒我",
+            "request_user_id": "u1",
+        }
+    )
+
+    assert result["response"].deals == []
+    assert result["response"].meta["intent"] == "set_alert"
+    assert result["response"].meta["handler_name"] == "set_alert"
+
+
+async def _async_value(value):
+    return value
