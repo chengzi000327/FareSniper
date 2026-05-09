@@ -5,7 +5,7 @@ import { motion } from 'motion/react'
 import { History, Radar, Send } from 'lucide-react'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import { RecommendationCard } from '@/components/shared-components'
-import { api } from '@/lib/api'
+import { recApi, searchApi } from '@/lib/api'
 import { dealToCardProps } from '@/lib/mappers'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
 
@@ -16,12 +16,13 @@ type Message =
 export function ChatPage() {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [inputValue, setInputValue] = React.useState('')
+  const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [recommendedQuestions, setRecommendedQuestions] = React.useState<string[]>([])
 
   React.useEffect(() => {
     const fetchQuestions = async () => {
       try {
-        const resp = await api.getRecommendations()
+        const resp = await recApi.list()
         const hints = resp.cards.map((c) => c.query_hint).filter((h): h is string => !!h)
         if (hints.length > 0) {
           setRecommendedQuestions(hints.slice(0, 4))
@@ -55,7 +56,8 @@ export function ChatPage() {
     ])
 
     try {
-      const resp = await api.search(value)
+      const resp = await searchApi.search({ message: value, session_id: sessionId })
+      setSessionId(resp.session_id ?? null)
       const deals = resp.deals ?? []
       const bestDeal = deals[0]
       const assistantText =
