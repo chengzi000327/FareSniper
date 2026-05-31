@@ -5,9 +5,17 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import (
-    Column, DateTime, ForeignKey, Integer, String, Text, delete, select,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    delete,
+    func,
+    select,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
 
 from backend.infrastructure.db.base import Base, get_session
 
@@ -49,8 +57,15 @@ class PlatformPriceSnapshot(Base):
 
 
 def _snapshot_id(f: dict[str, Any]) -> str:
-    raw = f"{f['origin_code']}|{f['destination_code']}|{f['depart_date']}|{f['flight_no']}|{f['dep_time']}"
+    raw = (
+        f"{f['origin_code']}|{f['destination_code']}|{f['depart_date']}|"
+        f"{f['flight_no']}|{f.get('dep_time', '')}"
+    )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def _advisory_lock_key(snapshot_id: str) -> int:
+    return int(hashlib.sha1(snapshot_id.encode("utf-8")).hexdigest()[:15], 16)
 
 
 async def upsert_flights(flights: list[dict[str, Any]]) -> None:
@@ -58,35 +73,52 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
     async with get_session() as s:
         for f in flights:
             sid = _snapshot_id(f)
-            await s.execute(delete(PlatformPriceSnapshot).where(PlatformPriceSnapshot.flight_snapshot_id == sid))
-            existing = await s.get(FlightSnapshot, sid)
-            if existing is None:
-                existing = FlightSnapshot(id=sid)
-                s.add(existing)
-            existing.origin_code = f["origin_code"]
-            existing.destination_code = f["destination_code"]
-            existing.depart_date = f["depart_date"]
-            existing.flight_no = f["flight_no"]
-            existing.airline = f.get("airline", "")
-            existing.dep_time = f.get("dep_time", "")
-            existing.arr_time = f.get("arr_time", "")
-            existing.duration = f.get("duration", "")
-            existing.stops = int(f.get("stops", 0))
-            existing.lowest_price = int(f.get("lowest_price", 0))
-            existing.history_avg_90d = f.get("history_avg_90d")
-            existing.history_low_90d = f.get("history_low_90d")
-            existing.crawled_at = now
-            existing.expires_at = now + CACHE_TTL
-            for idx, p in enumerate(f.get("prices", [])):
-                s.add(PlatformPriceSnapshot(
-                    id=f"{sid}-{idx}",
-                    flight_snapshot_id=sid,
-                    platform=p["platform"],
-                    price=int(p["price"]),
-                    url=p.get("url", ""),
-                    raw_payload=p.get("raw_payload"),
-                    crawled_at=now,
-                ))
+            await s.execute(select(func.pg_advisory_xact_lock(_advisory_lock_key(sid))))
+            values = {
+                "id": sid,
+                "origin_code": f["origin_code"],
+                "destination_code": f["destination_code"],
+                "depart_date": f["depart_date"],
+                "flight_no": f["flight_no"],
+                "airline": f.get("airline", ""),
+                "dep_time": f.get("dep_time", ""),
+                "arr_time": f.get("arr_time", ""),
+                "duration": f.get("duration", ""),
+                "stops": int(f.get("stops", 0)),
+                "lowest_price": int(f.get("lowest_price", 0)),
+                "history_avg_90d": f.get("history_avg_90d"),
+                "history_low_90d": f.get("history_low_90d"),
+                "crawled_at": now,
+                "expires_at": now + CACHE_TTL,
+            }
+            stmt = pg_insert(FlightSnapshot.__table__).values(**values)
+            await s.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=[FlightSnapshot.id],
+                    set_={k: v for k, v in values.items() if k != "id"},
+                )
+            )
+            await s.execute(
+                delete(PlatformPriceSnapshot).where(
+                    PlatformPriceSnapshot.flight_snapshot_id == sid
+                )
+            )
+            price_rows = [
+                {
+                    "id": f"{sid}-{idx}",
+                    "flight_snapshot_id": sid,
+                    "platform": p["platform"],
+                    "price": int(p["price"]),
+                    "url": p.get("url", ""),
+                    "raw_payload": p.get("raw_payload"),
+                    "crawled_at": now,
+                }
+                for idx, p in enumerate(f.get("prices", []))
+            ]
+            if price_rows:
+                await s.execute(
+                    pg_insert(PlatformPriceSnapshot.__table__).values(price_rows)
+                )
         await s.commit()
 
 

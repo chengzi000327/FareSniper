@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from backend.infrastructure.db.flight_snapshot_repo import upsert_flights, read_deals
@@ -44,3 +46,45 @@ async def test_upsert_is_idempotent_on_dedup_key(seeded_pg):
     assert len(deals) == 1  # same dedup key → one row, updated
     assert deals[0]["lowest_price"] == 250
     assert len(deals[0]["prices"]) == 1  # old platform prices replaced, not duplicated
+
+
+@pytest.mark.asyncio
+async def test_concurrent_upserts_same_dedup_key_do_not_collide(seeded_pg):
+    base = {
+        "flight_no": "MU5106",
+        "airline": "东方航空",
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2026-05-01",
+        "dep_time": "08:00",
+        "arr_time": "10:00",
+        "duration": "2h",
+        "stops": 0,
+        "history_avg_90d": None,
+        "history_low_90d": None,
+    }
+    await asyncio.gather(
+        upsert_flights(
+            [
+                dict(
+                    base,
+                    lowest_price=280,
+                    prices=[{"platform": "携程", "price": 280, "lowest": True, "url": ""}],
+                )
+            ]
+        ),
+        upsert_flights(
+            [
+                dict(
+                    base,
+                    lowest_price=250,
+                    prices=[{"platform": "去哪儿", "price": 250, "lowest": True, "url": ""}],
+                )
+            ]
+        ),
+    )
+
+    deals = await read_deals(origin_code="BJS", destination_code="SHA", depart_date="2026-05-01")
+    assert len(deals) == 1
+    assert deals[0]["lowest_price"] in {250, 280}
+    assert len(deals[0]["prices"]) == 1
