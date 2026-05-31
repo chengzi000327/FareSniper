@@ -119,6 +119,18 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "signals": ["no_deals"],
         }
 
+    final_text = _last_ai_text(state)
+    if final_text:
+        if recommendation:
+            recommendation["text"] = final_text
+        else:
+            recommendation = {
+                "action": "watch",
+                "text": final_text,
+                "confidence": "medium",
+                "signals": [],
+            }
+
     resp = FrontendResponse(
         user_id=state.get("request_user_id", ""),
         query=query_summary,
@@ -177,6 +189,19 @@ def _extract_prices(search_result, deals: list[dict]) -> list[int]:
             if isinstance(nested_price, (int, float)):
                 prices.append(int(nested_price))
     return prices
+
+
+def _last_ai_text(state) -> str | None:
+    """取最近一条「非工具调用」的 AIMessage 文本，作为 ReAct 最终自然语言回复。"""
+    for m in reversed(state.get("messages") or []):
+        is_ai = getattr(m, "type", "") == "ai" or m.__class__.__name__ == "AIMessage"
+        if not is_ai:
+            continue
+        if getattr(m, "tool_calls", None):
+            return None
+        content = getattr(m, "content", "")
+        return content.strip() if isinstance(content, str) and content.strip() else None
+    return None
 
 
 async def _async_memory_writeback(user_id, message, intent, session_factory):

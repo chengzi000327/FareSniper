@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 from backend.application.contracts.decision import DecisionResult, FrontendResponse, RecommendedAction
 from backend.application.contracts.search import FlightSearchResult
@@ -77,3 +77,13 @@ async def test_render_accepts_react_preference_dict():
     rsp = out["response"]
     assert rsp.analysis["match_score"] == 1.0
     assert "符合预算" in rsp.analysis["matched_preferences"]
+
+
+@pytest.mark.asyncio
+async def test_final_ai_text_becomes_recommendation_text():
+    state = {
+        "request_user_id": "u1",
+        "messages": [HumanMessage(content="你好"), AIMessage(content="我是 FareSniper，告诉我出发地和目的地吧。")],
+    }
+    out = await render_response(state)
+    assert out["response"].recommendation["text"] == "我是 FareSniper，告诉我出发地和目的地吧。"
