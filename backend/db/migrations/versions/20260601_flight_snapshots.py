@@ -38,7 +38,7 @@ def upgrade() -> None:
             sa.Column("lowest_price", sa.Integer, nullable=False, server_default="0"),
             sa.Column("history_avg_90d", sa.Integer, nullable=True),
             sa.Column("history_low_90d", sa.Integer, nullable=True),
-            sa.Column("crawled_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("crawled_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
             sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         )
         op.create_index(
@@ -61,7 +61,7 @@ def upgrade() -> None:
             sa.Column("price", sa.Integer, nullable=False),
             sa.Column("url", sa.Text, nullable=False, server_default=""),
             sa.Column("raw_payload", JSONB, nullable=True),
-            sa.Column("crawled_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+            sa.Column("crawled_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         )
         op.create_index("ix_platform_price_snapshot_fk", "platform_price_snapshots", ["flight_snapshot_id"])
 
