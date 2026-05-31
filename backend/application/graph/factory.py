@@ -78,35 +78,59 @@ search_graph = _LazySearchGraph()
 _compiled_graph = None
 
 
-def _route_after_react(state: dict) -> str:
-    last = state["messages"][-1] if state.get("messages") else None
-    if last and getattr(last, "tool_calls", None):
+def route_after_agent(state: dict) -> str:
+    """LLM 失败 → 规则兜底；有工具调用 → 执行工具；否则 → 收口渲染。"""
+    if state.get("llm_failed"):
+        return "fill_intent_slots"
+    messages = state.get("messages") or []
+    last = messages[-1] if messages else None
+    if last is not None and getattr(last, "tool_calls", None):
         return "tool_router"
     return "render_response"
 
 
+async def _react_agent_node(state: dict) -> dict:
+    # 间接引用，便于测试 monkeypatch
+    from backend.application.graph.nodes import react_agent as _ra
+
+    return await _ra.react_agent(state)
+
+
 def build_graph():
-    """Compile the PRD slot-filling graph: bootstrap → fill slots → clarify/search → render."""
+    """ReAct 主链路 + 规则版 slot-filling 兜底的统一编译图。"""
     from backend.application.graph.nodes.bootstrap_session import bootstrap_session
     from backend.application.graph.nodes.render_response import render_response
+    from backend.application.graph.nodes.tool_router import tool_router
     from backend.application.graph.nodes.slot_filling import (
+        dynamic_intent_response,
         fill_intent_slots,
         route_after_slot_filling,
         run_slot_search,
-        dynamic_intent_response,
         slot_clarify_response,
     )
 
     sg = StateGraph(WorkflowState)
     sg.add_node("bootstrap_session", bootstrap_session)
+    sg.add_node("react_agent", _react_agent_node)
+    sg.add_node("tool_router", tool_router)
+    sg.add_node("render_response", render_response)
     sg.add_node("fill_intent_slots", fill_intent_slots)
     sg.add_node("clarify_response", slot_clarify_response)
     sg.add_node("dynamic_intent_response", dynamic_intent_response)
     sg.add_node("run_slot_search", run_slot_search)
-    sg.add_node("render_response", render_response)
 
     sg.set_entry_point("bootstrap_session")
-    sg.add_edge("bootstrap_session", "fill_intent_slots")
+    sg.add_edge("bootstrap_session", "react_agent")
+    sg.add_conditional_edges(
+        "react_agent",
+        route_after_agent,
+        {
+            "tool_router": "tool_router",
+            "render_response": "render_response",
+            "fill_intent_slots": "fill_intent_slots",
+        },
+    )
+    sg.add_edge("tool_router", "react_agent")
     sg.add_conditional_edges(
         "fill_intent_slots",
         route_after_slot_filling,

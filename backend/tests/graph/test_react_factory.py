@@ -1,4 +1,4 @@
-"""Runtime graph wires the PRD slot-filling flow."""
+"""Runtime graph wires the ReAct-primary + rule-fallback flow."""
 
 from __future__ import annotations
 
@@ -6,35 +6,61 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 
-def test_build_graph_has_slot_filling_nodes():
-    """build_graph() compiled graph contains all slot-filling node names."""
+def test_build_graph_wires_react_primary_with_rule_fallback():
     from backend.application.graph.factory import build_graph
 
     g = build_graph()
     node_names = set(g.get_graph().nodes.keys())
-    assert "bootstrap_session" in node_names
-    assert "fill_intent_slots" in node_names
-    assert "clarify_response" in node_names
-    assert "run_slot_search" in node_names
-    assert "render_response" in node_names
+    assert {"bootstrap_session", "react_agent", "tool_router", "render_response"} <= node_names
+    assert {"fill_intent_slots", "clarify_response", "run_slot_search", "dynamic_intent_response"} <= node_names
+
+
+@pytest.mark.asyncio
+async def test_llm_failure_falls_back_to_rule_clarify(monkeypatch):
+    import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.slot_filling as sf
+    import backend.application.graph.nodes.react_agent as ra
+    from backend.application.services.default_intents import DEFAULT_INTENTS
+
+    monkeypatch.setattr(bs, "load_slots", lambda sid: _async_value(None))
+    monkeypatch.setattr(bs, "save_slots", lambda sid, slots: _async_value(None))
+    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
+
+    async def _failing_agent(state):
+        return {"llm_failed": True}
+    monkeypatch.setattr(ra, "react_agent", _failing_agent)
+
+    from backend.application.graph.factory import build_graph, reset_graph_cache
+    reset_graph_cache()
+    g = build_graph()
+    result = await g.ainvoke(
+        {
+            "messages": [HumanMessage(content="明天去三亚")],
+            "request_message": "明天去三亚",
+            "request_user_id": "u1",
+        }
+    )
+    assert result["response"].deals == []
+    assert result["response"].meta["missing_slots"] == ["origin"]
+    assert "从哪里出发" in result["response"].recommendation["text"]
 
 
 @pytest.mark.asyncio
 async def test_build_graph_clarifies_missing_origin(monkeypatch):
-    """Graph asks for one missing slot before search."""
+    """Graph asks for one missing slot before search (react_agent falls back to rule path)."""
     import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.react_agent as ra
     import backend.application.graph.nodes.slot_filling as sf
     from backend.application.services.default_intents import DEFAULT_INTENTS
 
-    async def _fake_load(sid):
-        return None
-
-    async def _fake_save(sid, slots):
-        return None
-
-    monkeypatch.setattr(bs, "load_slots", _fake_load)
-    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(bs, "load_slots", lambda sid: _async_value(None))
+    monkeypatch.setattr(bs, "save_slots", lambda sid, slots: _async_value(None))
     monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
+
+    async def _failing_agent(state):
+        return {"llm_failed": True}
+
+    monkeypatch.setattr(ra, "react_agent", _failing_agent)
 
     from backend.application.graph.factory import build_graph
 
@@ -55,16 +81,11 @@ async def test_build_graph_clarifies_missing_origin(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_graph_searches_when_slots_complete(monkeypatch):
-    """Graph calls search only after required slots are complete."""
+    """Graph calls search only after required slots are complete (via rule fallback path)."""
     import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.react_agent as ra
     import backend.application.graph.nodes.slot_filling as sf
     from backend.application.services.default_intents import DEFAULT_INTENTS
-
-    async def _fake_load(sid):
-        return None
-
-    async def _fake_save(sid, slots):
-        return None
 
     async def _fake_search(args):
         return {
@@ -76,10 +97,15 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
         async def ainvoke(self, args):
             return await _fake_search(args)
 
-    monkeypatch.setattr(bs, "load_slots", _fake_load)
-    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(bs, "load_slots", lambda sid: _async_value(None))
+    monkeypatch.setattr(bs, "save_slots", lambda sid, slots: _async_value(None))
     monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
     monkeypatch.setattr(sf, "search_flights", _FakeSearchTool())
+
+    async def _failing_agent(state):
+        return {"llm_failed": True}
+
+    monkeypatch.setattr(ra, "react_agent", _failing_agent)
 
     from backend.application.graph.factory import build_graph
 
@@ -100,19 +126,20 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_graph_routes_dynamic_non_search_intent(monkeypatch):
+    """Dynamic non-search intent is handled via rule fallback path."""
     import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.react_agent as ra
     import backend.application.graph.nodes.slot_filling as sf
     from backend.application.services.default_intents import DEFAULT_INTENTS
 
-    async def _fake_load(sid):
-        return None
-
-    async def _fake_save(sid, slots):
-        return None
-
-    monkeypatch.setattr(bs, "load_slots", _fake_load)
-    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(bs, "load_slots", lambda sid: _async_value(None))
+    monkeypatch.setattr(bs, "save_slots", lambda sid, slots: _async_value(None))
     monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
+
+    async def _failing_agent(state):
+        return {"llm_failed": True}
+
+    monkeypatch.setattr(ra, "react_agent", _failing_agent)
 
     from backend.application.graph.factory import build_graph
 
@@ -132,19 +159,20 @@ async def test_build_graph_routes_dynamic_non_search_intent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_build_graph_handles_chitchat(monkeypatch):
+    """Chitchat intent is handled via rule fallback path."""
     import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.react_agent as ra
     import backend.application.graph.nodes.slot_filling as sf
     from backend.application.services.default_intents import DEFAULT_INTENTS
 
-    async def _fake_load(sid):
-        return None
-
-    async def _fake_save(sid, slots):
-        return None
-
-    monkeypatch.setattr(bs, "load_slots", _fake_load)
-    monkeypatch.setattr(bs, "save_slots", _fake_save)
+    monkeypatch.setattr(bs, "load_slots", lambda sid: _async_value(None))
+    monkeypatch.setattr(bs, "save_slots", lambda sid, slots: _async_value(None))
     monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
+
+    async def _failing_agent(state):
+        return {"llm_failed": True}
+
+    monkeypatch.setattr(ra, "react_agent", _failing_agent)
 
     from backend.application.graph.factory import build_graph
 
