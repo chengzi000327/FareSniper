@@ -18,6 +18,10 @@ logger = logging.getLogger("faresniper.intent_registry")
 CACHE_KEY = "intent_registry:active"
 CACHE_TTL_SECONDS = 60
 
+# Minimum confidence for a fresh intent to be treated as an unambiguous,
+# high-signal match (keyword or exact-example hit) that may break session stickiness.
+STRONG_MATCH_THRESHOLD = 0.9
+
 
 async def load_intent_registry() -> list[IntentDefinition]:
     cached = await _load_from_cache()
@@ -77,8 +81,10 @@ def match_intent(
     if accumulated and accumulated.intent:
         session_def = find_intent_definition(definitions, accumulated.intent)
         if session_def:
-            # 新一轮带有明确且不同的高置信意图（命中关键词/例句）→ 切换，破除粘滞
-            if fresh and fresh.intent_name != accumulated.intent and fresh.confidence >= 0.9:
+            # A high-confidence fresh match (keyword / exact-example hit) on a
+            # *different* intent breaks session stickiness — the user switched goals.
+            # 新一轮命中关键词/例句的高置信、不同意图 → 切换，破除粘滞。
+            if fresh and fresh.intent_name != accumulated.intent and fresh.confidence >= STRONG_MATCH_THRESHOLD:
                 return fresh
             return IntentMatch(
                 intent_name=session_def.name,

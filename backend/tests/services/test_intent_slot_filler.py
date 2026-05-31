@@ -100,3 +100,9 @@ def test_slot_only_turn_keeps_session_intent():
     flight = SlotBundle(intent="search_flight")
     match = match_intent("北京", DEFAULT_INTENTS, flight)
     assert match.intent_name == "search_flight"
+
+
+def test_same_intent_fresh_match_keeps_session():
+    flight = SlotBundle(intent="search_flight")
+    match = match_intent("帮我查北京到上海的机票", DEFAULT_INTENTS, flight)
+    assert match.intent_name == "search_flight"
