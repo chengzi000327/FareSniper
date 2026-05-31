@@ -88,3 +88,15 @@ def test_chitchat_does_not_fall_back_to_search_slots():
 
     assert slots.intent == "chitchat"
     assert missing_required_slots(slots, DEFAULT_INTENTS) == []
+
+
+def test_strong_new_intent_overrides_sticky_session_intent():
+    chit = SlotBundle(intent="chitchat")
+    match = match_intent("我要从北京去上海的机票", DEFAULT_INTENTS, chit)
+    assert match.intent_name == "search_flight"
+
+
+def test_slot_only_turn_keeps_session_intent():
+    flight = SlotBundle(intent="search_flight")
+    match = match_intent("北京", DEFAULT_INTENTS, flight)
+    assert match.intent_name == "search_flight"

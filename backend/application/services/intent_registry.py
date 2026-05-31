@@ -40,27 +40,14 @@ async def invalidate_intent_registry_cache() -> None:
         await client.aclose()
 
 
-def match_intent(
-    text: str,
-    definitions: list[IntentDefinition],
-    accumulated: SlotBundle | None = None,
+def _best_content_match(
+    text: str, definitions: list[IntentDefinition]
 ) -> IntentMatch | None:
-    normalized = (text or "").strip()
-    if accumulated and accumulated.intent:
-        definition = find_intent_definition(definitions, accumulated.intent)
-        if definition:
-            return IntentMatch(
-                intent_name=definition.name,
-                confidence=0.9,
-                matched_by="session",
-                definition=definition,
-            )
-
     candidates: list[IntentMatch] = []
     for definition in definitions:
         if not definition.is_active:
             continue
-        score, matched_by = _score_intent(normalized, definition)
+        score, matched_by = _score_intent(text, definition)
         if score > 0:
             candidates.append(
                 IntentMatch(
@@ -70,7 +57,6 @@ def match_intent(
                     definition=definition,
                 )
             )
-
     if not candidates:
         return None
     candidates.sort(
@@ -78,6 +64,30 @@ def match_intent(
         reverse=True,
     )
     return candidates[0]
+
+
+def match_intent(
+    text: str,
+    definitions: list[IntentDefinition],
+    accumulated: SlotBundle | None = None,
+) -> IntentMatch | None:
+    normalized = (text or "").strip()
+    fresh = _best_content_match(normalized, definitions)
+
+    if accumulated and accumulated.intent:
+        session_def = find_intent_definition(definitions, accumulated.intent)
+        if session_def:
+            # 新一轮带有明确且不同的高置信意图（命中关键词/例句）→ 切换，破除粘滞
+            if fresh and fresh.intent_name != accumulated.intent and fresh.confidence >= 0.9:
+                return fresh
+            return IntentMatch(
+                intent_name=session_def.name,
+                confidence=0.9,
+                matched_by="session",
+                definition=session_def,
+            )
+
+    return fresh
 
 
 def find_intent_definition(
