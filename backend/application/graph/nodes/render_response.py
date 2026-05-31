@@ -49,6 +49,14 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 ]
                 deals.append(deal)
 
+    if deals:
+        from backend.services.recommend_scorer import sort_deals
+
+        pref_results = []
+        if isinstance(pref_result, dict):
+            pref_results = pref_result.get("filtered", []) + pref_result.get("boosted", [])
+        deals = sort_deals(deals, pref_results)
+
     prices = _extract_prices(search_result, deals)
     pref_reasons: list[str] = []
     if pref_result:
@@ -119,6 +127,18 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "signals": ["no_deals"],
         }
 
+    final_text = _last_ai_text(state)
+    if final_text:
+        if recommendation:
+            recommendation["text"] = final_text
+        else:
+            recommendation = {
+                "action": "watch",
+                "text": final_text,
+                "confidence": "medium",
+                "signals": [],
+            }
+
     resp = FrontendResponse(
         user_id=state.get("request_user_id", ""),
         query=query_summary,
@@ -177,6 +197,19 @@ def _extract_prices(search_result, deals: list[dict]) -> list[int]:
             if isinstance(nested_price, (int, float)):
                 prices.append(int(nested_price))
     return prices
+
+
+def _last_ai_text(state) -> str | None:
+    """取最近一条「非工具调用」的 AIMessage 文本，作为 ReAct 最终自然语言回复。"""
+    for m in reversed(state.get("messages") or []):
+        is_ai = getattr(m, "type", "") == "ai" or m.__class__.__name__ == "AIMessage"
+        if not is_ai:
+            continue
+        if getattr(m, "tool_calls", None):
+            continue
+        content = getattr(m, "content", "")
+        return content.strip() if isinstance(content, str) and content.strip() else None
+    return None
 
 
 async def _async_memory_writeback(user_id, message, intent, session_factory):

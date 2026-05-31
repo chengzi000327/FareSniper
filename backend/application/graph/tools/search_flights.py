@@ -6,7 +6,7 @@ from langchain_core.tools import tool
 
 from backend.config import settings
 from backend.data_sources.mock_flights import get_mock_flights
-from backend.infrastructure.db.flight_cache import read_cached_deals
+from backend.infrastructure.db.flight_snapshot_repo import read_deals
 from backend.infrastructure.scrapers.realtime_fallback import scrape_realtime
 
 logger = logging.getLogger("faresniper.graph.tools.search_flights")
@@ -16,8 +16,8 @@ logger = logging.getLogger("faresniper.graph.tools.search_flights")
 async def search_flights(origin: str, destination: str, depart_date: str) -> dict:
     """读取航班价格缓存；若缓存为空，触发实时爬取兜底。"""
     try:
-        deals = await read_cached_deals(
-            origin=origin, destination=destination, depart_date=depart_date
+        deals = await read_deals(
+            origin_code=origin, destination_code=destination, depart_date=depart_date
         )
     except Exception:
         logger.exception(

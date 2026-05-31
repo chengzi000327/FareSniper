@@ -67,5 +67,4 @@ class HealthResponse(BaseModel):
     redis_ok: bool = False
     postgres_ok: bool = False
     scheduler_ok: bool = False
-    langfuse_ok: bool = False
     langsmith_ok: bool = False

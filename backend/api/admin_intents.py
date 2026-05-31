@@ -9,9 +9,12 @@ from backend.application.services.intent_registry import (
     invalidate_intent_registry_cache,
     load_intent_registry,
 )
+from backend.infrastructure.llm.embeddings import embed
 from backend.infrastructure.db.intent_registry_repo import (
+    insert_example,
     list_intents,
     replace_examples,
+    set_example_embedding,
     upsert_intent,
 )
 
@@ -38,7 +41,7 @@ async def save_intent(
 ) -> IntentDefinition:
     saved = await upsert_intent(body)
     if body.examples:
-        await replace_examples(body.name, body.examples)
+        await _replace_examples_with_embeddings(body.name, body.examples)
     await invalidate_intent_registry_cache()
     return saved
 
@@ -49,7 +52,7 @@ async def save_examples(
     examples: list[str],
     _uid: str = Depends(current_user_id),
 ) -> dict:
-    await replace_examples(intent_name, examples)
+    await _replace_examples_with_embeddings(intent_name, examples)
     await invalidate_intent_registry_cache()
     return {"ok": True, "intent_name": intent_name, "count": len(examples)}
 
@@ -58,3 +61,20 @@ async def save_examples(
 async def invalidate_cache(_uid: str = Depends(current_user_id)) -> dict:
     await invalidate_intent_registry_cache()
     return {"ok": True}
+
+
+async def _replace_examples_with_embeddings(
+    intent_name: str,
+    examples: list[str],
+) -> None:
+    await replace_examples(intent_name, [])
+    for example in examples:
+        await _add_example_with_embedding(intent_name, example)
+
+
+async def _add_example_with_embedding(intent_name: str, example_text: str) -> int:
+    example_id = await insert_example(intent_name, example_text)
+    vector = await embed(example_text)
+    if vector:
+        await set_example_embedding(example_id, vector)
+    return example_id

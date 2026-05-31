@@ -24,3 +24,53 @@ async def test_react_emits_tool_call_when_slots_complete(
     last = out["messages"][-1]
     assert isinstance(last, AIMessage)
     assert any(tc["name"] == "search_flights" for tc in (last.tool_calls or []))
+
+
+@pytest.mark.asyncio
+async def test_react_agent_marks_llm_failed_on_exception(monkeypatch):
+    import backend.application.graph.nodes.react_agent as ra
+
+    class _Boom:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            raise RuntimeError("llm down")
+
+    monkeypatch.setattr(ra, "load_available_tools", lambda: [])
+    monkeypatch.setattr(ra, "build_chat_model", lambda role="agent": _Boom())
+    monkeypatch.setattr(ra, "load_prompt", lambda name: "SYS")
+
+    out = await ra.react_agent({"messages": [HumanMessage(content="嗨")], "request_user_id": "u1"})
+    assert out.get("llm_failed") is True
+    assert "messages" not in out
+
+
+@pytest.mark.asyncio
+async def test_react_agent_renders_intent_definitions_into_system(monkeypatch):
+    import backend.application.graph.nodes.react_agent as ra
+
+    seen = {}
+
+    class _Chat:
+        def bind_tools(self, tools):
+            return self
+
+        async def ainvoke(self, messages):
+            seen["system"] = messages[0]["content"]
+            return AIMessage(content="ok")
+
+    monkeypatch.setattr(ra, "load_available_tools", lambda: [])
+    monkeypatch.setattr(ra, "build_chat_model", lambda role="agent": _Chat())
+    monkeypatch.setattr(ra, "load_prompt", lambda name: "SYS\n{intent_definitions}")
+
+    out = await ra.react_agent(
+        {
+            "messages": [HumanMessage(content="嗨")],
+            "request_user_id": "u1",
+            "intent_definitions_text": "- search_flight: 查机票",
+        }
+    )
+
+    assert out["messages"][0].content == "ok"
+    assert "- search_flight: 查机票" in seen["system"]

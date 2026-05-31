@@ -18,11 +18,14 @@ from backend.application.contracts.workflow import WorkflowError
 class WorkflowState(TypedDict, total=False):
     # ── ReAct graph fields (TG-08) ──────────────────────────────────────────
     messages: Annotated[list, add_messages]
+    llm_failed: bool
     accumulated_slots: SlotBundle | None
     fallback_triggered: bool
     alert_result: dict | None
     missing_slots: list[str]
     intent_definitions: list[IntentDefinition]
+    intent_definitions_text: str
+    fast_intent_hint_text: str
 
     # ── Common fields ────────────────────────────────────────────────────────
     request_user_id: str

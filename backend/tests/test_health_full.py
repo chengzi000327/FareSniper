@@ -12,7 +12,6 @@ def test_health_reports_all_subsystems(seeded_pg, fake_redis):
             "redis_ok",
             "postgres_ok",
             "scheduler_ok",
-            "langfuse_ok",
             "langsmith_ok",
         ]:
             assert k in body, f"missing key: {k}"

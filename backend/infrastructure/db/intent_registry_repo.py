@@ -133,6 +133,39 @@ async def replace_examples(intent_name: str, examples: list[str]) -> None:
         await session.commit()
 
 
+async def insert_example(intent_name: str, example_text: str) -> int:
+    async with get_session() as session:
+        row = IntentExample(intent_name=intent_name, example_text=example_text)
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return int(row.id)
+
+
+async def set_example_embedding(example_id: int, vector: list[float]) -> None:
+    async with get_session() as session:
+        row = await session.get(IntentExample, example_id)
+        if row is None:
+            return
+        row.embedding = vector
+        await session.commit()
+
+
+async def list_examples_with_embeddings() -> list[dict]:
+    async with get_session() as session:
+        rows = (await session.execute(select(IntentExample))).scalars().all()
+        return [
+            {
+                "id": row.id,
+                "intent_name": row.intent_name,
+                "example_text": row.example_text,
+                "embedding": row.embedding,
+            }
+            for row in rows
+            if row.embedding
+        ]
+
+
 def _to_definition(row: IntentRegistry, examples: list[str]) -> IntentDefinition:
     return IntentDefinition(
         name=row.name,

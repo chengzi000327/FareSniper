@@ -4,6 +4,19 @@ from __future__ import annotations
 from typing import Any
 
 
+def _num(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
 def calc_recommend_score(
     flight: dict[str, Any],
     pref_result: dict[str, Any] | None,
@@ -15,8 +28,8 @@ def calc_recommend_score(
     偏好匹配原始分 = min(matched_count, 3) / 3                    # 0~1
     加成原始分     = (stops==0 ? 1:0)×0.5 + (baggage_fee==0 ? 1:0)×0.5  # 0~1
     """
-    lowest = flight.get("lowest_price", flight.get("price", 0))
-    avg_90d = flight.get("history_avg_90d")
+    lowest = _num(flight.get("lowest_price", flight.get("price", 0)))
+    avg_90d = _num(flight.get("history_avg_90d"))
 
     if avg_90d and avg_90d > 0:
         hist_raw = max(0.0, 1.0 - lowest / avg_90d)
@@ -26,8 +39,8 @@ def calc_recommend_score(
     matched_count = len(pref_result.get("reasons", [])) if pref_result else 0
     pref_raw = min(matched_count, 3) / 3.0
 
-    stops_bonus = 1.0 if flight.get("stops", 0) == 0 else 0.0
-    baggage_bonus = 1.0 if flight.get("baggage_fee", 0) == 0 else 0.0
+    stops_bonus = 1.0 if _num(flight.get("stops", 0)) == 0 else 0.0
+    baggage_bonus = 1.0 if _num(flight.get("baggage_fee", 0)) == 0 else 0.0
     bonus_raw = stops_bonus * 0.5 + baggage_bonus * 0.5
 
     score = (hist_raw * 0.5 + pref_raw * 0.3 + bonus_raw * 0.2) * 10
@@ -57,7 +70,7 @@ def sort_deals(
         f["_boost"] = pref.get("boost", False) if pref else False
 
     def sort_key(f: dict[str, Any]) -> tuple:
-        total = f.get("price", 0) + f.get("tax", 0) + f.get("baggage_fee", 0)
+        total = _num(f.get("price")) + _num(f.get("tax")) + _num(f.get("baggage_fee"))
         boost = 0 if f.get("_boost") else 1  # boost=True 排前
         score = -float(f.get("recommend_score", "0") or "0")
         return (total, boost, score)

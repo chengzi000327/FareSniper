@@ -71,11 +71,6 @@ class Settings(BaseSettings):
 
     cps_id_default: str = Field(default="")
 
-    langfuse_public_key: str = Field(default="")
-    langfuse_secret_key: str = Field(default="")
-    langfuse_host: str = Field(default="https://cloud.langfuse.com")
-    langfuse_offline: bool = Field(default=False)
-
     langsmith_api_key: str = Field(default="")
     langsmith_project: str = Field(default="faresniper-dev")
     langsmith_endpoint: str = Field(
@@ -83,6 +78,8 @@ class Settings(BaseSettings):
         alias="LANGSMITH_ENDPOINT",
     )
     langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
+    langsmith_prompt_prefix: str = Field(default="faresniper-")
+    prompt_cache_ttl_seconds: float = Field(default=300.0)
 
     langchain_tracing: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
     langchain_api_key: str = Field(default="", alias="LANGCHAIN_API_KEY")
