@@ -78,6 +78,10 @@ class Settings(BaseSettings):
 
     langsmith_api_key: str = Field(default="")
     langsmith_project: str = Field(default="faresniper-dev")
+    langsmith_endpoint: str = Field(
+        default="https://api.smith.langchain.com",
+        alias="LANGSMITH_ENDPOINT",
+    )
 
     langchain_tracing: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
     langchain_api_key: str = Field(default="", alias="LANGCHAIN_API_KEY")
@@ -107,8 +111,22 @@ def get_settings() -> Settings:
 settings = get_settings()
 
 
-if settings.langchain_tracing and settings.langchain_api_key:
+_trace_api_key = settings.langchain_api_key or settings.langsmith_api_key
+_trace_project = (
+    os.getenv("LANGCHAIN_PROJECT")
+    or os.getenv("LANGSMITH_PROJECT")
+    or settings.langchain_project
+    or settings.langsmith_project
+)
+_trace_endpoint = (
+    os.getenv("LANGCHAIN_ENDPOINT")
+    or os.getenv("LANGSMITH_ENDPOINT")
+    or settings.langchain_endpoint
+    or settings.langsmith_endpoint
+)
+
+if _trace_api_key and (settings.langchain_tracing or settings.langsmith_api_key):
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-    os.environ.setdefault("LANGCHAIN_API_KEY", settings.langchain_api_key)
-    os.environ.setdefault("LANGCHAIN_PROJECT", settings.langchain_project)
-    os.environ.setdefault("LANGCHAIN_ENDPOINT", settings.langchain_endpoint)
+    os.environ.setdefault("LANGCHAIN_API_KEY", _trace_api_key)
+    os.environ.setdefault("LANGCHAIN_PROJECT", _trace_project)
+    os.environ.setdefault("LANGCHAIN_ENDPOINT", _trace_endpoint)

@@ -10,6 +10,6 @@ vi.mock("@/lib/api", () => ({ priceHistoryApi: {
 }}));
 
 test("renders chart with points", async () => {
-  render(<PriceHistoryPage params={{ route: "BJS-SYX" }} />);
+  render(<PriceHistoryPage params={Promise.resolve({ route: "BJS-SYX" })} />);
   await waitFor(() => expect(screen.getByTestId("price-chart")).toBeInTheDocument());
 });

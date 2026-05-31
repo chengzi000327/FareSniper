@@ -23,6 +23,7 @@ from backend.api.session import router as session_router
 from backend.api.flight_status import router as flight_status_router
 from backend.api.track import router as track_router
 from backend.infrastructure.observability.latency_mw import record_latency
+from backend.infrastructure.observability.langsmith import langsmith_enabled
 from backend.infrastructure.redis import session_store
 from backend.api.track_jump import router as track_jump_router
 from backend.application.graph.factory import get_graph
@@ -166,6 +167,7 @@ def create_app() -> FastAPI:
         scheduler_ok = scheduler is not None and getattr(scheduler, "running", False)
 
         langfuse_ok = bool(settings.langfuse_public_key)
+        langsmith_ok = langsmith_enabled()
 
         return HealthResponse(
             app=PRODUCT_NAME,
@@ -174,6 +176,7 @@ def create_app() -> FastAPI:
             postgres_ok=pg_ok,
             scheduler_ok=scheduler_ok,
             langfuse_ok=langfuse_ok,
+            langsmith_ok=langsmith_ok,
         )
 
     app.include_router(session_router, prefix=settings.api_prefix)
