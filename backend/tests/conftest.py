@@ -390,18 +390,27 @@ async def seeded_pg_with_history(seeded_pg):
 
 @pytest.fixture
 def stub_realtime(monkeypatch):
-    """Replace scrape_realtime with a deterministic stub returning one deal."""
+    """Stub out all live flight data sources with a deterministic single deal."""
     import backend.infrastructure.scrapers.realtime_fallback as rf
 
     async def _stub(*, origin, destination, depart_date):
         return [{"flight_no": "XX001", "price": 300, "platform": "stub"}]
 
+    async def _variflight_stub(origin, destination, depart_date):
+        return [{"flight_no": "XX001", "price": 300, "platform": "stub"}]
+
     monkeypatch.setattr(rf, "scrape_realtime", _stub)
-    # Also patch through to the tool module if it was already imported
+    # Patch variflight client used by the search_flights tool
     try:
         import backend.application.graph.tools.search_flights as sf
 
-        monkeypatch.setattr(sf, "scrape_realtime", _stub)
+        monkeypatch.setattr(sf, "variflight_search", _variflight_stub)
+    except ImportError:
+        pass
+    try:
+        import backend.infrastructure.flight_data.variflight_client as vc
+
+        monkeypatch.setattr(vc, "search_flights", _variflight_stub)
     except ImportError:
         pass
 

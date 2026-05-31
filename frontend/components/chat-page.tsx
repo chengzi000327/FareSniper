@@ -3,6 +3,9 @@
 import React from 'react'
 import { motion } from 'motion/react'
 import { History, Radar, Send } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeSanitize from 'rehype-sanitize'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import { RecommendationCard } from '@/components/shared-components'
 import { recApi, searchApi } from '@/lib/api'
@@ -12,6 +15,18 @@ import type { DiscoveryCardContentProps } from '@/components/discovery-card-cont
 type Message =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string; isSpecial?: boolean; hasCard?: boolean; cardData?: DiscoveryCardContentProps }
+
+// 助手气泡用 Markdown 渲染：支持 GFM 表格/标题/加粗/列表，rehypeSanitize 防 XSS。
+// prose 限定在气泡内，避免 LLM 输出的 ### / |表格| 直接暴露成纯文本。
+function MarkdownMessage({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm max-w-none break-words prose-headings:my-2 prose-p:my-1.5 prose-table:my-2 prose-th:px-2 prose-td:px-2 prose-li:my-0.5 prose-pre:my-2">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  )
+}
 
 export function ChatPage() {
   const [messages, setMessages] = React.useState<Message[]>([])
@@ -126,6 +141,8 @@ export function ChatPage() {
                     <Radar className="h-4 w-4 animate-spin" />
                     <span>{message.content}</span>
                   </div>
+                ) : message.role === 'assistant' ? (
+                  <MarkdownMessage content={message.content} />
                 ) : (
                   message.content
                 )}

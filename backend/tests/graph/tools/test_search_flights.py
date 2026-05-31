@@ -38,21 +38,21 @@ async def test_returns_snapshot_cache_when_available(seeded_pg):
 
 
 @pytest.mark.asyncio
-async def test_realtime_fallback_when_cache_miss(seeded_pg_empty, stub_realtime):
+async def test_variflight_fallback_when_cache_miss(seeded_pg_empty, stub_realtime):
     out = await search_flights.ainvoke(
         {"origin": "XIY", "destination": "URC", "depart_date": "2026-05-08"}
     )
-    assert out["source"] == "realtime"
+    assert out["source"] == "variflight"
 
 
 @pytest.mark.asyncio
-async def test_mock_fallback_when_realtime_fails(seeded_pg_empty, monkeypatch):
+async def test_mock_fallback_when_variflight_fails(seeded_pg_empty, monkeypatch):
     import backend.application.graph.tools.search_flights as sf
 
-    async def _boom(*, origin, destination, depart_date):
-        raise RuntimeError("browser unavailable")
+    async def _boom(origin, destination, depart_date):
+        raise RuntimeError("variflight unavailable")
 
-    monkeypatch.setattr(sf, "scrape_realtime", _boom)
+    monkeypatch.setattr(sf, "variflight_search", _boom)
 
     out = await search_flights.ainvoke(
         {"origin": "BJS", "destination": "SHA", "depart_date": "2026-05-08"}

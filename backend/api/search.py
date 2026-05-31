@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 
@@ -23,7 +23,7 @@ class SearchReq(BaseModel):
 
 @router.post("", response_model=FrontendResponse)
 async def search(
-    req: SearchReq, uid: str = Depends(current_user_id)
+    req: SearchReq, request: Request, uid: str = Depends(current_user_id)
 ) -> FrontendResponse:
     request_id = uuid.uuid4().hex
     t0 = time.monotonic()
@@ -34,6 +34,8 @@ async def search(
         req.session_id,
         len(req.message),
     )
+    session_factory = getattr(request.app.state, "session_factory", None)
+    redis_client = getattr(request.app.state, "redis_client", None)
     graph = get_graph()
     try:
         out = await graph.ainvoke(
@@ -46,6 +48,8 @@ async def search(
                 "clarify_count": 0,
                 "fallback_triggered": False,
                 "errors": [],
+                "_session_factory": session_factory,
+                "_redis_client": redis_client,
             },
             config={"recursion_limit": 15},
         )

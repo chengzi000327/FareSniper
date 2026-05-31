@@ -156,15 +156,25 @@ async def render_response(state: WorkflowState) -> WorkflowState:
     )
 
     session_factory = state.get("_session_factory")
-    if session_factory and intent and not intent.parse_failed:
-        asyncio.create_task(
-            _async_memory_writeback(
-                user_id=state["request_user_id"],
-                message=state.get("request_message", ""),
+    user_id = state.get("request_user_id", "")
+    session_id = state.get("request_session_id", "")
+    user_message = state.get("request_message", "")
+    assistant_text = resp.recommendation.get("text", "") if isinstance(resp.recommendation, dict) else ""
+
+    if session_factory:
+        await _write_chat_history(
+            session_factory=session_factory,
+            session_id=session_id,
+            user_message=user_message,
+            assistant_text=assistant_text,
+        )
+        if intent and not intent.parse_failed:
+            await _async_memory_writeback(
+                user_id=user_id,
+                message=user_message,
                 intent=intent,
                 session_factory=session_factory,
             )
-        )
 
     return {**state, "response": resp}
 
@@ -210,6 +220,25 @@ def _last_ai_text(state) -> str | None:
         content = getattr(m, "content", "")
         return content.strip() if isinstance(content, str) and content.strip() else None
     return None
+
+
+async def _write_chat_history(
+    session_factory, session_id: str, user_message: str, assistant_text: str
+) -> None:
+    """写 user + assistant 两条 chat_history 记录，供下轮记忆读取。"""
+    if not session_id or not (user_message or assistant_text):
+        return
+    try:
+        from backend.db.models import ChatHistory
+
+        async with session_factory() as db:
+            if user_message:
+                db.add(ChatHistory(session_id=session_id, role="user", content=user_message))
+            if assistant_text:
+                db.add(ChatHistory(session_id=session_id, role="assistant", content=assistant_text))
+            await db.commit()
+    except Exception:
+        pass
 
 
 async def _async_memory_writeback(user_id, message, intent, session_factory):

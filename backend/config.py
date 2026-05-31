@@ -49,6 +49,7 @@ class Settings(BaseSettings):
 
     request_timeout_seconds: float = Field(default=25.0)
     enable_mock_fallback: bool = Field(default=True)
+    scraper_playwright_enabled: bool = Field(default=False)
     session_ttl_minutes: int = Field(default=30)
 
     jwt_secret: str = Field(default="")
@@ -70,6 +71,8 @@ class Settings(BaseSettings):
     flight_status_api_key: str = Field(default="")
 
     cps_id_default: str = Field(default="")
+
+    variflight_api_key: str = Field(default="")
 
     langsmith_api_key: str = Field(default="")
     langsmith_project: str = Field(default="faresniper-dev")

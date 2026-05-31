@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from backend.config import settings
 from backend.data_sources.normalizer import normalize_raw_rows
 from backend.infrastructure.db.crawl_job_repo import (
     mark_crawl_job_failed,
@@ -11,6 +12,9 @@ from backend.infrastructure.db.crawl_job_repo import (
     update_platform_status,
 )
 from backend.infrastructure.db.flight_snapshot_repo import upsert_flights
+from backend.infrastructure.flight_data.variflight_client import (
+    search_flights as variflight_search,
+)
 from backend.infrastructure.scrapers.base_scraper import ScrapeQuery
 from backend.infrastructure.scrapers.ctrip_scraper import CtripScraper
 from backend.infrastructure.scrapers.fliggy_scraper import FliggyScraper
@@ -25,6 +29,10 @@ _ALL_SCRAPERS = [
     FliggyScraper(),
     UmetripScraper(),
 ]
+
+# Playwright scrapers are disabled by default on Railway (headless browser unavailable).
+# Set SCRAPER_PLAYWRIGHT_ENABLED=true in env to re-enable cross-platform cross-checking.
+_PLAYWRIGHT_ENABLED = getattr(settings, "scraper_playwright_enabled", False)
 
 COVERED_ROUTES = [
     ("BJS", "SHA", "2026-05-08"),
@@ -107,13 +115,26 @@ async def crawl_route(*, origin: str, destination: str, depart_date: str) -> str
     )
     platform_status: dict[str, Any] = {}
     try:
-        raw_rows = await scrape_route_all_platforms(
+        # 主数据源：飞常准
+        variflight_rows = await variflight_search(
             origin=origin, destination=destination, depart_date=depart_date
         )
-        valid_rows = [row for row in raw_rows if row.get("source") != "fake"]
-        platform_status = _platform_status(raw_rows, valid_rows)
+
+        # 可选：playwright OTA 爬虫（feature flag 默认关闭）
+        playwright_rows: list[dict] = []
+        if _PLAYWRIGHT_ENABLED:
+            raw = await scrape_route_all_platforms(
+                origin=origin, destination=destination, depart_date=depart_date
+            )
+            playwright_rows = [r for r in raw if r.get("source") != "fake"]
+
+        all_valid = variflight_rows + playwright_rows
+        platform_status = _platform_status(
+            variflight_rows + playwright_rows, all_valid
+        )
         await update_platform_status(job_id, platform_status)
-        flights = normalize_raw_rows([_normalizer_row(row) for row in valid_rows])
+
+        flights = normalize_raw_rows([_normalizer_row(r) for r in all_valid])
         if flights:
             await upsert_flights(flights)
         await mark_crawl_job_success(job_id, platform_status)
