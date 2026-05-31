@@ -16,3 +16,10 @@ def test_settings_exposes_launch_fields(monkeypatch):
     assert s.langsmith_tracing is True
     assert isinstance(s.cors_origins, list)
     assert hasattr(settings, "database_url")
+
+
+def test_settings_normalizes_postgres_url_for_async_engine(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@postgres.railway.internal:5432/railway")
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.database_url.startswith("postgresql+asyncpg://")

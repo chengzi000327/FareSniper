@@ -103,6 +103,17 @@ class Settings(BaseSettings):
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return v
 
+    @field_validator("database_url", "test_database_url", mode="before")
+    @classmethod
+    def _normalize_async_database_url(cls, v):
+        if not isinstance(v, str):
+            return v
+        if v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        return v
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
