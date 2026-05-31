@@ -22,6 +22,8 @@ async def embed(text: str) -> list[float]:
     """Generate a text embedding, returning an empty vector when unavailable."""
     if not settings.model_api_key or not text.strip():
         return []
+    if "api.deepseek.com" in settings.model_base_url:
+        return []
     try:
         resp = await _async_client().embeddings.create(model=EMBED_MODEL, input=text)
         return list(resp.data[0].embedding)
