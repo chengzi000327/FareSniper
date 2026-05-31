@@ -30,40 +30,7 @@ async def test_llm_failure_falls_back_to_rule_clarify(monkeypatch):
         return {"llm_failed": True}
     monkeypatch.setattr(ra, "react_agent", _failing_agent)
 
-    from backend.application.graph.factory import build_graph, reset_graph_cache
-    reset_graph_cache()
-    g = build_graph()
-    result = await g.ainvoke(
-        {
-            "messages": [HumanMessage(content="明天去三亚")],
-            "request_message": "明天去三亚",
-            "request_user_id": "u1",
-        }
-    )
-    assert result["response"].deals == []
-    assert result["response"].meta["missing_slots"] == ["origin"]
-    assert "从哪里出发" in result["response"].recommendation["text"]
-
-
-@pytest.mark.asyncio
-async def test_build_graph_clarifies_missing_origin(monkeypatch):
-    """Graph asks for one missing slot before search (react_agent falls back to rule path)."""
-    import backend.application.graph.nodes.bootstrap_session as bs
-    import backend.application.graph.nodes.react_agent as ra
-    import backend.application.graph.nodes.slot_filling as sf
-    from backend.application.services.default_intents import DEFAULT_INTENTS
-
-    monkeypatch.setattr(bs, "load_slots", lambda sid: _async_value(None))
-    monkeypatch.setattr(bs, "save_slots", lambda sid, slots: _async_value(None))
-    monkeypatch.setattr(sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS))
-
-    async def _failing_agent(state):
-        return {"llm_failed": True}
-
-    monkeypatch.setattr(ra, "react_agent", _failing_agent)
-
     from backend.application.graph.factory import build_graph
-
     g = build_graph()
     result = await g.ainvoke(
         {
@@ -72,11 +39,10 @@ async def test_build_graph_clarifies_missing_origin(monkeypatch):
             "request_user_id": "u1",
         }
     )
-    assert "response" in result
-    assert result["response"] is not None
     assert result["response"].deals == []
     assert result["response"].meta["missing_slots"] == ["origin"]
     assert "从哪里出发" in result["response"].recommendation["text"]
+
 
 
 @pytest.mark.asyncio

@@ -68,12 +68,10 @@ class _LazySearchGraph:
 search_graph = _LazySearchGraph()
 
 
-# ── Launch-plan ReAct factory (TG-05 · Task 4) ──────────────────────────────
-# build_graph() returns a fresh compiled graph with a single placeholder
-# node — TG-08 will replace the body with the ReAct agent + tool router +
-# render_response wiring. get_graph() memoises one compiled instance for the
-# FastAPI lifespan to consume; tests can call build_graph() directly to get
-# an isolated copy that's safe to mutate.
+# build_graph() compiles the runtime graph: ReAct agent (LLM + tools) as the
+# primary path with a rule-based slot-filling fallback when the LLM is
+# unavailable. get_graph() memoises a singleton for the FastAPI lifespan;
+# tests call build_graph() directly for an isolated compiled copy.
 
 _compiled_graph = None
 
