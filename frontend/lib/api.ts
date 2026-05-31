@@ -5,7 +5,14 @@ function getToken(): string | null {
   return window.localStorage.getItem("fs_token");
 }
 
-async function ensureSession(): Promise<string> {
+function clearSession() {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem("fs_token");
+  window.localStorage.removeItem("fs_user_id");
+}
+
+async function ensureSession(force = false): Promise<string> {
+  if (force) clearSession();
   let token = getToken();
   if (token) return token;
   const r = await fetch(`${BASE}/api/session`, {
@@ -22,14 +29,21 @@ async function ensureSession(): Promise<string> {
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await ensureSession();
-  const r = await fetch(`${BASE}${path}`, {
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-      ...(init?.headers || {}),
-    },
-    ...init,
-  });
+  const request = (authToken: string) =>
+    fetch(`${BASE}${path}`, {
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${authToken}`,
+        ...(init?.headers || {}),
+      },
+      ...init,
+    });
+
+  let r = await request(token);
+  if (r.status === 401) {
+    const freshToken = await ensureSession(true);
+    r = await request(freshToken);
+  }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json();
 }
