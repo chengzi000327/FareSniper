@@ -20,6 +20,12 @@ async def react_agent(state: dict) -> dict:
         chat = chat.bind_tools(tools)
 
     system = load_prompt("react_agent")
+    system = system.replace(
+        "{intent_definitions}",
+        state.get("intent_definitions_text") or "暂无动态意图定义",
+    )
+    if state.get("fast_intent_hint_text"):
+        system = f"{system}\n{state['fast_intent_hint_text']}"
     messages = [{"role": "system", "content": system}, *list(state["messages"])]
 
     try:

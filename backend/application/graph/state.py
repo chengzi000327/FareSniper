@@ -24,6 +24,8 @@ class WorkflowState(TypedDict, total=False):
     alert_result: dict | None
     missing_slots: list[str]
     intent_definitions: list[IntentDefinition]
+    intent_definitions_text: str
+    fast_intent_hint_text: str
 
     # ── Common fields ────────────────────────────────────────────────────────
     request_user_id: str
