@@ -5,7 +5,9 @@ import json
 import re
 from typing import Any
 
-_SYSTEM_PROMPT = """你是机票价值判断助手，帮用户判断当前机票是否值得买。
+from backend.infrastructure.llm.prompt_loader import load_prompt
+
+_FALLBACK_SYSTEM_PROMPT = """你是机票价值判断助手，帮用户判断当前机票是否值得买。
 
 ## 任务
 对每张票，输出触发的值得买信号列表和一句话购买建议。
@@ -27,6 +29,11 @@ JSON数组：
 - 不捏造数据，只用传入数据做判断
 - is_holiday=true 时可在 advice 文案中提及节假日，但不得将"节假日稀缺"写入 signals 数组
 - 只输出JSON，不加解释"""
+
+
+def _system_prompt() -> str:
+    text = load_prompt("value_judge")
+    return text if text and "[value_judge]" not in text else _FALLBACK_SYSTEM_PROMPT
 
 
 class ValueJudge:
@@ -81,7 +88,7 @@ class ValueJudge:
         user_msg = json.dumps(payload, ensure_ascii=False)
         try:
             raw = await self.llm_client.chat_completion([
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": _system_prompt()},
                 {"role": "user", "content": user_msg},
             ])
             match = re.search(r"\[.*\]", raw, re.DOTALL)

@@ -101,3 +101,35 @@ async def test_last_ai_text_skips_tool_call_messages():
     }
     out = await render_response(state)
     assert out["response"].recommendation["text"] == "给你找到了北京到上海的航班。"
+
+
+@pytest.mark.asyncio
+async def test_deals_get_recommend_score_and_sorted_by_total():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "deals": [
+                {
+                    "flight_no": "A",
+                    "price": 600,
+                    "tax": 0,
+                    "baggage_fee": 0,
+                    "stops": 0,
+                    "history_avg_90d": 700,
+                },
+                {
+                    "flight_no": "B",
+                    "price": 400,
+                    "tax": 0,
+                    "baggage_fee": 0,
+                    "stops": 0,
+                    "history_avg_90d": 700,
+                },
+            ],
+            "source": "cache",
+        },
+    }
+    out = await render_response(state)
+    deals = out["response"].deals
+    assert deals[0]["flight_no"] == "B"
+    assert deals[0]["recommend_score"]

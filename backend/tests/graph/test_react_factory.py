@@ -84,7 +84,9 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
         }
     )
 
-    assert result["response"].deals == [{"flight_no": "MU5137", "price": 480}]
+    assert result["response"].deals[0]["flight_no"] == "MU5137"
+    assert result["response"].deals[0]["price"] == 480
+    assert result["response"].deals[0]["recommend_score"]
     assert result["response"].query["origin_city"] == "北京"
     assert result["response"].query["destination_city"] == "三亚"
     assert result["response"].meta["source"] == "cache"

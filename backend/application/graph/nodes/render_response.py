@@ -49,6 +49,14 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 ]
                 deals.append(deal)
 
+    if deals:
+        from backend.services.recommend_scorer import sort_deals
+
+        pref_results = []
+        if isinstance(pref_result, dict):
+            pref_results = pref_result.get("filtered", []) + pref_result.get("boosted", [])
+        deals = sort_deals(deals, pref_results)
+
     prices = _extract_prices(search_result, deals)
     pref_reasons: list[str] = []
     if pref_result:
