@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
+
+logger = logging.getLogger("faresniper.graph.render_response")
 
 from backend.application.contracts.decision import FrontendResponse
 from backend.application.graph.state import WorkflowState
@@ -161,10 +164,21 @@ async def render_response(state: WorkflowState) -> WorkflowState:
     user_message = state.get("request_message", "")
     assistant_text = resp.recommendation.get("text", "") if isinstance(resp.recommendation, dict) else ""
 
+    logger.info(
+        "memory_writeback_check session_factory=%s session_id=%s user_id=%s "
+        "user_message_len=%d assistant_text_len=%d",
+        "present" if session_factory else "NONE",
+        session_id or "NONE",
+        user_id or "NONE",
+        len(user_message),
+        len(assistant_text),
+    )
+
     if session_factory:
         await _write_chat_history(
             session_factory=session_factory,
             session_id=session_id,
+            user_id=user_id,
             user_message=user_message,
             assistant_text=assistant_text,
         )
@@ -175,6 +189,13 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 intent=intent,
                 session_factory=session_factory,
             )
+    else:
+        logger.warning(
+            "memory_writeback_skipped reason=no_session_factory "
+            "user_id=%s session_id=%s",
+            user_id,
+            session_id,
+        )
 
     return {**state, "response": resp}
 
@@ -223,22 +244,31 @@ def _last_ai_text(state) -> str | None:
 
 
 async def _write_chat_history(
-    session_factory, session_id: str, user_message: str, assistant_text: str
+    session_factory, session_id: str, user_id: str, user_message: str, assistant_text: str
 ) -> None:
     """写 user + assistant 两条 chat_history 记录，供下轮记忆读取。"""
-    if not session_id or not (user_message or assistant_text):
+    if not session_id or not user_id or not (user_message or assistant_text):
+        logger.warning(
+            "chat_history_skipped reason=missing_field session_id=%s user_id=%s",
+            session_id or "NONE", user_id or "NONE",
+        )
         return
     try:
         from backend.db.models import ChatHistory
 
         async with session_factory() as db:
             if user_message:
-                db.add(ChatHistory(session_id=session_id, role="user", content=user_message))
+                db.add(ChatHistory(session_id=session_id, user_id=user_id, role="user", content=user_message))
             if assistant_text:
-                db.add(ChatHistory(session_id=session_id, role="assistant", content=assistant_text))
+                db.add(ChatHistory(session_id=session_id, user_id=user_id, role="assistant", content=assistant_text))
             await db.commit()
+        logger.info(
+            "chat_history_written session_id=%s user_id=%s", session_id, user_id
+        )
     except Exception:
-        pass
+        logger.exception(
+            "chat_history_write_failed session_id=%s user_id=%s", session_id, user_id
+        )
 
 
 async def _async_memory_writeback(user_id, message, intent, session_factory):
