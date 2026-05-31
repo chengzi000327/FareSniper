@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from backend.application.graph.tools import load_available_tools
 from backend.infrastructure.llm.models import build_chat_model
 from backend.infrastructure.llm.prompt_loader import load_prompt
 
+logger = logging.getLogger("faresniper.graph.react_agent")
+
+LLM_TIMEOUT_SECONDS = 8.0
+
 
 async def react_agent(state: dict) -> dict:
-    """ReAct LLM node: bind tools and invoke the chat model."""
+    """ReAct LLM node: bind tools and invoke the chat model; on failure flag llm_failed for rule fallback."""
     tools = load_available_tools()
     chat = build_chat_model(role="agent")
     if tools:
@@ -14,7 +21,14 @@ async def react_agent(state: dict) -> dict:
 
     system = load_prompt("react_agent")
     messages = [{"role": "system", "content": system}, *list(state["messages"])]
-    ai = await chat.ainvoke(messages)
+
+    try:
+        ai = await asyncio.wait_for(chat.ainvoke(messages), timeout=LLM_TIMEOUT_SECONDS)
+    except Exception:
+        logger.warning(
+            "react_agent_llm_failed user_id=%s", state.get("request_user_id", ""), exc_info=True
+        )
+        return {"llm_failed": True}
 
     try:
         from backend.analytics.events import EventName

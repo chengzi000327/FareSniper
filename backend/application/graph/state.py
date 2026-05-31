@@ -18,6 +18,7 @@ from backend.application.contracts.workflow import WorkflowError
 class WorkflowState(TypedDict, total=False):
     # ── ReAct graph fields (TG-08) ──────────────────────────────────────────
     messages: Annotated[list, add_messages]
+    llm_failed: bool
     accumulated_slots: SlotBundle | None
     fallback_triggered: bool
     alert_result: dict | None
