@@ -23,7 +23,7 @@ _DEFAULTS: dict[str, str] = {
 
 def _hub_identifier(name: str) -> str:
     prefix = get_settings().langsmith_prompt_prefix
-    return f"{prefix}{name}".replace("_", "-")
+    return f"{prefix}{name.replace('_', '-')}"
 
 
 def _extract_prompt_text(obj) -> str | None:

@@ -27,3 +27,23 @@ def test_caches_within_ttl(monkeypatch):
     pl.load_prompt("react_agent")
     pl.load_prompt("react_agent")
     assert calls["n"] == 1
+
+
+def test_falls_back_to_local_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(pl, "_pull_from_langsmith", lambda name: None)
+    monkeypatch.setattr(pl, "_PROMPTS_DIR", tmp_path)
+    (tmp_path / "react_agent.txt").write_text("FILE PROMPT", encoding="utf-8")
+    assert pl.load_prompt("react_agent") == "FILE PROMPT"
+
+
+def test_refetches_after_ttl_expiry(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_pull(name):
+        calls["n"] += 1
+        return "HUB"
+
+    monkeypatch.setattr(pl, "_pull_from_langsmith", fake_pull)
+    pl._CACHE["react_agent"] = ("OLD", 0.0)  # timestamp far in the past
+    pl.load_prompt("react_agent")
+    assert calls["n"] == 1
