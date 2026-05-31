@@ -82,6 +82,7 @@ class Settings(BaseSettings):
         default="https://api.smith.langchain.com",
         alias="LANGSMITH_ENDPOINT",
     )
+    langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
 
     langchain_tracing: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
     langchain_api_key: str = Field(default="", alias="LANGCHAIN_API_KEY")
@@ -125,7 +126,11 @@ _trace_endpoint = (
     or settings.langsmith_endpoint
 )
 
-if _trace_api_key and (settings.langchain_tracing or settings.langsmith_api_key):
+if _trace_api_key and (
+    settings.langchain_tracing
+    or settings.langsmith_tracing
+    or settings.langsmith_api_key
+):
     os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
     os.environ.setdefault("LANGCHAIN_API_KEY", _trace_api_key)
     os.environ.setdefault("LANGCHAIN_PROJECT", _trace_project)

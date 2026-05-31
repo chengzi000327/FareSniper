@@ -80,6 +80,7 @@ CORS_ORIGINS=["https://<frontend>.up.railway.app"]
 LANGSMITH_API_KEY=lsv2_...
 LANGSMITH_PROJECT=faresniper
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_TRACING=true
 LANGCHAIN_TRACING_V2=true
 ```
 
