@@ -198,7 +198,7 @@ def _last_ai_text(state) -> str | None:
         if not is_ai:
             continue
         if getattr(m, "tool_calls", None):
-            return None
+            continue
         content = getattr(m, "content", "")
         return content.strip() if isinstance(content, str) and content.strip() else None
     return None

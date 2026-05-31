@@ -87,3 +87,17 @@ async def test_final_ai_text_becomes_recommendation_text():
     }
     out = await render_response(state)
     assert out["response"].recommendation["text"] == "我是 FareSniper，告诉我出发地和目的地吧。"
+
+
+@pytest.mark.asyncio
+async def test_last_ai_text_skips_tool_call_messages():
+    from langchain_core.messages import AIMessage, HumanMessage
+    tool_call_ai = AIMessage(content="", tool_calls=[{"name": "search_flights", "args": {}, "id": "1"}])
+    text_ai = AIMessage(content="给你找到了北京到上海的航班。")
+    state = {
+        "request_user_id": "u1",
+        # reverse-scan hits tool_call_ai first (continue), then finds text_ai
+        "messages": [HumanMessage(content="查机票"), text_ai, tool_call_ai],
+    }
+    out = await render_response(state)
+    assert out["response"].recommendation["text"] == "给你找到了北京到上海的航班。"
