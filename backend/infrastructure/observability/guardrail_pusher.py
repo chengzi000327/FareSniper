@@ -1,5 +1,10 @@
-from langfuse import Langfuse
+from __future__ import annotations
+
+import logging
+
 from backend.analytics.guardrails import GuardrailReport
+
+logger = logging.getLogger("faresniper.guardrail")
 
 _FIELD_MAP = {
     "deeplink_failure": "deeplink_failure_rate",
@@ -8,15 +13,10 @@ _FIELD_MAP = {
 }
 
 
-def _get_langfuse() -> Langfuse:
-    return Langfuse()
-
-
 async def push_breach(rep: GuardrailReport) -> None:
     if not rep.breached:
         return
-    lf = _get_langfuse()
     for name in rep.breached:
         field = _FIELD_MAP.get(name, name)
         value = getattr(rep, field, 0.0)
-        lf.score(name=name, value=value)
+        logger.warning("guardrail_breach name=%s value=%s", name, value)

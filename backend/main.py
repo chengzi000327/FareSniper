@@ -166,7 +166,6 @@ def create_app() -> FastAPI:
         scheduler = getattr(app.state, "scheduler", None)
         scheduler_ok = scheduler is not None and getattr(scheduler, "running", False)
 
-        langfuse_ok = bool(settings.langfuse_public_key)
         langsmith_ok = langsmith_enabled()
 
         return HealthResponse(
@@ -175,7 +174,6 @@ def create_app() -> FastAPI:
             redis_ok=bool(getattr(app.state, "redis_ok", False)),
             postgres_ok=pg_ok,
             scheduler_ok=scheduler_ok,
-            langfuse_ok=langfuse_ok,
             langsmith_ok=langsmith_ok,
         )
 

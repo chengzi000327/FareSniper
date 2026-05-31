@@ -261,13 +261,6 @@ def stub_chat_judge_buy_now() -> _StubChatModel:
     )
 
 
-@pytest.fixture
-def captured_langfuse():
-    from backend.tests._fakes.langfuse import CapturedLangfuse
-
-    return CapturedLangfuse()
-
-
 def _mint_jwt(sub: str) -> str:
     """Helper for tests that need a valid Bearer token."""
     import jwt as _jwt

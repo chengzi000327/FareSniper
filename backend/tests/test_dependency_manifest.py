@@ -8,7 +8,6 @@ def test_backend_requirements_include_plan_dependencies():
         "pydantic-settings",
         "PyJWT",
         "aiosqlite",
-        "langfuse",
         "pywebpush",
         "playwright",
         "apscheduler",
