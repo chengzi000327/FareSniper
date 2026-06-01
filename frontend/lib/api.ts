@@ -118,7 +118,10 @@ export const memoryApi = {
 
 export interface RecCardDto {
   id?: string;
+  title?: string;
   reason?: string;
+  tags?: string[];
+  discount_pct?: number | null;
   preview_deal?: DealCardDto;
   query_hint?: string;
   [key: string]: unknown;
