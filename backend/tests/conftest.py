@@ -360,6 +360,22 @@ async def seeded_pg_with_memory(seeded_pg):
 
 
 @pytest_asyncio.fixture
+async def seeded_pg_with_user_prefs(seeded_pg):
+    """seeded_pg with u1's preferences pre-loaded in user_preferences."""
+    from backend.infrastructure.db.base import get_session
+    from backend.memory.long_term import LongTermMemory
+
+    async with get_session() as db:
+        ltm = LongTermMemory(db)
+        await ltm.upsert_preferences(
+            "u1",
+            {"budget": 500, "preferred_airlines": ["东方航空"], "constraints": ["direct_only"]},
+        )
+        await db.commit()
+    return seeded_pg
+
+
+@pytest_asyncio.fixture
 async def seeded_pg_with_cache(seeded_pg):
     """seeded_pg with one BJS→SHA deal pre-loaded in flight_cache."""
     from backend.infrastructure.db.flight_cache import write_cached_deals

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date, timedelta
 from typing import Any
 
 from backend.config import settings
@@ -34,13 +35,26 @@ _ALL_SCRAPERS = [
 # Set SCRAPER_PLAYWRIGHT_ENABLED=true in env to re-enable cross-platform cross-checking.
 _PLAYWRIGHT_ENABLED = getattr(settings, "scraper_playwright_enabled", False)
 
-COVERED_ROUTES = [
-    ("BJS", "SHA", "2026-05-08"),
-    ("BJS", "SYX", "2026-05-01"),
-    ("CAN", "HGH", "2026-05-08"),
-    ("SHA", "CTU", "2026-05-08"),
-    ("SZX", "XIY", "2026-05-08"),
+# 北京出发热门航线（国内高频 OD 对）
+_BJS_HOT_ROUTES = [
+    ("BJS", "SHA"),  # 北京→上海
+    ("BJS", "SYX"),  # 北京→三亚
+    ("BJS", "CTU"),  # 北京→成都
+    ("BJS", "CAN"),  # 北京→广州
+    ("BJS", "XMN"),  # 北京→厦门
 ]
+
+
+def _near_dates(days: int = 3) -> list[str]:
+    """返回从明天起共 days 天的日期字符串列表（YYYY-MM-DD）。"""
+    today = date.today()
+    return [(today + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(days)]
+
+
+def _build_covered_routes() -> list[tuple[str, str, str]]:
+    """按最近 3 天动态生成路线×日期组合。"""
+    dates = _near_dates(3)
+    return [(orig, dest, d) for orig, dest in _BJS_HOT_ROUTES for d in dates]
 
 
 async def scrape_route_all_platforms(
@@ -147,5 +161,5 @@ async def crawl_route(*, origin: str, destination: str, depart_date: str) -> str
 
 
 async def scrape_all_routes() -> None:
-    for origin, destination, depart_date in COVERED_ROUTES:
+    for origin, destination, depart_date in _build_covered_routes():
         await crawl_route(origin=origin, destination=destination, depart_date=depart_date)

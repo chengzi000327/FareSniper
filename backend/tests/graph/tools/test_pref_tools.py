@@ -7,10 +7,10 @@ from backend.application.graph.tools.match_preferences import match_preferences
 
 
 @pytest.mark.asyncio
-async def test_get_preferences_reads_memories(seeded_pg_with_memory):
+async def test_get_preferences_reads_user_preferences(seeded_pg_with_user_prefs):
     out = await get_preferences.ainvoke({"user_id": "u1"})
-    assert "budget_ceiling" in out
-    assert out["budget_ceiling"] == 500
+    assert out.get("budget") == 500
+    assert "东方航空" in (out.get("preferred_airlines") or [])
 
 
 @pytest.mark.asyncio

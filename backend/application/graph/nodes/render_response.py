@@ -182,6 +182,15 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             user_message=user_message,
             assistant_text=assistant_text,
         )
+        # 偏好提取：不依赖 intent（ReAct 路径 intent 常为 None），直接从用户消息提取
+        if user_id and user_message:
+            try:
+                from backend.services.preference_extractor import learn_preferences
+
+                await learn_preferences(user_id, user_message, session_factory)
+            except Exception:
+                logger.warning("learn_preferences_failed user_id=%s", user_id, exc_info=True)
+        # 行为推断学习（仅在拿到结构化 intent 时补充）
         if intent and not intent.parse_failed:
             await _async_memory_writeback(
                 user_id=user_id,
