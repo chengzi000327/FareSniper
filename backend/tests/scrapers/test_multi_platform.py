@@ -31,11 +31,12 @@ async def test_scrape_all_routes_skips_fake_source(seeded_pg, monkeypatch):
     variflight_search is stubbed to return empty → nothing written to DB.
     """
     import backend.infrastructure.scrapers.multi_platform as mp
+    from backend.infrastructure.flight_data.variflight_client import VariflightResult
 
     async def _empty(origin, destination, depart_date):
-        return []
+        return VariflightResult(rows=[])
 
-    monkeypatch.setattr(mp, "variflight_search", _empty)
+    monkeypatch.setattr(mp, "variflight_search_with_status", _empty)
     await scrape_all_routes()
     # Dynamic routes cover next-3-days BJS hot routes, none with this old date
     deals = await read_deals(
@@ -68,12 +69,14 @@ async def test_scrape_all_routes_writes_real_source(seeded_pg, monkeypatch):
         }
     ]
 
+    from backend.infrastructure.flight_data.variflight_client import VariflightResult
+
     async def _stub_variflight(origin, destination, depart_date):
         if origin == "BJS" and destination == "SHA":
-            return real_deals
-        return []
+            return VariflightResult(rows=real_deals)
+        return VariflightResult(rows=[])
 
-    monkeypatch.setattr(mp, "variflight_search", _stub_variflight)
+    monkeypatch.setattr(mp, "variflight_search_with_status", _stub_variflight)
     await scrape_all_routes()
     deals = await read_deals(
         origin_code="BJS", destination_code="SHA", depart_date=tomorrow
@@ -102,10 +105,12 @@ async def test_crawl_route_persists_valid_rows_and_skips_fake(seeded_pg, monkeyp
         }
     ]
 
-    async def _stub(origin, destination, depart_date):
-        return variflight_rows
+    from backend.infrastructure.flight_data.variflight_client import VariflightResult
 
-    monkeypatch.setattr(mp, "variflight_search", _stub)
+    async def _stub(origin, destination, depart_date):
+        return VariflightResult(rows=variflight_rows)
+
+    monkeypatch.setattr(mp, "variflight_search_with_status", _stub)
 
     job_id = await crawl_route(
         origin="BJS", destination="SHA", depart_date="2026-05-08"
@@ -141,7 +146,7 @@ async def test_crawl_route_marks_job_failed_on_exception(seeded_pg, monkeypatch)
         "backend.infrastructure.scrapers.multi_platform.start_crawl_job",
         tracking_start_crawl_job,
     )
-    monkeypatch.setattr(mp, "variflight_search", broken_variflight)
+    monkeypatch.setattr(mp, "variflight_search_with_status", broken_variflight)
 
     with pytest.raises(RuntimeError, match="scraper down"):
         await crawl_route(origin="BJS", destination="SHA", depart_date="2026-05-08")
@@ -150,3 +155,52 @@ async def test_crawl_route_marks_job_failed_on_exception(seeded_pg, monkeypatch)
     assert job is not None
     assert job["status"] == "failed"
     assert job["error_message"] == "scraper down"
+
+
+@pytest.mark.asyncio
+async def test_crawl_route_marks_failed_on_datasource_error_zero_rows(
+    seeded_pg, monkeypatch
+):
+    """数据源报错(API/网络/限流)且落库 0 行 → job 标记 failed,而非 success。"""
+    import backend.infrastructure.scrapers.multi_platform as mp
+    from backend.infrastructure.flight_data.variflight_client import VariflightResult
+
+    async def _errored(origin, destination, depart_date):
+        # rows 为空但 error 非 None：代表「数据源报错」,非「正常无航班」。
+        return VariflightResult(rows=[], error="http_429")
+
+    monkeypatch.setattr(mp, "variflight_search_with_status", _errored)
+
+    job_id = await crawl_route(
+        origin="BJS", destination="SHA", depart_date="2026-05-08"
+    )
+
+    job = await get_crawl_job(job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+    assert "http_429" in (job["error_message"] or "")
+    # platform_status 应记录飞常准的失败原因。
+    vf = job["platform_status"].get("variflight")
+    assert vf is not None
+    assert vf["status"] == "error"
+    assert vf["error"] == "http_429"
+
+
+@pytest.mark.asyncio
+async def test_crawl_route_marks_success_on_empty_no_error(seeded_pg, monkeypatch):
+    """正常无航班(empty,error 为 None)→ job 仍标记 success。"""
+    import backend.infrastructure.scrapers.multi_platform as mp
+    from backend.infrastructure.flight_data.variflight_client import VariflightResult
+
+    async def _empty(origin, destination, depart_date):
+        return VariflightResult(rows=[], error=None)
+
+    monkeypatch.setattr(mp, "variflight_search_with_status", _empty)
+
+    job_id = await crawl_route(
+        origin="BJS", destination="SHA", depart_date="2026-05-08"
+    )
+
+    job = await get_crawl_job(job_id)
+    assert job is not None
+    assert job["status"] == "success"

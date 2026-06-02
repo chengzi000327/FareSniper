@@ -16,6 +16,9 @@ from backend.infrastructure.db.flight_snapshot_repo import upsert_flights
 from backend.infrastructure.flight_data.variflight_client import (
     search_flights as variflight_search,
 )
+from backend.infrastructure.flight_data.variflight_client import (
+    search_flights_with_status as variflight_search_with_status,
+)
 from backend.infrastructure.scrapers.base_scraper import ScrapeQuery
 from backend.infrastructure.scrapers.ctrip_scraper import CtripScraper
 from backend.infrastructure.scrapers.fliggy_scraper import FliggyScraper
@@ -129,10 +132,12 @@ async def crawl_route(*, origin: str, destination: str, depart_date: str) -> str
     )
     platform_status: dict[str, Any] = {}
     try:
-        # 主数据源：飞常准
-        variflight_rows = await variflight_search(
+        # 主数据源：飞常准。区分「API 报错/网络异常/限流」与「正常无航班」。
+        variflight_result = await variflight_search_with_status(
             origin=origin, destination=destination, depart_date=depart_date
         )
+        variflight_rows = variflight_result.rows
+        variflight_error = variflight_result.error
 
         # 可选：playwright OTA 爬虫（feature flag 默认关闭）
         playwright_rows: list[dict] = []
@@ -146,11 +151,35 @@ async def crawl_route(*, origin: str, destination: str, depart_date: str) -> str
         platform_status = _platform_status(
             variflight_rows + playwright_rows, all_valid
         )
+        # 数据源报错时,在 platform_status 里记录飞常准的失败原因。
+        if variflight_error:
+            vf = platform_status.setdefault(
+                "variflight",
+                {
+                    "status": "ok",
+                    "raw_rows": 0,
+                    "persisted_rows": 0,
+                    "skipped_fake_rows": 0,
+                },
+            )
+            vf["status"] = "error"
+            vf["error"] = variflight_error
         await update_platform_status(job_id, platform_status)
 
         flights = normalize_raw_rows([_normalizer_row(r) for r in all_valid])
         if flights:
             await upsert_flights(flights)
+
+        # 落库 0 行 + 数据源报错 → 不能算 success,标记 failed/降级。
+        # 正常无航班（empty,error 为 None）仍按 success 处理。
+        if not flights and variflight_error:
+            await mark_crawl_job_failed(
+                job_id,
+                error_message=f"variflight: {variflight_error}",
+                platform_status=platform_status,
+            )
+            return job_id
+
         await mark_crawl_job_success(job_id, platform_status)
         return job_id
     except Exception as exc:
