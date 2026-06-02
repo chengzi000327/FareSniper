@@ -122,6 +122,26 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
         await s.commit()
 
 
+async def read_deals_latest(*, origin_code: str, destination_code: str) -> list[dict[str, Any]]:
+    """兜底:返回该路线库里最新 ``depart_date`` 的全部 deals。
+
+    用于推荐瀑布流——当未来 N 天没有任何快照时,退回到该路线已抓到的
+    最新一批数据,确保卡片不至于因日期错位而整体落空。
+    """
+    async with get_session() as s:
+        latest = (await s.execute(
+            select(func.max(FlightSnapshot.depart_date)).where(
+                FlightSnapshot.origin_code == origin_code,
+                FlightSnapshot.destination_code == destination_code,
+            )
+        )).scalar_one_or_none()
+    if not latest:
+        return []
+    return await read_deals(
+        origin_code=origin_code, destination_code=destination_code, depart_date=latest
+    )
+
+
 async def read_deals(*, origin_code: str, destination_code: str, depart_date: str) -> list[dict[str, Any]]:
     async with get_session() as s:
         snaps = (await s.execute(

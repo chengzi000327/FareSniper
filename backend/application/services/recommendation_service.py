@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import statistics
 import uuid
 from datetime import date, timedelta
 from typing import Any
 
 from backend.application.contracts.recommendations import RecCard, RecommendationsResponseDto
 from backend.infrastructure.db.base import get_session
-from backend.infrastructure.db.flight_snapshot_repo import read_deals
+from backend.infrastructure.db.flight_snapshot_repo import read_deals, read_deals_latest
 from backend.infrastructure.redis.session_store import _redis
 from backend.memory.long_term import LongTermMemory
 
@@ -76,15 +77,33 @@ async def _build_recommendations_uncached(user_id: str) -> RecommendationsRespon
     for origin, dest in routes:
         if dest in seen_destinations:
             continue
-        best_deal: dict[str, Any] | None = None
+
+        # 先查未来 N 天;查不到则兜底到该路线库里最新一批快照
+        batch: list[dict[str, Any]] = []
+        chosen_date: str | None = None
         for d in dates:
             deals = await read_deals(origin_code=origin, destination_code=dest, depart_date=d)
             if deals:
-                best_deal = deals[0]
-                best_deal["depart_date"] = d
+                batch = deals
+                chosen_date = d
                 break
+        if not batch:
+            batch = await read_deals_latest(origin_code=origin, destination_code=dest)
+            chosen_date = batch[0]["depart_date"] if batch else None
 
-        card = _build_card(origin, dest, best_deal, preferred_dest)
+        best_deal: dict[str, Any] | None = None
+        market_avg: int | None = None
+        if batch:
+            best_deal = dict(batch[0])
+            best_deal["depart_date"] = chosen_date
+            # 同航线近期基准价:history_avg_90d 缺失时作为折扣基准。
+            # 用中位数而非均值——同一天的高价商务/全价舱会把均值拉高,
+            # 导致折扣虚高;中位数对离群价更稳健。
+            prices = [d["lowest_price"] for d in batch if d.get("lowest_price", 0) > 0]
+            if prices:
+                market_avg = round(statistics.median(prices))
+
+        card = _build_card(origin, dest, best_deal, preferred_dest, market_avg)
         cards.append(card)
         seen_destinations.add(dest)
 
@@ -104,6 +123,7 @@ def _build_card(
     dest: str,
     deal: dict[str, Any] | None,
     preferred_dest: list[str],
+    market_avg: int | None = None,
 ) -> RecCard:
     origin_name = _CITY_NAMES.get(origin, origin)
     dest_name = _CITY_NAMES.get(dest, dest)
@@ -117,9 +137,12 @@ def _build_card(
 
     if deal:
         price = deal.get("lowest_price", 0)
-        avg = deal.get("history_avg_90d")
-        if avg and avg > 0 and price > 0:
-            discount_pct = round((avg - price) / avg * 100)
+        # 优先用 90 天历史均价;缺失时退回同航线近期市场均价。
+        # 折扣封顶 50%:离群特价相对中位数可能算出 70%+ 的失真数字,
+        # 封顶后更贴近真实可感知的优惠区间。
+        avg = deal.get("history_avg_90d") or market_avg
+        if avg and avg > 0 and price > 0 and avg > price:
+            discount_pct = min(round((avg - price) / avg * 100), 50)
 
         platform = ""
         prices = deal.get("prices") or []
@@ -174,9 +197,9 @@ def _build_reason(
     if is_personalized:
         return f"你经常飞 {dest}，近期有席位，价格稳定"
     if discount_pct and discount_pct >= 15:
-        return f"AI 监测到 {dest} 机票近期大幅低于历史均价 {discount_pct}%，值得关注"
+        return f"AI 监测到 {dest} 机票大幅低于近期均价 {discount_pct}%，值得关注"
     if discount_pct and discount_pct >= 5:
-        return f"{dest} 近日机票略低于历史均价，可考虑出行"
+        return f"{dest} 近日机票略低于近期均价，可考虑出行"
     if deal:
         return f"{dest} 热门目的地，近期有充足席位，价格正常"
     return f"{dest} 热门出行目的地，AI 持续监控中"
