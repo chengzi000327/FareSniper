@@ -17,3 +17,5 @@ class RecCard(BaseModel):
 class RecommendationsResponseDto(BaseModel):
     personalized: bool = False
     cards: list[RecCard] = Field(default_factory=list)
+    has_more: bool = False        # 是否还有下一页（前端无限滚动据此停止）
+    next_offset: int = 0          # 下一页起始 offset

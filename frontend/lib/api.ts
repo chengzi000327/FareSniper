@@ -78,6 +78,8 @@ export interface DealCardDto {
   discount_rate?: number;
   cabin?: string;
   signals: string[];
+  booking_url?: string | null;
+  data_freshness?: string;
 }
 
 export interface ChatSearchRequest {
@@ -127,8 +129,21 @@ export interface RecCardDto {
   [key: string]: unknown;
 }
 
+export interface RecommendationsResponse {
+  personalized: boolean;
+  cards: RecCardDto[];
+  has_more: boolean;
+  next_offset: number;
+}
+
 export const recApi = {
-  list: () => http<{ personalized: boolean; cards: RecCardDto[] }>("/api/recommendations"),
+  list: (params?: { limit?: number; offset?: number }) => {
+    const limit = params?.limit ?? 6;
+    const offset = params?.offset ?? 0;
+    return http<RecommendationsResponse>(
+      `/api/recommendations?limit=${limit}&offset=${offset}`
+    );
+  },
 };
 
 export const alertsApi = {

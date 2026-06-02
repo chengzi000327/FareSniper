@@ -38,14 +38,8 @@ _ALL_SCRAPERS = [
 # Set SCRAPER_PLAYWRIGHT_ENABLED=true in env to re-enable cross-platform cross-checking.
 _PLAYWRIGHT_ENABLED = getattr(settings, "scraper_playwright_enabled", False)
 
-# 北京出发热门航线（国内高频 OD 对）
-_BJS_HOT_ROUTES = [
-    ("BJS", "SHA"),  # 北京→上海
-    ("BJS", "SYX"),  # 北京→三亚
-    ("BJS", "CTU"),  # 北京→成都
-    ("BJS", "CAN"),  # 北京→广州
-    ("BJS", "XMN"),  # 北京→厦门
-]
+# 北京出发热门航线（国内高频 OD 对）——单一来源见 _routes.HOT_ROUTES
+from backend.application.services._routes import HOT_ROUTES as _BJS_HOT_ROUTES
 
 
 def _near_dates(days: int = 3) -> list[str]:

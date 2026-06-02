@@ -20,6 +20,7 @@ export type DiscoveryCardContentProps = {
   prices: PriceItem[]
   compact?: boolean
   onMonitorPrice?: () => void
+  bookingUrl?: string | null
 }
 
 export function DiscoveryCardContent({
@@ -35,6 +36,7 @@ export function DiscoveryCardContent({
   prices,
   compact,
   onMonitorPrice,
+  bookingUrl,
 }: DiscoveryCardContentProps) {
   const totalPrice = basePrice + tax + baggageFee
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
@@ -137,13 +139,26 @@ export function DiscoveryCardContent({
           <Bell className="h-4 w-4" />
           监控价格
         </button>
-        <button
-          type="button"
-          className="group flex flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-text px-4 py-2 text-sm font-bold text-white shadow-card transition hover:bg-brand-orange"
-        >
-          前往预订
-          <ExternalLink className="h-4 w-4 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-        </button>
+        {bookingUrl ? (
+          <a
+            href={bookingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-text px-4 py-2 text-sm font-bold text-white shadow-card transition hover:bg-brand-orange"
+          >
+            前往预订
+            <ExternalLink className="h-4 w-4 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            className="group flex flex-1 cursor-not-allowed items-center justify-center gap-2 rounded-2xl bg-brand-text px-4 py-2 text-sm font-bold text-white opacity-50 shadow-card"
+          >
+            前往预订
+            <ExternalLink className="h-4 w-4" />
+          </button>
+        )}
       </div>
     </div>
   )

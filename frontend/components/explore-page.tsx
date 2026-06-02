@@ -4,9 +4,12 @@ import React from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Gift, MapPin, Plane, Sparkles, TrendingDown, X } from 'lucide-react'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
-import { api } from '@/lib/api'
+import { recApi } from '@/lib/api'
 import { dealToCardProps } from '@/lib/mappers'
+import type { RecCardDto } from '@/lib/api'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
+
+const PAGE_SIZE = 6
 
 // 本地目的地图片映射（未匹配则用渐变占位）
 const DEST_IMAGES: Record<string, string> = {
@@ -31,43 +34,80 @@ type Deal = {
   cardData: DiscoveryCardContentProps
 }
 
+function mapCard(c: RecCardDto): Deal | null {
+  if (!c.preview_deal) return null
+  const deal = c.preview_deal
+  const destCode = (deal.destination_code as string) ?? ''
+  return {
+    id: (c.id as string) ?? deal.system_id,
+    from: deal.origin_city,
+    to: deal.destination_city,
+    destCode,
+    price: String(deal.price),
+    date: deal.depart_date,
+    reason: c.reason ?? '',
+    tags: (c.tags as string[]) ?? [],
+    discountPct: (c.discount_pct as number) ?? null,
+    image: DEST_IMAGES[destCode] ?? `https://picsum.photos/seed/${destCode}/800/560`,
+    cardData: dealToCardProps(deal),
+  }
+}
+
 export function ExplorePage() {
   const [deals, setDeals] = React.useState<Deal[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [loadingMore, setLoadingMore] = React.useState(false)
   const [departure, setDeparture] = React.useState('')
   const [selectedDeal, setSelectedDeal] = React.useState<Deal | null>(null)
   const [isDrawing, setIsDrawing] = React.useState(false)
   const [personalized, setPersonalized] = React.useState(false)
+  const [hasMore, setHasMore] = React.useState(false)
+  const [nextOffset, setNextOffset] = React.useState(0)
 
+  const sentinelRef = React.useRef<HTMLDivElement | null>(null)
+  // 用 ref 镜像分页状态,避免 IntersectionObserver 回调闭包读到旧值
+  const stateRef = React.useRef({ hasMore: false, loadingMore: false, nextOffset: 0 })
+  stateRef.current = { hasMore, loadingMore, nextOffset }
+
+  const loadPage = React.useCallback(async (offset: number) => {
+    const resp = await recApi.list({ limit: PAGE_SIZE, offset })
+    const mapped = resp.cards.map(mapCard).filter((d): d is Deal => d !== null)
+    setPersonalized(resp.personalized ?? false)
+    setHasMore(resp.has_more ?? false)
+    setNextOffset(resp.next_offset ?? offset + PAGE_SIZE)
+    setDeals((prev) => {
+      if (offset === 0) return mapped
+      const seen = new Set(prev.map((d) => d.id))
+      return [...prev, ...mapped.filter((d) => !seen.has(d.id))]
+    })
+  }, [])
+
+  // 首屏加载
   React.useEffect(() => {
-    api
-      .getRecommendations()
-      .then((resp) => {
-        setPersonalized(resp.personalized ?? false)
-        const mapped: Deal[] = resp.cards
-          .filter((c) => !!c.preview_deal)
-          .map((c) => {
-            const deal = c.preview_deal!
-            const destCode = deal.destination_code as string ?? ''
-            return {
-              id: (c.id as string) ?? deal.system_id,
-              from: deal.origin_city,
-              to: deal.destination_city,
-              destCode,
-              price: String(deal.price),
-              date: deal.depart_date,
-              reason: c.reason ?? '',
-              tags: (c.tags as string[]) ?? [],
-              discountPct: (c.discount_pct as number) ?? null,
-              image: DEST_IMAGES[destCode] ?? `https://picsum.photos/seed/${destCode}/800/560`,
-              cardData: dealToCardProps(deal),
-            }
-          })
-        setDeals(mapped)
-      })
+    loadPage(0)
       .catch(() => {/* keep empty */})
       .finally(() => setLoading(false))
-  }, [])
+  }, [loadPage])
+
+  // 触底无限滚动:IntersectionObserver 监听 sentinel 进入视口即追加下一页
+  React.useEffect(() => {
+    const node = sentinelRef.current
+    if (!node) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const { hasMore: more, loadingMore: busy, nextOffset: off } = stateRef.current
+        if (entries[0].isIntersecting && more && !busy) {
+          setLoadingMore(true)
+          loadPage(off)
+            .catch(() => {/* keep prev */})
+            .finally(() => setLoadingMore(false))
+        }
+      },
+      { rootMargin: '200px' }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [loadPage])
 
   const visibleDeals = deals.filter((deal) => !departure || deal.from.includes(departure) || deal.to.includes(departure))
 
@@ -136,11 +176,24 @@ export function ExplorePage() {
             {deals.length === 0 ? '暂无推荐，请稍后重试' : '没有匹配的城市'}
           </div>
         ) : (
-          <div className="columns-1 gap-5 space-y-5 md:columns-2 xl:columns-3">
-            {visibleDeals.map((deal) => (
-              <DealCard key={deal.id} deal={deal} onSelect={() => setSelectedDeal(deal)} />
-            ))}
-          </div>
+          <>
+            <div className="columns-1 gap-5 space-y-5 md:columns-2 xl:columns-3">
+              {visibleDeals.map((deal) => (
+                <DealCard key={deal.id} deal={deal} onSelect={() => setSelectedDeal(deal)} />
+              ))}
+            </div>
+            {/* 无限滚动 sentinel + 加载态 */}
+            {!departure && hasMore && (
+              <div ref={sentinelRef} className="flex h-20 items-center justify-center">
+                {loadingMore && (
+                  <div className="flex items-center gap-2 text-sm text-brand-muted">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" />
+                    加载更多...
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
       </div>
 

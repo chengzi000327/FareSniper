@@ -14,6 +14,7 @@ export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
     platform: deal.platform,
     recommendScore: deal.recommend_score || undefined,
     prices: deal.prices,
+    bookingUrl: deal.booking_url ?? null,
   }
 }
 
