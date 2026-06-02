@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from backend.application.graph._now import today_cn
 from backend.application.graph.tools import load_available_tools
 from backend.infrastructure.llm.models import build_chat_model
 from backend.infrastructure.llm.prompt_loader import load_prompt
@@ -23,6 +24,12 @@ async def react_agent(state: dict) -> dict:
     system = system.replace(
         "{intent_definitions}",
         state.get("intent_definitions_text") or "暂无动态意图定义",
+    )
+    # 注入当前日期(北京时区),让 LLM 能把"明天/后天/下周末/五一"等相对说法
+    # 推算成具体 YYYY-MM-DD;否则模型不知道今天几号,出发日会算错。
+    system = (
+        f"今天是 {today_cn()}。涉及日期的工具参数(如 depart_date)必须基于今天"
+        f"推算成具体的 YYYY-MM-DD 格式。\n\n{system}"
     )
     if state.get("fast_intent_hint_text"):
         system = f"{system}\n{state['fast_intent_hint_text']}"

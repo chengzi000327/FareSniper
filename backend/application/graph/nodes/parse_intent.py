@@ -6,6 +6,8 @@ import json
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from backend.application.graph._now import today_cn
+
 from backend.application.contracts.intent import NormalizedIntent, is_intent_complete
 from backend.application.contracts.workflow import WorkflowError, WorkflowErrorCode
 from backend.application.graph.state import WorkflowState
@@ -13,12 +15,18 @@ from backend.infrastructure.llm.models import get_intent_model
 
 _SYSTEM_PROMPT = """你是一个机票查询助手，专注于从用户输入中提取出行意图。
 
+**今天是 {today}。所有相对日期都必须基于今天推算成具体的 YYYY-MM-DD：**
+- "明天"=今天+1天，"后天"=今天+2天，"大后天"=今天+3天，"N天后"=今天+N天
+- "这周末/本周末"=本周最近的周六；"下周末"=下一个周六；"下周X"=下一周的星期X
+- 节假日按今天所在年份就近推算：五一=5月1日，清明=4月4日，端午/中秋按农历，国庆=10月1日，元旦=1月1日
+- 若用户说的日期已过（早于今天），顺延到明年同一日期
+
 从用户输入中提取：origin（出发城市）、destination（目的地）、date_window（出行日期）、budget_cny（预算）、constraints（约束列表）。
 
 ## 判断逻辑
 1. origin.city：出发城市中文名，未提及为null
 2. destination.city：目的地城市中文名，未提及为null
-3. date_window.start_date："五一"=2026-05-01，"下周末"=最近周六，"清明"=2026-04-04
+3. date_window.start_date：按上面"今天"规则推算成 YYYY-MM-DD，未提及为null
 
 ## 约束识别
 - "不要太早"/"不要红眼" → constraints: [{{"type":"avoid_redeye","value":true}}]
@@ -73,7 +81,7 @@ async def parse_user_intent(state: WorkflowState) -> WorkflowState:
     ]
     try:
         intent = await _intent_chain.ainvoke(
-            {"message": state["request_message"], "history": history}
+            {"message": state["request_message"], "history": history, "today": today_cn()}
         )
     except Exception:
         intent = NormalizedIntent(parse_failed=True)
