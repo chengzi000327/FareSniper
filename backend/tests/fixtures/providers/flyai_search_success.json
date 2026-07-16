@@ -1,0 +1,40 @@
+{
+  "data": {
+    "itemList": [
+      {
+        "adultPrice": "¥400.0",
+        "journeys": [
+          {
+            "journeyType": "直达",
+            "segments": [
+              {
+                "depCityCode": "BJS",
+                "depCityName": "北京",
+                "depStationCode": "PEK",
+                "depStationName": "首都国际机场",
+                "depTerm": "T3",
+                "depDateTime": "2099-08-01 21:00:00",
+                "arrCityCode": "SHA",
+                "arrCityName": "上海",
+                "arrStationCode": "PVG",
+                "arrStationName": "浦东国际机场",
+                "arrTerm": "T2",
+                "arrDateTime": "2099-08-01 23:20:00",
+                "duration": "140分钟",
+                "transportType": "飞机",
+                "marketingTransportName": "国航",
+                "marketingTransportNo": "CA1883",
+                "seatClassName": "经济舱"
+              }
+            ],
+            "totalDuration": "140分钟"
+          }
+        ],
+        "jumpUrl": "https://example.com/fliggy/CA1883"
+      }
+    ]
+  },
+  "message": "success",
+  "systemMessage": "",
+  "status": 0
+}
