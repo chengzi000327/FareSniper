@@ -1,0 +1,13 @@
+{
+  "booking_options": [
+    {
+      "together": {
+        "book_with": "Trip.com",
+        "price": 2860,
+        "booking_request": {
+          "url": "https://booking.example.com/checkout"
+        }
+      }
+    }
+  ]
+}

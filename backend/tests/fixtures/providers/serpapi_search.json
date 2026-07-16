@@ -1,0 +1,23 @@
+{
+  "search_metadata": {
+    "google_flights_url": "https://www.google.com/travel/flights?hl=zh-CN"
+  },
+  "best_flights": [
+    {
+      "price": 2860,
+      "booking_token": "booking-token-1",
+      "flights": [
+        {
+          "flight_number": "SQ831",
+          "airline": "Singapore Airlines",
+          "ticket_also_sold_by": ["Partner Air"],
+          "departure_airport": {"time": "2099-08-01 16:50"},
+          "arrival_airport": {"time": "2099-08-01 22:15"},
+          "duration": 325,
+          "travel_class": "Economy"
+        }
+      ]
+    }
+  ],
+  "other_flights": []
+}
