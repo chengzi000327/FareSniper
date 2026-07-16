@@ -105,7 +105,7 @@ class SerpApiProvider:
                 response = await self._client.get(
                     _SEARCH_URL, params=params, timeout=_TIMEOUT_SECONDS
                 )
-            except (httpx.TimeoutException, httpx.NetworkError):
+            except httpx.TransportError:
                 if attempt == 0:
                     await asyncio.sleep(random.uniform(0.05, 0.25))
                     continue

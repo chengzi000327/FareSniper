@@ -144,13 +144,14 @@ async def test_resolves_booking_options_for_only_three_cheapest_token_itinerarie
 
 
 @pytest.mark.asyncio
-async def test_401_is_not_retried():
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_authentication_errors_are_not_retried(status_code):
     calls = 0
 
     async def handler(request):
         nonlocal calls
         calls += 1
-        return httpx.Response(401, json={"error": "unauthorized"})
+        return httpx.Response(status_code, json={"error": "unauthorized"})
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     result = await SerpApiProvider(api_key="secret", client=client).search(
@@ -161,6 +162,33 @@ async def test_401_is_not_retried():
     assert calls == 1
     assert result.status is ProviderStatus.error
     assert result.error_code == "authentication"
+
+
+@pytest.mark.asyncio
+async def test_temporary_5xx_retries_once_then_succeeds(monkeypatch):
+    calls = 0
+    search = deepcopy(SEARCH)
+    search["best_flights"][0].pop("booking_token")
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(503, json={"error": "temporary"})
+        return httpx.Response(200, json=search)
+
+    async def no_sleep(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("backend.infrastructure.flight_data.providers.serpapi.asyncio.sleep", no_sleep)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await SerpApiProvider(api_key="secret", client=client).search(
+        build_flight_query("上海", "新加坡", "2099-08-01")
+    )
+    await client.aclose()
+
+    assert calls == 2
+    assert result.status is ProviderStatus.success
 
 
 @pytest.mark.asyncio
@@ -188,3 +216,89 @@ async def test_429_retries_once_then_succeeds(monkeypatch):
 
     assert calls == 2
     assert result.status is ProviderStatus.success
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(lambda: httpx.TimeoutException("timed out"), id="timeout"),
+        pytest.param(lambda: httpx.RemoteProtocolError("connection reset"), id="protocol"),
+        pytest.param(lambda: httpx.ProxyError("proxy reset"), id="proxy"),
+    ],
+)
+async def test_transient_transport_failure_retries_once_then_succeeds(failure, monkeypatch):
+    calls = 0
+    search = deepcopy(SEARCH)
+    search["best_flights"][0].pop("booking_token")
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise failure()
+        return httpx.Response(200, json=search)
+
+    async def no_sleep(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("backend.infrastructure.flight_data.providers.serpapi.asyncio.sleep", no_sleep)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await SerpApiProvider(api_key="secret", client=client).search(
+        build_flight_query("上海", "新加坡", "2099-08-01")
+    )
+    await client.aclose()
+
+    assert calls == 2
+    assert result.status is ProviderStatus.success
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(lambda: httpx.RemoteProtocolError("connection reset"), id="protocol"),
+        pytest.param(lambda: httpx.ProxyError("proxy reset"), id="proxy"),
+    ],
+)
+async def test_repeated_transport_failure_returns_network_error(failure, monkeypatch):
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        raise failure()
+
+    async def no_sleep(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr("backend.infrastructure.flight_data.providers.serpapi.asyncio.sleep", no_sleep)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await SerpApiProvider(api_key="secret", client=client).search(
+        build_flight_query("上海", "新加坡", "2099-08-01")
+    )
+    await client.aclose()
+
+    assert calls == 2
+    assert result.status is ProviderStatus.error
+    assert result.error_code == "network"
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_response_is_not_retried():
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, content=b"not json")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await SerpApiProvider(api_key="secret", client=client).search(
+        build_flight_query("上海", "新加坡", "2099-08-01")
+    )
+    await client.aclose()
+
+    assert calls == 1
+    assert result.status is ProviderStatus.error
+    assert result.error_code == "upstream_response"
