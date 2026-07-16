@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlparse
@@ -258,6 +259,9 @@ class FlyAIProvider:
             payload = json.loads(run.stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             return self._error_result("invalid_json")
+
+        if not isinstance(payload, Mapping):
+            return self._error_result("upstream_response")
 
         if payload.get("status") not in (None, 0, "0"):
             return self._error_result("upstream_response")

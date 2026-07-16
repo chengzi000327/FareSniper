@@ -158,6 +158,24 @@ async def test_zero_exit_with_upstream_error_status_is_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_non_object_json_payload_is_upstream_error(monkeypatch):
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b"[]", b""
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    result = await FlyAIProvider(api_key="secret").search(_query())
+
+    assert result.status is ProviderStatus.error
+    assert result.error_code == "upstream_response"
+
+
+@pytest.mark.asyncio
 async def test_nonzero_exit_classifies_authentication(monkeypatch):
     calls = 0
 
@@ -178,6 +196,29 @@ async def test_nonzero_exit_classifies_authentication(monkeypatch):
     assert calls == 1
     assert result.status is ProviderStatus.error
     assert result.error_code == "authentication"
+
+
+@pytest.mark.asyncio
+async def test_non_auth_non_transient_cli_failure_is_not_retried(monkeypatch):
+    calls = 0
+
+    class FakeProcess:
+        returncode = 2
+
+        async def communicate(self):
+            return b"", b"invalid argument"
+
+    async def fake_create(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    result = await FlyAIProvider(api_key="secret").search(_query())
+
+    assert calls == 1
+    assert result.status is ProviderStatus.error
+    assert result.error_code == "cli_failed"
 
 
 @pytest.mark.asyncio
