@@ -1,6 +1,6 @@
 import React from "react";
 import { vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import PriceHistoryPage from "@/app/price-history/[route]/page";
 
 vi.mock("@/lib/api", () => ({ priceHistoryApi: {
@@ -10,6 +10,13 @@ vi.mock("@/lib/api", () => ({ priceHistoryApi: {
 }}));
 
 test("renders chart with points", async () => {
-  render(<PriceHistoryPage params={Promise.resolve({ route: "BJS-SYX" })} />);
-  await waitFor(() => expect(screen.getByTestId("price-chart")).toBeInTheDocument());
+  await act(async () => {
+    render(
+      <React.Suspense fallback={null}>
+        <PriceHistoryPage params={Promise.resolve({ route: "BJS-SYX" })} />
+      </React.Suspense>,
+    );
+  });
+
+  expect(await screen.findByTestId("price-chart")).toBeInTheDocument();
 });
