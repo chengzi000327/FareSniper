@@ -48,7 +48,16 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="deepseek-chat")
 
     request_timeout_seconds: float = Field(default=25.0)
-    enable_mock_fallback: bool = Field(default=True)
+    flyai_api_key: str = Field(default="")
+    flyai_cli_path: str = Field(default="flyai")
+    serpapi_api_key: str = Field(default="")
+    flight_provider_timeout_seconds: float = Field(default=10.0)
+    ctrip_snapshot_ttl_minutes: int = Field(default=75)
+    ctrip_refresh_batch_size: int = Field(default=20)
+    ctrip_request_delay_min_seconds: float = Field(default=2.0)
+    ctrip_request_delay_max_seconds: float = Field(default=5.0)
+    run_scheduler_in_api: bool = Field(default=False)
+    enable_mock_fallback: bool = Field(default=False)
     scraper_playwright_enabled: bool = Field(default=False)
     session_ttl_minutes: int = Field(default=30)
 

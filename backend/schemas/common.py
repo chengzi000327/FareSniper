@@ -19,8 +19,11 @@ class ApiMeta(BaseModel):
 
 class PriceItemDto(BaseModel):
     name: str
-    price: int
+    price: Optional[int]
     lowest: Optional[bool] = None
+    status: str = "priced"
+    url: Optional[str] = None
+    data_provider: str = ""
 
 
 class DealCardDto(BaseModel):
@@ -35,10 +38,12 @@ class DealCardDto(BaseModel):
     airline: str
     depart_time: str
     arrive_time: str
-    price: int
-    tax: int = 0
-    baggage_fee: int = 0
-    has_baggage: bool = False
+    price: Optional[int]
+    tax: Optional[int] = None
+    baggage_fee: Optional[int] = None
+    has_baggage: Optional[bool] = None
+    total_price: Optional[int] = None
+    currency: str = "CNY"
     recommend_score: str = ""
     prices: list[PriceItemDto] = Field(default_factory=list)
     original_price: Optional[int] = None
