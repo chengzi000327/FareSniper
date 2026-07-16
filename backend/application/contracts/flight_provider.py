@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Protocol
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ProviderStatus(str, Enum):
@@ -62,6 +63,23 @@ class FlightOffer(BaseModel):
     expires_at: str | None = None
     is_realtime: bool = True
     raw_reference: str | None = None
+
+    @model_validator(mode="after")
+    def validate_price_status(self) -> FlightOffer:
+        is_live_price = self.price_status is PriceStatus.view_live_price
+        has_https_booking_url = (
+            self.booking_url is not None
+            and urlparse(self.booking_url).scheme == "https"
+            and bool(urlparse(self.booking_url).netloc)
+        )
+        if self.total_price is None:
+            if not is_live_price:
+                raise ValueError("未知总价必须使用 view_live_price 状态")
+            if not has_https_booking_url:
+                raise ValueError("view_live_price 必须提供 HTTPS booking_url")
+        elif is_live_price:
+            raise ValueError("view_live_price 必须使用未知总价")
+        return self
 
 
 class ProviderResult(BaseModel):
