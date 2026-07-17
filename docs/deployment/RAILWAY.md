@@ -31,7 +31,7 @@ backend/third_party/flights_monitor/requirements.txt
 nixpacks build . --config backend/nixpacks.toml
 ```
 
-该 config 从 repo root 安装两套 requirements、Python 3.13/GCC、Chromium/ChromeDriver、Node 22 和固定 FlyAI CLI，并以 Uvicorn API 命令启动。worker 生产构建仍使用 Dockerfile 和独立 worker start override。
+该 config 在 `/opt/venv` 创建 Python 3.13 虚拟环境，通过虚拟环境中的 pip 从 repo root 安装两套 requirements，并通过同一环境中的 Uvicorn 启动 API；同时安装 GCC、Chromium/ChromeDriver、Node 22 和固定 FlyAI CLI。worker 生产构建仍使用 Dockerfile 和独立 worker start override。
 
 服务生命周期由各自 config 管理：
 

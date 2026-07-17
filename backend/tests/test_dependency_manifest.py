@@ -68,10 +68,25 @@ def test_nixpacks_pins_flyai_cli_and_node():
     config = tomllib.loads(text)
     assert config["phases"]["install"]["dependsOn"] == ["setup"]
     assert config["start"]["cmd"] == (
-        "sh -c 'exec uvicorn backend.main:app --host 0.0.0.0 "
+        "sh -c 'exec /opt/venv/bin/uvicorn backend.main:app --host 0.0.0.0 "
         '--port "${PORT:-8000}"\''
     )
     assert config["variables"]["PYTHONUNBUFFERED"] == "1"
+
+
+def test_nixpacks_provisions_python_venv_for_install_and_start():
+    import tomllib
+
+    config = tomllib.loads(Path("backend/nixpacks.toml").read_text())
+    install = config["phases"]["install"]
+
+    assert install["dependsOn"] == ["setup"]
+    assert install["cmds"][0] == "python -m venv --copies /opt/venv"
+    assert install["cmds"][1].startswith("/opt/venv/bin/pip install ")
+    assert install["paths"] == ["/opt/venv/bin"]
+    assert config["start"]["cmd"].startswith(
+        "sh -c 'exec /opt/venv/bin/uvicorn backend.main:app "
+    )
 
 
 def test_backend_dockerfile_has_complete_shared_runtime():
