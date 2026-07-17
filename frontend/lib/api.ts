@@ -274,7 +274,12 @@ function hasValidKnownPayloadFields(payload: Record<string, unknown>): boolean {
   if (hasOwn(payload, "response") && !isChatSearchResponse(payload.response)) {
     return false;
   }
-  if (hasOwn(payload, "deals") && !Array.isArray(payload.deals)) return false;
+  if (
+    hasOwn(payload, "deals") &&
+    (!Array.isArray(payload.deals) || !payload.deals.every(isDealCardDto))
+  ) {
+    return false;
+  }
   if (hasOwn(payload, "provider") && typeof payload.provider !== "string") {
     return false;
   }

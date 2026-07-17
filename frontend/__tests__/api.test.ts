@@ -185,6 +185,65 @@ test("stream refreshes its session once after a 401", async () => {
   });
 });
 
+test("stream propagates AbortError while refreshing a session after a 401", async () => {
+  const controller = new AbortController();
+  const abortError = new DOMException("aborted", "AbortError");
+  const fetchSpy = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValueOnce(new Response(null, { status: 401 }))
+    .mockImplementationOnce(
+      (_url, init) =>
+        new Promise((_, reject) => {
+          (init?.signal as AbortSignal).addEventListener("abort", () => reject(abortError));
+        })
+    );
+
+  const pending = searchApi.stream(
+    { session_id: null, message: "hi" },
+    () => undefined,
+    controller.signal
+  );
+  await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(2));
+  controller.abort();
+
+  await expect(pending).rejects.toBe(abortError);
+  expect(fetchSpy.mock.calls[1][0]).toMatch(/\/api\/session$/);
+  expect(fetchSpy.mock.calls[1][1]?.signal).toBe(controller.signal);
+});
+
+test("stream cancels and releases the reader after an abort causes read to fail", async () => {
+  const controller = new AbortController();
+  const abortError = new DOMException("aborted", "AbortError");
+  const reader = {
+    read: vi.fn(
+      () =>
+        new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+          controller.signal.addEventListener("abort", () => reject(abortError));
+        })
+    ),
+    cancel: vi.fn().mockResolvedValue(undefined),
+    releaseLock: vi.fn(),
+  };
+  const response = {
+    ok: true,
+    status: 200,
+    body: { getReader: vi.fn(() => reader) },
+  } as unknown as Response;
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+
+  const pending = searchApi.stream(
+    { session_id: null, message: "hi" },
+    () => undefined,
+    controller.signal
+  );
+  await vi.waitFor(() => expect(reader.read).toHaveBeenCalledTimes(1));
+  controller.abort();
+
+  await expect(pending).rejects.toBe(abortError);
+  expect(reader.cancel).toHaveBeenCalledWith(abortError);
+  expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+});
+
 test("stream rejects malformed NDJSON instead of completing silently", async () => {
   const encoder = new TextEncoder();
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -274,6 +333,24 @@ test.each([
   ["non-object payload", startedEvent({ payload: [] })],
 ])("stream rejects %s before invoking onEvent", async (_description, event) => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(streamEvents(event));
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test("stream rejects malformed results deals before invoking onEvent", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents({
+      type: "results",
+      search_id: "search-1",
+      sequence: 2,
+      payload: { deals: [null] },
+    })
+  );
   const onEvent = vi.fn();
 
   await expect(
