@@ -21,6 +21,7 @@ type ActiveSearch = {
   id: string
   assistantMessageId: string
   controller: AbortController
+  awaitingCanonicalAfterValidation?: boolean
 }
 
 function assistantText(response: ChatSearchResponse) {
@@ -83,10 +84,17 @@ export function ChatPage() {
   const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [recommendedQuestions, setRecommendedQuestions] = React.useState<string[]>([])
   const activeSearchRef = React.useRef<ActiveSearch | null>(null)
+  const sessionIdRef = React.useRef(sessionId)
+  const pendingFollowUpRef = React.useRef<string | null>(null)
+  const startSearchRef = React.useRef<((value: string) => void) | null>(null)
+  const isMountedRef = React.useRef(true)
   const nextMessageIdRef = React.useRef(0)
 
   React.useEffect(() => {
+    isMountedRef.current = true
     return () => {
+      isMountedRef.current = false
+      pendingFollowUpRef.current = null
       const activeSearch = activeSearchRef.current
       activeSearchRef.current = null
       activeSearch?.controller.abort()
@@ -117,9 +125,22 @@ export function ChatPage() {
     fetchQuestions()
   }, [])
 
-  const handleSend = async () => {
-    const value = inputValue.trim()
-    if (!value) return
+  const setCurrentSessionId = (nextSessionId: string | null) => {
+    sessionIdRef.current = nextSessionId
+    setSessionId(nextSessionId)
+  }
+
+  const flushPendingFollowUp = () => {
+    if (!isMountedRef.current || activeSearchRef.current) return
+
+    const pendingFollowUp = pendingFollowUpRef.current
+    if (!pendingFollowUp) return
+
+    pendingFollowUpRef.current = null
+    startSearchRef.current?.(pendingFollowUp)
+  }
+
+  const startSearch = async (value: string) => {
 
     const previousSearch = activeSearchRef.current
     if (previousSearch) {
@@ -146,7 +167,6 @@ export function ChatPage() {
     activeSearchRef.current = { id: clientSearchId, assistantMessageId, controller }
 
     setMessages((prev) => [...prev, { id: `user-${++nextMessageIdRef.current}`, role: 'user', content: value }])
-    setInputValue('')
 
     setMessages((prev) => [
       ...prev,
@@ -162,7 +182,6 @@ export function ChatPage() {
     }
 
     const completeSearch = (response: ChatSearchResponse) => {
-      setSessionId(response.session_id ?? null)
       const bestDeal = response.deals?.[0]
       updateAssistant((message) => ({
         ...message,
@@ -216,6 +235,9 @@ export function ChatPage() {
 
       if (event.type === 'validation_error') {
         validationErrorShown = true
+        if (isActiveSearch() && activeSearchRef.current) {
+          activeSearchRef.current.awaitingCanonicalAfterValidation = true
+        }
         updateAssistant((message) => ({
           ...message,
           content: event.payload.message ?? '请输入完整的航班信息。',
@@ -229,9 +251,12 @@ export function ChatPage() {
       if (event.type === 'complete') {
         completeEventReceived = true
         if (event.payload.response) {
-          setSessionId(event.payload.response.session_id ?? null)
+          setCurrentSessionId(event.payload.response.session_id ?? null)
           if (!validationErrorShown) completeSearch(event.payload.response)
-          if (isActiveSearch()) activeSearchRef.current = null
+          if (isActiveSearch()) {
+            activeSearchRef.current = null
+            flushPendingFollowUp()
+          }
           return
         }
         if (!validationErrorShown) {
@@ -243,13 +268,16 @@ export function ChatPage() {
             cardData: undefined,
           }))
         }
-        if (isActiveSearch()) activeSearchRef.current = null
+        if (isActiveSearch()) {
+          activeSearchRef.current = null
+          flushPendingFollowUp()
+        }
       }
     }
 
     try {
       await searchApi.stream(
-        { message: value, session_id: sessionId },
+        { message: value, session_id: sessionIdRef.current },
         handleEvent,
         controller.signal
       )
@@ -258,7 +286,23 @@ export function ChatPage() {
       if (isActiveSearch() && !completeEventReceived && !validationErrorShown) settleIncompleteSearch()
     } finally {
       if (isActiveSearch()) activeSearchRef.current = null
+      flushPendingFollowUp()
     }
+  }
+
+  startSearchRef.current = startSearch
+
+  const handleSend = () => {
+    const value = inputValue.trim()
+    if (!value) return
+
+    setInputValue('')
+    if (activeSearchRef.current?.awaitingCanonicalAfterValidation) {
+      pendingFollowUpRef.current = value
+      return
+    }
+
+    void startSearch(value)
   }
 
   return (

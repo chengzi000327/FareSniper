@@ -89,6 +89,11 @@ async function send(message: string) {
   await waitFor(() => expect(calls.length).toBeGreaterThan(0));
 }
 
+function submit(message: string) {
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: message } });
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+}
+
 beforeEach(() => {
   calls.length = 0;
   streamMock.mockReset();
@@ -208,6 +213,115 @@ test("keeps validation feedback while accepting its canonical session for the ne
     expect.any(Function),
     expect.any(AbortSignal)
   );
+});
+
+test("serializes an immediate validation followup until canonical completion saves its session", async () => {
+  render(<ChatPage />);
+  await send("过去日期");
+
+  await act(async () => {
+    calls[0].onEvent({
+      type: "validation_error",
+      search_id: "server_search",
+      sequence: 1,
+      payload: { message: "请补充出发日期" },
+    });
+  });
+
+  submit("下周一出发");
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0].signal?.aborted).toBe(false);
+  expect(screen.getByText("请补充出发日期")).toBeInTheDocument();
+  expect(screen.queryByText("已取消本次搜索。")).not.toBeInTheDocument();
+
+  await act(async () => {
+    calls[0].onEvent(complete(2, {
+      session_id: "s_validation_followup",
+      deals: [],
+      recommendation: { text: "不应覆盖校验提示" },
+    }));
+    calls[0].resolve(null);
+  });
+
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(searchApi.stream).toHaveBeenLastCalledWith(
+    { message: "下周一出发", session_id: "s_validation_followup" },
+    expect.any(Function),
+    expect.any(AbortSignal)
+  );
+  expect(screen.getAllByText("下周一出发")).toHaveLength(1);
+  expect(screen.getByText("请补充出发日期")).toBeInTheDocument();
+});
+
+test("releases a queued validation followup after clean EOF", async () => {
+  render(<ChatPage />);
+  await send("缺少日期");
+
+  await act(async () => {
+    calls[0].onEvent({
+      type: "validation_error",
+      search_id: "server_search",
+      sequence: 1,
+      payload: { message: "请补充日期" },
+    });
+  });
+  submit("补充下周日期");
+
+  await act(async () => {
+    calls[0].resolve(null);
+  });
+
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(screen.getByText("请补充日期")).toBeInTheDocument();
+  expect(screen.getAllByText("补充下周日期")).toHaveLength(1);
+});
+
+test("releases a queued validation followup after stream error", async () => {
+  render(<ChatPage />);
+  await send("缺少目的地");
+
+  await act(async () => {
+    calls[0].onEvent({
+      type: "validation_error",
+      search_id: "server_search",
+      sequence: 1,
+      payload: { message: "请补充目的地" },
+    });
+  });
+  submit("补充上海");
+
+  await act(async () => {
+    calls[0].reject(new Error("reader failed"));
+  });
+
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(screen.getByText("请补充目的地")).toBeInTheDocument();
+  expect(screen.getAllByText("补充上海")).toHaveLength(1);
+});
+
+test("drops a queued validation followup when the chat unmounts", async () => {
+  const { unmount } = render(<ChatPage />);
+  await send("缺少返程日期");
+
+  await act(async () => {
+    calls[0].onEvent({
+      type: "validation_error",
+      search_id: "server_search",
+      sequence: 1,
+      payload: { message: "请补充返程日期" },
+    });
+  });
+  submit("下周日返程");
+
+  unmount();
+
+  expect(calls[0].signal?.aborted).toBe(true);
+  await act(async () => {
+    calls[0].onEvent(complete(2, response("卸载后不应继续")));
+    calls[0].resolve(null);
+  });
+  expect(calls).toHaveLength(1);
 });
 
 test("finalizes partial provider rows before replacing an active search", async () => {
