@@ -10,7 +10,7 @@ FareSniper 是一个面向自然语言机票搜索、低价发现和价格监控
 - 国际航线：组合 FlyAI、SerpAPI Google Flights 销售平台/航司结果，以及匹配的携程快照。
 - 价格监控：支持价格告警、推送订阅、价格历史和后台调度。
 - 安全观测：LangSmith 记录搜索、provider 和携程 worker 的状态、数量、延迟等摘要，不记录密钥、raw offer、完整预订 URL 或第三方原始错误。
-- Railway 部署：`backend`、`worker`、`frontend` 三个服务入口；backend 启动前执行 Alembic migration，worker 负责每小时携程刷新。
+- Railway 部署：三个服务各用独立 Config-as-Code；backend pre-deploy 执行 migration，严格单副本 worker 负责每小时携程刷新。
 
 ## 能力边界
 
@@ -23,7 +23,7 @@ FareSniper 是搜索与比价工具，不在站内出票或支付。预订操作
 - Agent: LangGraph、LangChain、OpenAI-compatible chat model providers
 - Flight providers: FlyAI CLI、携程快照、SerpAPI Google Flights
 - Observability: LangSmith 安全摘要 tracing、健康检查
-- Infra: Railway、PostgreSQL、Redis、Node.js 22、Chromium
+- Infra: Railway、Docker、PostgreSQL、Redis、Python 3.13、Node.js 22、Chromium
 
 ## 目录结构
 
@@ -32,7 +32,7 @@ backend/      FastAPI、Provider 聚合、数据库、worker 和观测能力
 frontend/     Next.js 前端、PWA、渐进搜索和航班卡片
 docs/         架构、计划和部署文档
 scripts/      本地检查脚本
-railway.toml  Railway 三服务启动配置
+backend/railway.api.toml、backend/railway.worker.toml、frontend/railway.toml
 ```
 
 ## 本地开发
@@ -71,6 +71,7 @@ ENABLE_MOCK_FALLBACK=false
 FLYAI_API_KEY=
 FLYAI_CLI_PATH=flyai
 SERPAPI_API_KEY=
+VARIFLIGHT_API_KEY=
 FLIGHT_PROVIDER_TIMEOUT_SECONDS=10
 CTRIP_SNAPSHOT_TTL_MINUTES=75
 CTRIP_REFRESH_BATCH_SIZE=20
@@ -86,19 +87,16 @@ LANGSMITH_TRACING=true
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=faresniper
+LANGCHAIN_TRACING_V2=false
 ```
 
-Tracing 必须同时有显式 `LANGSMITH_TRACING=true` 和 key 才启用。自定义 span 只包含航线/日期、状态、数量、延迟和缓存年龄等允许字段。
+Tracing 必须同时有显式 `LANGSMITH_TRACING=true` 和 key 才启用。`LANGCHAIN_TRACING_V2` 始终保持 false；只有 Task 10 手工 wrapper 在局部 context 中启用自定义安全 span。
 
 ## Railway
 
-根目录的 [`railway.toml`](railway.toml) 定义：
+Railway dashboard 中的三个服务都把 Root Directory 设为 `/`，Config File 分别设置为 `/backend/railway.api.toml`、`/backend/railway.worker.toml`、`/frontend/railway.toml`。backend 与 worker 生产构建共享 [`backend/Dockerfile`](backend/Dockerfile)；worker 必须严格单副本。
 
-- `backend`：执行 migration 后启动 FastAPI；镜像固定 Node.js 22 和 FlyAI CLI 1.0.16。
-- `worker`：保持 `python -m backend.workers.run_all`，每小时刷新携程快照。
-- `frontend`：启动 Next.js production server。
-
-变量边界、部署顺序、FlyAI 命令、NDJSON curl 和安全 smoke 命令见 [`docs/deployment/RAILWAY.md`](docs/deployment/RAILWAY.md)。
+完整变量归属、Dockerfile/Nixpacks fallback、部署顺序、FlyAI 命令、NDJSON curl 和安全 smoke 语义见 [`docs/deployment/RAILWAY.md`](docs/deployment/RAILWAY.md)。
 
 ## 测试
 

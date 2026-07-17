@@ -2,13 +2,20 @@ from __future__ import annotations
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from backend.config import settings
 from backend.infrastructure.scrapers.multi_platform import scrape_all_routes
 from backend.workers.ctrip_refresh import refresh_ctrip_once
 
 
 def build_scheduler() -> AsyncIOScheduler:
     s = AsyncIOScheduler(timezone="Asia/Shanghai")
-    s.add_job(scrape_all_routes, trigger="cron", minute=5, id="hourly_scrape")
+    if settings.variflight_api_key:
+        s.add_job(
+            scrape_all_routes,
+            trigger="cron",
+            minute=5,
+            id="hourly_scrape",
+        )
     s.add_job(
         refresh_ctrip_once,
         trigger="cron",

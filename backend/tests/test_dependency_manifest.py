@@ -54,6 +54,24 @@ def test_nixpacks_pins_flyai_cli_and_node():
     text = Path("backend/nixpacks.toml").read_text()
 
     assert "nodejs_22" in text
+    assert "python313" in text
+    assert "backend/requirements.txt" in text
+    assert "backend/third_party/flights_monitor/requirements.txt" in text
+    assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
+    assert "npx" not in text
+    assert "flyai config set" not in text
+
+
+def test_backend_dockerfile_has_complete_shared_runtime():
+    text = Path("backend/Dockerfile").read_text()
+
+    assert "FROM node:22" in text
+    assert "FROM python:3.13" in text
+    assert "chromium" in text
+    assert "chromium-driver" in text
+    assert "WORKDIR /app" in text
+    assert "backend/requirements.txt" in text
+    assert "backend/third_party/flights_monitor/requirements.txt" in text
     assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
     assert "npx" not in text
     assert "flyai config set" not in text
@@ -72,10 +90,12 @@ def test_env_example_has_safe_flight_provider_defaults():
     assert values["FLYAI_API_KEY"] == ""
     assert values["FLYAI_CLI_PATH"] == "flyai"
     assert values["SERPAPI_API_KEY"] == ""
+    assert values["VARIFLIGHT_API_KEY"] == ""
     assert values["FLIGHT_PROVIDER_TIMEOUT_SECONDS"] == "10"
     assert values["CTRIP_SNAPSHOT_TTL_MINUTES"] == "75"
     assert values["CTRIP_REFRESH_BATCH_SIZE"] == "20"
     assert values["RUN_SCHEDULER_IN_API"] == "false"
     assert values["LANGSMITH_TRACING"] == "true"
+    assert values["LANGCHAIN_TRACING_V2"] == "false"
     assert values["LANGSMITH_API_KEY"] == ""
     assert values["LANGSMITH_PROJECT"] == "faresniper"

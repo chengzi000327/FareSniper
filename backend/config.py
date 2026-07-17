@@ -153,46 +153,25 @@ def langsmith_tracing_enabled(
 ) -> bool:
     current = runtime_settings or get_settings()
     explicit_langsmith = _environment_flag("LANGSMITH_TRACING")
-    if explicit_langsmith is False:
-        return False
-
-    if explicit_langsmith is True:
-        requested = True
-    else:
-        legacy = _environment_flag("LANGCHAIN_TRACING_V2")
-        requested = (
-            legacy
-            if legacy is not None
-            else current.langsmith_tracing or current.langchain_tracing
-        )
-
-    api_key = (
-        os.getenv("LANGSMITH_API_KEY")
-        or os.getenv("LANGCHAIN_API_KEY")
-        or current.langsmith_api_key
-        or current.langchain_api_key
+    requested = (
+        explicit_langsmith
+        if explicit_langsmith is not None
+        else current.langsmith_tracing
     )
+    api_key = os.getenv("LANGSMITH_API_KEY") or current.langsmith_api_key
     return bool(requested and api_key)
 
 
-_trace_api_key = settings.langchain_api_key or settings.langsmith_api_key
+_trace_api_key = os.getenv("LANGSMITH_API_KEY") or settings.langsmith_api_key
 _trace_project = (
-    os.getenv("LANGCHAIN_PROJECT")
-    or os.getenv("LANGSMITH_PROJECT")
-    or settings.langchain_project
-    or settings.langsmith_project
+    os.getenv("LANGSMITH_PROJECT") or settings.langsmith_project
 )
 _trace_endpoint = (
-    os.getenv("LANGCHAIN_ENDPOINT")
-    or os.getenv("LANGSMITH_ENDPOINT")
-    or settings.langchain_endpoint
-    or settings.langsmith_endpoint
+    os.getenv("LANGSMITH_ENDPOINT") or settings.langsmith_endpoint
 )
 
-if _environment_flag("LANGSMITH_TRACING") is False:
-    os.environ["LANGCHAIN_TRACING_V2"] = "false"
-elif langsmith_tracing_enabled(settings):
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ.setdefault("LANGCHAIN_API_KEY", _trace_api_key)
-    os.environ.setdefault("LANGCHAIN_PROJECT", _trace_project)
-    os.environ.setdefault("LANGCHAIN_ENDPOINT", _trace_endpoint)
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
+if _trace_api_key:
+    os.environ["LANGCHAIN_API_KEY"] = _trace_api_key
+os.environ["LANGCHAIN_PROJECT"] = _trace_project
+os.environ["LANGCHAIN_ENDPOINT"] = _trace_endpoint

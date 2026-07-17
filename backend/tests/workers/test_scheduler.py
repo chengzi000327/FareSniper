@@ -2,16 +2,28 @@ from __future__ import annotations
 
 import pytest
 
-from backend.workers import run_all
+from backend.workers import run_all, scheduler as scheduler_module
 from backend.workers.scheduler import build_scheduler
 
 
-def test_hourly_scrape_job_registered():
+def test_hourly_scrape_job_registered_only_with_variflight_key(monkeypatch):
+    monkeypatch.setattr(
+        scheduler_module.settings, "variflight_api_key", "configured-key"
+    )
     s = build_scheduler()
     job_ids = {j.id for j in s.get_jobs()}
     assert "hourly_scrape" in job_ids
     job = s.get_job("hourly_scrape")
     assert str(job.trigger).startswith("cron[")
+
+
+def test_hourly_scrape_job_omitted_without_variflight_key(monkeypatch):
+    monkeypatch.setattr(scheduler_module.settings, "variflight_api_key", "")
+
+    scheduler = build_scheduler()
+
+    assert scheduler.get_job("hourly_scrape") is None
+    assert scheduler.get_job("ctrip_hourly_refresh") is not None
 
 
 def test_ctrip_hourly_refresh_registered_at_minute_zero():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from collections.abc import Mapping, Sequence
 from datetime import date
@@ -26,6 +27,11 @@ from backend.infrastructure.flight_data.providers.factory import (
 
 _ALLOWED_PROVIDERS = ("flyai", "ctrip", "serpapi")
 _ALLOWED_STATUSES = {status.value for status in ProviderStatus}
+_USABLE_STATUSES = {ProviderStatus.success.value, ProviderStatus.empty.value}
+_SELLER_PATTERN = re.compile(
+    r"^[A-Za-z0-9\u3400-\u9fff][A-Za-z0-9\u3400-\u9fff .&'()\-]{0,79}$"
+)
+_SENSITIVE_SELLER_MARKERS = ("www.", "sk-", "lsv2_", "token", "secret", "auth", "bearer")
 _EMPTY_SUMMARY = {
     "provider_statuses": {},
     "deal_count": 0,
@@ -80,9 +86,12 @@ def _safe_seller(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     seller = value.strip()
-    if not seller or len(seller) > 80 or "://" in seller:
+    if not seller or not _SELLER_PATTERN.fullmatch(seller):
         return None
-    if any(ord(character) < 32 for character in seller):
+    normalized = seller.casefold()
+    if any(marker in normalized for marker in _SENSITIVE_SELLER_MARKERS):
+        return None
+    if re.search(r"(?:^|[ .&'()\-])key(?:$|[ .&'()\-])", normalized):
         return None
     return seller
 
@@ -135,6 +144,13 @@ def _print_summary(summary: Mapping[str, Any]) -> None:
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
 
 
+def _has_usable_provider(summary: Mapping[str, Any]) -> bool:
+    statuses = summary.get("provider_statuses")
+    return isinstance(statuses, Mapping) and any(
+        status in _USABLE_STATUSES for status in statuses.values()
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -151,6 +167,12 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _print_summary(summary)
+    if not _has_usable_provider(summary):
+        print(
+            "Flight provider smoke check found no usable provider.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 

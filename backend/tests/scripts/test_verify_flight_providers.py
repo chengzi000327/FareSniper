@@ -155,3 +155,116 @@ def test_smoke_failure_omits_exception_text_and_traceback(
     assert secret not in captured.out + captured.err
     assert "booking.example" not in captured.out + captured.err
     assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    "seller",
+    [
+        "https://seller.example",
+        "www.seller.example",
+        "sk-sensitive-value",
+        "lsv2_sensitive_value",
+        "api_key",
+        "token seller",
+        "secret seller",
+        "auth provider",
+        "Bearer credential",
+        "seller=value",
+        "seller?query",
+        "seller/path",
+        r"seller\path",
+        "seller@example",
+        "seller:443",
+    ],
+)
+def test_smoke_omits_sensitive_seller_shapes(seller, smoke_module):
+    summary = smoke_module._safe_summary(
+        {
+            "provider_statuses": {"flyai": "success"},
+            "deals": [
+                {
+                    "platform": seller,
+                    "prices": [
+                        {"name": seller},
+                        {"name": "Singapore Airlines"},
+                        {"name": "中国国际航空"},
+                    ],
+                }
+            ],
+        }
+    )
+
+    assert summary["sellers"] == ["Singapore Airlines", "中国国际航空"]
+
+
+@pytest.mark.parametrize(
+    "provider_statuses",
+    [
+        {},
+        {"flyai": "error"},
+        {"flyai": "timeout", "ctrip": "queued"},
+        {"flyai": "disabled", "ctrip": "stale", "serpapi": "error"},
+    ],
+)
+def test_smoke_returns_failure_when_no_provider_succeeds(
+    monkeypatch, capsys, smoke_module, provider_statuses
+):
+    async def fake_run(origin, destination, depart_date):
+        return {
+            "provider_statuses": provider_statuses,
+            "deal_count": 0,
+            "sellers": [],
+        }
+
+    monkeypatch.setattr(smoke_module, "_run", fake_run)
+
+    exit_code = smoke_module.main(
+        [
+            "--origin",
+            "北京",
+            "--destination",
+            "上海",
+            "--depart-date",
+            "2099-08-01",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert set(json.loads(captured.out)) == {
+        "provider_statuses",
+        "deal_count",
+        "sellers",
+    }
+    assert captured.err == "Flight provider smoke check found no usable provider.\n"
+
+
+@pytest.mark.parametrize("terminal_status", ["success", "empty"])
+def test_smoke_returns_success_for_usable_terminal_provider(
+    monkeypatch, capsys, smoke_module, terminal_status
+):
+    async def fake_run(origin, destination, depart_date):
+        return {
+            "provider_statuses": {
+                "flyai": terminal_status,
+                "ctrip": "error",
+            },
+            "deal_count": 0,
+            "sellers": [],
+        }
+
+    monkeypatch.setattr(smoke_module, "_run", fake_run)
+
+    exit_code = smoke_module.main(
+        [
+            "--origin",
+            "北京",
+            "--destination",
+            "上海",
+            "--depart-date",
+            "2099-08-01",
+        ]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().err == ""

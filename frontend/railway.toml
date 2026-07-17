@@ -1,0 +1,8 @@
+[build]
+builder = "RAILPACK"
+buildCommand = "npm --prefix frontend ci && npm --prefix frontend run build"
+
+[deploy]
+startCommand = "npm --prefix frontend run start -- -p $PORT"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

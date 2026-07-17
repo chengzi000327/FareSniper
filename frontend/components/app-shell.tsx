@@ -52,7 +52,7 @@ export function AppShell() {
                 </h1>
 
                 <p className="mt-8 max-w-[33rem] text-[15px] leading-8 text-brand-muted sm:text-base lg:text-[15px] xl:text-[17px]">
-                  我们不只是比价，更是你的低价雷达。AI 24 小时穿透全网数据，综合计算行李额与税费，只为你锁定最真特价。
+                  输入航线和未来日期后，系统会逐步展示各来源状态。价格、税费与行李规则以预订页为准。
                 </p>
 
                 <div className="mt-10 flex flex-col items-start gap-4">
@@ -71,18 +71,8 @@ export function AppShell() {
                 </div>
 
                 <div className="mt-14 flex w-full flex-col items-start gap-5 border-t border-brand-text/10 pt-8 sm:flex-row sm:items-center">
-                  <div className="flex -space-x-2">
-                    {['赵', '钱', '孙', '李'].map((name) => (
-                      <div
-                        key={name}
-                        className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-brand-bg bg-brand-orange-light text-sm font-bold text-brand-orange"
-                      >
-                        {name}
-                      </div>
-                    ))}
-                  </div>
                   <p className="text-sm leading-7 text-brand-muted">
-                    已为 <span className="font-bold text-brand-text">12,847</span> 位旅行者捕捉到梦幻特价
+                    来源可能返回实时结果、小时快照或暂时不可用状态
                   </p>
                 </div>
               </motion.div>
@@ -104,20 +94,16 @@ export function AppShell() {
                   <DiscoveryCardContent
                     from="上海"
                     to="三亚"
-                    date="04-25"
-                    basePrice={299}
-                    tax={100}
-                    baggageFee={0}
-                    hasBaggage
-                    originalPrice={1280}
-                    platform="去哪儿网"
-                    recommendScore="9.6"
+                    basePrice={null}
+                    tax={null}
+                    baggageFee={null}
+                    hasBaggage={null}
+                    platform="飞猪旅行"
+                    recommendScore="--"
                     compact
                     prices={[
-                      { name: '去哪儿网', price: 399, lowest: true },
-                      { name: '携程旅行', price: 420 },
-                      { name: '飞猪旅行', price: 425 },
-                      { name: '航旅纵横', price: 430 },
+                      { name: '飞猪旅行', price: null, status: 'loading' },
+                      { name: '携程旅行', price: null, status: 'queued' },
                     ]}
                   />
                 </motion.div>
@@ -130,22 +116,22 @@ export function AppShell() {
                   className="absolute bottom-0 right-0 w-[92%] max-w-[32rem] overflow-hidden rounded-[28px] border border-brand-orange/10 bg-white shadow-[0_24px_80px_-24px_rgba(67,44,27,0.28)] sm:w-[74%] lg:right-[2%] lg:bottom-1 lg:w-[66%] xl:right-[3%] xl:bottom-0 xl:w-[62%] 2xl:right-[4%] 2xl:w-[64%]"
                 >
                   <DiscoveryCardContent
-                    from="北京"
-                    to="大理"
-                    date="05-12"
-                    basePrice={418}
-                    tax={100}
-                    baggageFee={50}
-                    hasBaggage={false}
-                    originalPrice={1560}
-                    platform="携程旅行"
-                    recommendScore="9.8"
+                    from="上海"
+                    to="新加坡"
+                    basePrice={null}
+                    tax={null}
+                    baggageFee={null}
+                    hasBaggage={null}
+                    platform="国际航司/销售平台"
+                    recommendScore="--"
                     compact
                     prices={[
-                      { name: '携程旅行', price: 568, lowest: true },
-                      { name: '飞猪旅行', price: 575 },
-                      { name: '航旅纵横', price: 580 },
-                      { name: '同程旅行', price: 585 },
+                      {
+                        name: '国际航司/销售平台',
+                        price: null,
+                        status: 'loading',
+                      },
+                      { name: '飞猪旅行', price: null, status: 'empty' },
                     ]}
                   />
                 </motion.div>
