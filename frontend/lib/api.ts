@@ -11,7 +11,7 @@ function clearSession() {
   window.localStorage.removeItem("fs_user_id");
 }
 
-async function ensureSession(force = false): Promise<string> {
+async function ensureSession(force = false, signal?: AbortSignal): Promise<string> {
   if (force) clearSession();
   let token = getToken();
   if (token) return token;
@@ -19,6 +19,7 @@ async function ensureSession(force = false): Promise<string> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
+    signal,
   });
   if (!r.ok) throw new Error(`session bootstrap failed: ${r.status}`);
   const body = await r.json();
@@ -27,8 +28,8 @@ async function ensureSession(force = false): Promise<string> {
   return body.access_token;
 }
 
-async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = await ensureSession();
+async function requestWithSession(path: string, init?: RequestInit): Promise<Response> {
+  const token = await ensureSession(false, init?.signal ?? undefined);
   const request = (authToken: string) =>
     fetch(`${BASE}${path}`, {
       headers: {
@@ -41,19 +42,38 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
   let r = await request(token);
   if (r.status === 401) {
-    const freshToken = await ensureSession(true);
+    const freshToken = await ensureSession(true, init?.signal ?? undefined);
     r = await request(freshToken);
   }
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+  return r;
+}
+
+async function http<T>(path: string, init?: RequestInit): Promise<T> {
+  const r = await requestWithSession(path, init);
   return r.json();
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export type ProviderDisplayStatus =
+  | "loading"
+  | "queued"
+  | "success"
+  | "empty"
+  | "stale"
+  | "timeout"
+  | "disabled"
+  | "error"
+  | "view_live_price";
+
 export interface PriceItem {
   name: string;
-  price: number;
+  price: number | null;
   lowest?: boolean;
+  status: ProviderDisplayStatus;
+  url?: string | null;
+  data_provider?: string | null;
 }
 
 export interface DealCardDto {
@@ -68,10 +88,12 @@ export interface DealCardDto {
   airline: string;
   depart_time: string;
   arrive_time: string;
-  price: number;
-  tax: number;
-  baggage_fee: number;
-  has_baggage: boolean;
+  price: number | null;
+  tax: number | null;
+  baggage_fee: number | null;
+  has_baggage: boolean | null;
+  total_price: number | null;
+  currency: string;
   recommend_score: string;
   prices: PriceItem[];
   original_price?: number;
@@ -100,6 +122,83 @@ export interface ChatSearchResponse {
   fallback?: FallbackDirective | null;
 }
 
+export interface SearchStreamEvent {
+  type: "started" | "provider_status" | "results" | "validation_error" | "complete";
+  search_id: string;
+  sequence: number;
+  payload: {
+    response?: ChatSearchResponse;
+    deals?: DealCardDto[];
+    provider?: string;
+    status?: ProviderDisplayStatus;
+    message?: string;
+    [key: string]: unknown;
+  };
+}
+
+function parseSearchStreamEvent(line: string): SearchStreamEvent {
+  const parsed: unknown = JSON.parse(line);
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("invalid stream event");
+  }
+  return parsed as SearchStreamEvent;
+}
+
+async function readNdjson(
+  response: Response,
+  onEvent: (event: SearchStreamEvent) => void
+): Promise<ChatSearchResponse | null> {
+  if (!response.body) throw new Error("stream body missing");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalResponse: ChatSearchResponse | null = null;
+  let completed = false;
+  let failure: unknown;
+
+  const emit = (line: string) => {
+    if (!line.trim()) return;
+    const event = parseSearchStreamEvent(line);
+    onEvent(event);
+    if (event.type === "complete" && event.payload.response) {
+      finalResponse = event.payload.response;
+    }
+  };
+
+  const consumeLines = () => {
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    lines.forEach(emit);
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      consumeLines();
+      if (done) {
+        buffer += decoder.decode();
+        if (buffer.trim()) emit(buffer);
+        completed = true;
+        return finalResponse;
+      }
+    }
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally {
+    if (!completed) {
+      try {
+        await reader.cancel(failure);
+      } catch {
+        // Preserve the original parse, callback, or abort error.
+      }
+    }
+    reader.releaseLock();
+  }
+}
+
 // ── API clients ──────────────────────────────────────────────────────────────
 
 export const searchApi = {
@@ -108,6 +207,18 @@ export const searchApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  stream: async (
+    body: { session_id: string | null; message: string },
+    onEvent: (event: SearchStreamEvent) => void,
+    signal?: AbortSignal
+  ) => {
+    const response = await requestWithSession("/api/search/stream", {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal,
+    });
+    return readNdjson(response, onEvent);
+  },
 };
 
 export const memoryApi = {

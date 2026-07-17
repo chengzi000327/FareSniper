@@ -1,9 +1,20 @@
-import type { DealCardDto } from './api'
+import type { DealCardDto, PriceItem } from './api'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
 import type { DealCardDto as ApiDealCardDto, DiscoveryCardContent } from "@/types/api";
 
+type NullableDiscoveryCardContentProps = Omit<
+  DiscoveryCardContentProps,
+  "basePrice" | "tax" | "baggageFee" | "hasBaggage" | "prices"
+> & {
+  basePrice: number | null;
+  tax: number | null;
+  baggageFee: number | null;
+  hasBaggage: boolean | null;
+  prices: PriceItem[];
+};
+
 export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
-  return {
+  const card: NullableDiscoveryCardContentProps = {
     from: deal.origin_city,
     to: deal.destination_city,
     date: deal.depart_date,
@@ -16,6 +27,9 @@ export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
     prices: deal.prices,
     bookingUrl: deal.booking_url ?? null,
   }
+
+  // Task 9 widens card props; this preserves transport nulls in the meantime.
+  return card as unknown as DiscoveryCardContentProps
 }
 
 export function dealCardToDiscoveryCard(d: ApiDealCardDto): DiscoveryCardContent {
