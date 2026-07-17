@@ -247,7 +247,13 @@ def test_event_redaction_is_recursive_key_agnostic_and_non_mutating():
         "href": "https://example.test/path?campaign=summer#details",
         "link": "http://example.test/other?token=secret#top",
         "ordinary": "https://example.test/plain?a=1#fragment",
-        "relative": "/search?q=kept#kept",
+        "relative": "/search?token=secret#frag",
+        "scheme_relative": (
+            "//book.example.test/path?api_key=secret#frag"
+        ),
+        "prose": "show fare? maybe later # not a URI",
+        "non_uri": "not-a-uri?token=kept#fragment",
+        "custom_scheme": "faresniper://book/path?token=kept#fragment",
         "malformed": "https://[",
         "rawPayload": {"secret": "raw"},
         "httpHeaders": {"Authorization": "Bearer secret"},
@@ -270,9 +276,15 @@ def test_event_redaction_is_recursive_key_agnostic_and_non_mutating():
     assert clean["href"] == "https://example.test/path"
     assert clean["link"] == "http://example.test/other"
     assert clean["ordinary"] == "https://example.test/plain"
+    assert clean["relative"] == "/search"
+    assert clean["scheme_relative"] == "//book.example.test/path"
     assert clean["nested"][0] == "https://example.test/list"
     assert clean["nested"][1]["value"] == "http://example.test/nested"
-    assert clean["relative"] == "/search?q=kept#kept"
+    assert clean["prose"] == "show fare? maybe later # not a URI"
+    assert clean["non_uri"] == "not-a-uri?token=kept#fragment"
+    assert clean["custom_scheme"] == (
+        "faresniper://book/path?token=kept#fragment"
+    )
     assert clean["malformed"] == "https://["
     assert set(clean).isdisjoint(
         {"rawPayload", "httpHeaders", "authorizationHeader", "api-key"}

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import SplitResult, urlsplit, urlunsplit
 
 
 _SENSITIVE_KEY_SUFFIXES = (
@@ -30,6 +30,33 @@ def _is_sensitive_key(key: object) -> bool:
     return _canonical_key(key).endswith(_SENSITIVE_KEY_SUFFIXES)
 
 
+def _is_recognized_uri_reference(value: str, parsed: SplitResult) -> bool:
+    if any(character.isspace() for character in value):
+        return False
+    if parsed.scheme in {"http", "https"}:
+        return bool(parsed.netloc)
+    if parsed.scheme or not value.startswith("/"):
+        return False
+    if value.startswith("//"):
+        try:
+            return bool(parsed.netloc and parsed.hostname)
+        except ValueError:
+            return False
+    return not parsed.netloc
+
+
+def _safe_uri_reference(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return value
+    if not _is_recognized_uri_reference(value, parsed):
+        return value
+    if not parsed.query and not parsed.fragment:
+        return value
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+
+
 def _safe_event_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
@@ -40,12 +67,7 @@ def _safe_event_value(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [_safe_event_value(item) for item in value]
     if isinstance(value, str):
-        try:
-            parsed = urlsplit(value)
-        except ValueError:
-            return value
-        if parsed.scheme in {"http", "https"} and parsed.netloc:
-            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+        return _safe_uri_reference(value)
     return value
 
 
