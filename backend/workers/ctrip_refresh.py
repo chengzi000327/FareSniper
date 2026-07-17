@@ -21,7 +21,10 @@ from backend.infrastructure.db.flight_demand_repo import (
     enqueue_demand,
 )
 from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
-from backend.infrastructure.observability.provider_tracing import trace_ctrip_refresh
+from backend.infrastructure.observability.provider_tracing import (
+    trace_ctrip_demand,
+    trace_ctrip_refresh,
+)
 from backend.utils.airport_codes import resolve_airport
 
 
@@ -99,11 +102,16 @@ async def _refresh_ctrip_once() -> CtripRefreshSummary:
 
         for demand in demands:
             try:
-                rows = await source.search_flights(
-                    demand.origin_code,
-                    demand.destination_code,
-                    demand.depart_date,
-                    demand.depart_date,
+                rows = await trace_ctrip_demand(
+                    origin_code=demand.origin_code,
+                    destination_code=demand.destination_code,
+                    depart_date=demand.depart_date,
+                    operation=lambda: source.search_flights(
+                        demand.origin_code,
+                        demand.destination_code,
+                        demand.depart_date,
+                        demand.depart_date,
+                    ),
                 )
                 if rows:
                     await upsert_provider_flights(

@@ -14,6 +14,9 @@ from backend.config import settings
 from backend.infrastructure.flight_data.providers.factory import (
     build_flight_providers,
 )
+from backend.infrastructure.observability.provider_tracing import (
+    trace_validate_and_normalize_input,
+)
 
 
 @tool
@@ -22,7 +25,12 @@ async def search_flights(
 ) -> dict:
     """查询指定出发地、目的地和日期的真实航班报价。"""
     try:
-        query = build_flight_query(origin, destination, depart_date)
+        query = trace_validate_and_normalize_input(
+            depart_date=depart_date,
+            operation=lambda: build_flight_query(
+                origin, destination, depart_date
+            ),
+        )
     except FlightQueryValidationError as exc:
         message = str(exc)
         emit_search_event("validation_error", {"message": message})

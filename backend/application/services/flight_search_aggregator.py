@@ -85,13 +85,12 @@ class FlightSearchAggregator:
         self, provider: FlightProvider, query: FlightQuery
     ) -> tuple[str, ProviderResult]:
         async def search_with_timeout() -> ProviderResult:
-            result = await asyncio.wait_for(
-                trace_provider_call(
-                    provider.name,
-                    query,
-                    lambda: provider.search(query),
+            result = await trace_provider_call(
+                provider.name,
+                query,
+                lambda: asyncio.wait_for(
+                    provider.search(query), timeout=self._timeout_seconds
                 ),
-                timeout=self._timeout_seconds,
             )
             if result.status in _BREAKER_FAILURE_STATUSES:
                 raise _ReturnedProviderFailure(result)

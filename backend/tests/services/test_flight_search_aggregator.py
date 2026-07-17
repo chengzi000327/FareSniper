@@ -132,6 +132,45 @@ async def test_timeout_does_not_discard_fast_result_and_cancels_slow_search():
 
 
 @pytest.mark.asyncio
+async def test_provider_trace_observes_timeout_instead_of_outer_cancellation(
+    monkeypatch,
+):
+    observed: list[str] = []
+
+    class SlowProvider:
+        name = "slow_traced_timeout"
+
+        def supports(self, query) -> bool:
+            return True
+
+        async def search(self, query) -> ProviderResult:
+            await asyncio.sleep(10)
+            raise AssertionError("unreachable")
+
+    async def recording_trace(provider_name, query, operation):
+        try:
+            return await operation()
+        except TimeoutError:
+            observed.append("timeout")
+            raise
+        except asyncio.CancelledError:
+            observed.append("cancelled")
+            raise
+
+    monkeypatch.setattr(
+        "backend.application.services.flight_search_aggregator.trace_provider_call",
+        recording_trace,
+    )
+
+    result = await FlightSearchAggregator(
+        [SlowProvider()], timeout_seconds=0.001
+    ).collect(_query())
+
+    assert result["provider_statuses"] == {"slow_traced_timeout": "timeout"}
+    assert observed == ["timeout"]
+
+
+@pytest.mark.asyncio
 async def test_applicable_providers_start_concurrently():
     both_started = asyncio.Event()
     started = 0

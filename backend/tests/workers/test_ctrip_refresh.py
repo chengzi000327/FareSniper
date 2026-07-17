@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -121,6 +122,91 @@ async def test_refresh_runs_batch_inside_ctrip_root_trace(monkeypatch):
     assert [operation.__name__ for operation in traced_operations] == [
         "_refresh_ctrip_once"
     ]
+
+
+@pytest.mark.asyncio
+async def test_refresh_wraps_each_demand_in_safe_child_span(monkeypatch):
+    traced_demands = []
+
+    class EmptySource:
+        async def search_flights(self, *args):
+            return []
+
+    async def fake_trace_demand(
+        *, origin_code, destination_code, depart_date, operation
+    ):
+        traced_demands.append((origin_code, destination_code, depart_date))
+        return await operation()
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _acquired_lease
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.seed_ctrip_demands", _async_none
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.claim_due_demands",
+        lambda limit: _async_value(
+            [_demand("BJS", "SHA"), _demand("CAN", "SHA")]
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.CtripSource",
+        lambda **kwargs: EmptySource(),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.trace_ctrip_demand",
+        fake_trace_demand,
+        raising=False,
+    )
+    monkeypatch.setattr("backend.workers.ctrip_refresh.asyncio.sleep", _async_none)
+
+    summary = await refresh_ctrip_once()
+
+    assert summary.processed == 2
+    assert summary.succeeded == 2
+    assert traced_demands == [
+        ("BJS", "SHA", "2099-08-01"),
+        ("CAN", "SHA", "2099-08-01"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_refresh_cancellation_propagates_from_demand(monkeypatch):
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class HangingSource:
+        async def search_flights(self, *args):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _acquired_lease
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.seed_ctrip_demands", _async_none
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.claim_due_demands",
+        lambda limit: _async_value([_demand()]),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.CtripSource",
+        lambda **kwargs: HangingSource(),
+    )
+
+    task = asyncio.create_task(refresh_ctrip_once())
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert cancelled.is_set()
 
 
 @pytest.mark.asyncio

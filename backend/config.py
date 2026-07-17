@@ -132,6 +132,49 @@ def get_settings() -> Settings:
 settings = get_settings()
 
 
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"0", "false", "no", "off"}
+
+
+def _environment_flag(name: str) -> bool | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    normalized = value.strip().casefold()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    return None
+
+
+def langsmith_tracing_enabled(
+    runtime_settings: Settings | None = None,
+) -> bool:
+    current = runtime_settings or get_settings()
+    explicit_langsmith = _environment_flag("LANGSMITH_TRACING")
+    if explicit_langsmith is False:
+        return False
+
+    if explicit_langsmith is True:
+        requested = True
+    else:
+        legacy = _environment_flag("LANGCHAIN_TRACING_V2")
+        requested = (
+            legacy
+            if legacy is not None
+            else current.langsmith_tracing or current.langchain_tracing
+        )
+
+    api_key = (
+        os.getenv("LANGSMITH_API_KEY")
+        or os.getenv("LANGCHAIN_API_KEY")
+        or current.langsmith_api_key
+        or current.langchain_api_key
+    )
+    return bool(requested and api_key)
+
+
 _trace_api_key = settings.langchain_api_key or settings.langsmith_api_key
 _trace_project = (
     os.getenv("LANGCHAIN_PROJECT")
@@ -146,12 +189,10 @@ _trace_endpoint = (
     or settings.langsmith_endpoint
 )
 
-if _trace_api_key and (
-    settings.langchain_tracing
-    or settings.langsmith_tracing
-    or settings.langsmith_api_key
-):
-    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+if _environment_flag("LANGSMITH_TRACING") is False:
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+elif langsmith_tracing_enabled(settings):
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
     os.environ.setdefault("LANGCHAIN_API_KEY", _trace_api_key)
     os.environ.setdefault("LANGCHAIN_PROJECT", _trace_project)
     os.environ.setdefault("LANGCHAIN_ENDPOINT", _trace_endpoint)

@@ -5,8 +5,10 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from langsmith import Client, traceable, tracing_context
 
 import backend.infrastructure.observability.provider_tracing as tracing
+from backend.config import get_settings
 from backend.application.contracts.decision import FrontendResponse
 from backend.application.contracts.flight_provider import (
     FlightOffer,
@@ -29,6 +31,7 @@ class _TraceRecord:
     parent: str | None
     outputs: dict[str, Any] | None = None
     exit_exception: BaseException | None = None
+    end_calls: int = 0
 
 
 class _FakeRun:
@@ -36,6 +39,7 @@ class _FakeRun:
         self._record = record
 
     def end(self, *, outputs: dict[str, Any]) -> None:
+        self._record.end_calls += 1
         self._record.outputs = outputs
 
 
@@ -77,7 +81,31 @@ def trace_records(monkeypatch) -> list[_TraceRecord]:
         return _FakeTrace(records, active, name, run_type, inputs)
 
     monkeypatch.setattr(tracing, "trace", fake_trace)
+    monkeypatch.setattr(
+        tracing, "langsmith_tracing_enabled", lambda: True, raising=False
+    )
     return records
+
+
+@pytest.fixture
+def sdk_runs(monkeypatch):
+    creates: list[dict[str, Any]] = []
+    updates: list[dict[str, Any]] = []
+
+    def capture_create(self, **kwargs):
+        creates.append(kwargs)
+
+    def capture_update(self, **kwargs):
+        updates.append(kwargs)
+
+    monkeypatch.setattr(Client, "create_run", capture_create)
+    monkeypatch.setattr(Client, "update_run", capture_update)
+    client = Client(
+        api_url="https://langsmith.invalid",
+        api_key="ls-test-key",
+        auto_batch_tracing=False,
+    )
+    return client, creates, updates
 
 
 def _offer() -> FlightOffer:
@@ -206,6 +234,150 @@ async def test_flight_search_trace_tree_contains_only_safe_summaries(trace_recor
     assert "raw-provider-payload-must-not-leak" not in trace_payload
     assert "book.example.test" not in trace_payload
     assert "secret seller" not in trace_payload
+    assert all(record.end_calls == 1 for record in trace_records)
+
+
+@pytest.mark.asyncio
+async def test_real_sdk_disables_automatic_graph_span_but_restores_provider_child(
+    monkeypatch, sdk_runs
+):
+    client, creates, updates = sdk_runs
+    monkeypatch.setattr(
+        tracing, "langsmith_tracing_enabled", lambda: True
+    )
+    secret_message = "full-user-message-must-not-leak"
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    provider_result = ProviderResult(
+        provider="sdk_provider",
+        status=ProviderStatus.success,
+        offers=[_offer()],
+    )
+
+    @traceable(name="automatic_graph_span")
+    async def automatic_graph(state):
+        result = await tracing.trace_provider_call(
+            "sdk_provider", query, lambda: _async_value(provider_result)
+        )
+        return FrontendResponse(
+            user_id="u1",
+            session_id="s-sdk",
+            deals=[{"price": result.offers[0].total_price}],
+            analysis={},
+            recommendation={},
+            meta={},
+        )
+
+    with tracing_context(
+        enabled=True, client=client, project_name="task-10-test"
+    ):
+        response = await tracing.trace_flight_search(
+            "req-sdk",
+            len(secret_message),
+            lambda: automatic_graph({"request_message": secret_message}),
+        )
+
+    assert response.session_id == "s-sdk"
+    assert [run["name"] for run in creates] == [
+        "flight_search",
+        "provider.sdk_provider",
+        "stream_results",
+    ]
+    root = creates[0]
+    provider = creates[1]
+    stream = creates[2]
+    assert provider["parent_run_id"] == root["id"]
+    assert stream["parent_run_id"] == root["id"]
+    assert provider["trace_id"] == stream["trace_id"] == root["trace_id"]
+    assert {run["name"] for run in updates} == {
+        "flight_search",
+        "provider.sdk_provider",
+        "stream_results",
+    }
+    sdk_payload = repr((creates, updates))
+    assert "automatic_graph_span" not in sdk_payload
+    assert secret_message not in sdk_payload
+    assert "book.example.test" not in sdk_payload
+    assert "raw-provider-payload" not in sdk_payload
+
+
+@pytest.mark.asyncio
+async def test_disabled_tracing_uses_no_sdk_runs_or_network(
+    monkeypatch, sdk_runs
+):
+    client, creates, updates = sdk_runs
+    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-test-key")
+    monkeypatch.setenv("LANGCHAIN_TRACING_V2", "true")
+    get_settings.cache_clear()
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    provider_result = ProviderResult(
+        provider="disabled_provider",
+        status=ProviderStatus.empty,
+    )
+
+    with tracing_context(enabled=True, client=client, project_name="task-10-test"):
+        result = await tracing.trace_provider_call(
+            "disabled_provider", query, lambda: _async_value(provider_result)
+        )
+
+    assert result is provider_result
+    assert creates == []
+    assert updates == []
+
+
+@pytest.mark.asyncio
+async def test_all_disabled_wrappers_bypass_custom_run_construction(monkeypatch):
+    monkeypatch.setattr(
+        tracing, "langsmith_tracing_enabled", lambda: False, raising=False
+    )
+    monkeypatch.setattr(
+        tracing,
+        "trace",
+        lambda *args, **kwargs: pytest.fail("disabled tracing created a run"),
+    )
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    provider_result = ProviderResult(
+        provider="disabled_provider",
+        status=ProviderStatus.empty,
+    )
+    response = FrontendResponse(
+        user_id="u1",
+        deals=[],
+        analysis={},
+        recommendation={},
+        meta={},
+    )
+    summary = CtripRefreshSummary()
+
+    assert (
+        await tracing.trace_provider_call(
+            "disabled_provider", query, lambda: _async_value(provider_result)
+        )
+        is provider_result
+    )
+    assert tracing.trace_stage("rank_results", {}, lambda: []) == []
+    assert (
+        tracing.trace_validate_and_normalize_input(
+            depart_date="2099-08-01", operation=lambda: "query"
+        )
+        == "query"
+    )
+    assert (
+        await tracing.trace_flight_search(
+            "req-disabled", 1, lambda: _async_value(response)
+        )
+        is response
+    )
+    assert await tracing.trace_ctrip_demand(
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+        operation=lambda: _async_value([]),
+    ) == []
+    assert (
+        await tracing.trace_ctrip_refresh(lambda: _async_value(summary))
+        is summary
+    )
 
 
 @pytest.mark.asyncio
@@ -225,6 +397,81 @@ async def test_provider_exception_is_reraised_after_safe_trace_end(trace_records
         "latency_ms": pytest.approx(0, abs=1000),
         "cache_age_seconds": None,
     }
+    assert trace_records[0].exit_exception is None
+    assert trace_records[0].end_calls == 1
+    assert secret not in repr(trace_records[0])
+
+
+@pytest.mark.asyncio
+async def test_provider_hard_timeout_is_recorded_as_timeout(trace_records):
+    query = build_flight_query("北京", "上海", "2099-08-01")
+
+    async def time_out() -> ProviderResult:
+        return await asyncio.wait_for(asyncio.sleep(10), timeout=0.001)
+
+    with pytest.raises(TimeoutError):
+        await tracing.trace_provider_call("slow", query, time_out)
+
+    assert trace_records[0].outputs["status"] == "timeout"
+    assert trace_records[0].outputs["offer_count"] == 0
+    assert trace_records[0].end_calls == 1
+    assert trace_records[0].exit_exception is None
+
+
+@pytest.mark.asyncio
+async def test_provider_external_cancellation_is_recorded_as_cancelled(trace_records):
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    started = asyncio.Event()
+
+    async def hang() -> ProviderResult:
+        started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    task = asyncio.create_task(tracing.trace_provider_call("slow", query, hang))
+    await started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert trace_records[0].outputs["status"] == "cancelled"
+    assert trace_records[0].end_calls == 1
+    assert trace_records[0].exit_exception is None
+
+
+def test_validate_and_normalize_span_records_no_raw_input_and_ends_once(
+    trace_records,
+):
+    result = tracing.trace_validate_and_normalize_input(
+        depart_date="2099-08-01",
+        operation=lambda: "normalized",
+    )
+
+    assert result == "normalized"
+    assert trace_records[0].name == "validate_and_normalize_input"
+    assert trace_records[0].inputs == {
+        "depart_date": "2099-08-01",
+        "field_count": 3,
+    }
+    assert trace_records[0].outputs == {"status": "success"}
+    assert trace_records[0].end_calls == 1
+
+
+def test_validate_and_normalize_exception_is_safely_reraised(trace_records):
+    secret = "full message must not reach trace"
+
+    def fail():
+        raise ValueError(secret)
+
+    with pytest.raises(ValueError, match="must not reach"):
+        tracing.trace_validate_and_normalize_input(
+            depart_date="not-a-date",
+            operation=fail,
+        )
+
+    assert trace_records[0].outputs == {"status": "error"}
+    assert trace_records[0].end_calls == 1
     assert trace_records[0].exit_exception is None
     assert secret not in repr(trace_records[0])
 
@@ -248,6 +495,7 @@ async def test_cancelled_search_emits_no_complete_or_sensitive_error(trace_recor
     assert trace_records[0].outputs == {"status": "cancelled", "result_count": 0}
     assert trace_records[1].outputs == {"status": "cancelled", "result_count": 0}
     assert "complete-user-message" not in repr(trace_records)
+    assert all(record.end_calls == 1 for record in trace_records)
 
 
 @pytest.mark.asyncio
@@ -273,17 +521,35 @@ async def test_failed_search_emits_one_sanitized_complete_from_stream_trace(
     assert trace_records[1].outputs == {"status": "error", "result_count": 0}
     assert secret not in repr(trace_records)
     assert secret not in repr(events)
+    assert all(record.end_calls == 1 for record in trace_records)
 
 
 @pytest.mark.asyncio
 async def test_ctrip_refresh_has_independent_safe_root_trace(trace_records):
     summary = CtripRefreshSummary(processed=3, succeeded=2, failed=1)
 
-    result = await tracing.trace_ctrip_refresh(lambda: _async_value(summary))
+    async def refresh_operation():
+        await tracing.trace_ctrip_demand(
+            origin_code="BJS",
+            destination_code="SHA",
+            depart_date="2099-08-01",
+            operation=lambda: _async_value([{"booking_url": "https://secret"}]),
+        )
+        await tracing.trace_ctrip_demand(
+            origin_code="CAN",
+            destination_code="SHA",
+            depart_date="2099-08-02",
+            operation=lambda: _async_value([]),
+        )
+        return summary
+
+    result = await tracing.trace_ctrip_refresh(refresh_operation)
 
     assert result == summary
     assert [(record.name, record.parent) for record in trace_records] == [
-        ("ctrip_hourly_refresh", None)
+        ("ctrip_hourly_refresh", None),
+        ("ctrip_demand", "ctrip_hourly_refresh"),
+        ("ctrip_demand", "ctrip_hourly_refresh"),
     ]
     assert trace_records[0].inputs == {"schedule": "hourly"}
     assert trace_records[0].outputs == {
@@ -292,6 +558,75 @@ async def test_ctrip_refresh_has_independent_safe_root_trace(trace_records):
         "failed": 1,
         "skipped_overlap": False,
     }
+    assert trace_records[1].inputs == {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    assert trace_records[1].outputs["status"] == "success"
+    assert trace_records[1].outputs["row_count"] == 1
+    assert trace_records[2].outputs["status"] == "empty"
+    assert trace_records[2].outputs["row_count"] == 0
+    assert "booking_url" not in repr(trace_records)
+    assert all(record.end_calls == 1 for record in trace_records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeError("raw worker response must not leak"), "error"),
+        (asyncio.CancelledError("worker cancellation payload"), "cancelled"),
+    ],
+)
+async def test_ctrip_refresh_exception_and_cancel_are_safely_reraised(
+    trace_records, error, expected_status
+):
+    async def fail():
+        raise error
+
+    with pytest.raises(type(error)):
+        await tracing.trace_ctrip_refresh(fail)
+
+    assert trace_records[0].outputs == {
+        "status": expected_status,
+        "processed": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "skipped_overlap": False,
+    }
+    assert trace_records[0].end_calls == 1
+    assert trace_records[0].exit_exception is None
+    assert str(error) not in repr(trace_records[0])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_status"),
+    [
+        (RuntimeError("raw demand rows must not leak"), "error"),
+        (asyncio.CancelledError("demand cancellation payload"), "cancelled"),
+    ],
+)
+async def test_ctrip_demand_exception_and_cancel_are_safely_reraised(
+    trace_records, error, expected_status
+):
+    async def fail():
+        raise error
+
+    with pytest.raises(type(error)):
+        await tracing.trace_ctrip_demand(
+            origin_code="BJS",
+            destination_code="SHA",
+            depart_date="2099-08-01",
+            operation=fail,
+        )
+
+    assert trace_records[0].outputs["status"] == expected_status
+    assert trace_records[0].outputs["row_count"] == 0
+    assert trace_records[0].end_calls == 1
+    assert trace_records[0].exit_exception is None
+    assert str(error) not in repr(trace_records[0])
 
 
 async def _async_value(value):

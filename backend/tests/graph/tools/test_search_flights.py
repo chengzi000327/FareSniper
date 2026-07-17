@@ -117,3 +117,56 @@ async def test_tool_delegates_to_real_aggregator_with_settings_timeout(monkeypat
     )
     assert captured["query"].origin_code == "BJS"
     assert captured["query"].destination_code == "SHA"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("depart_date", "expected_source"),
+    [
+        ("2099-08-01", "multi_provider"),
+        ("not-a-date", "validation_error"),
+    ],
+)
+async def test_tool_wraps_input_validation_in_safe_custom_span(
+    monkeypatch, depart_date, expected_source
+):
+    module = importlib.import_module(
+        "backend.application.graph.tools.search_flights"
+    )
+    trace_calls = []
+
+    def fake_trace_validate(*, depart_date, operation):
+        trace_calls.append(depart_date)
+        return operation()
+
+    class EmptyAggregator:
+        def __init__(self, providers, *, timeout_seconds):
+            pass
+
+        async def collect(self, query):
+            return {
+                "deals": [],
+                "source": "multi_provider",
+                "provider_statuses": {},
+                "errors": {},
+            }
+
+    monkeypatch.setattr(
+        module,
+        "trace_validate_and_normalize_input",
+        fake_trace_validate,
+        raising=False,
+    )
+    monkeypatch.setattr(module, "build_flight_providers", lambda: [])
+    monkeypatch.setattr(module, "FlightSearchAggregator", EmptyAggregator)
+
+    result = await search_flights.ainvoke(
+        {
+            "origin": "北京",
+            "destination": "上海",
+            "depart_date": depart_date,
+        }
+    )
+
+    assert result["source"] == expected_source
+    assert trace_calls == [depart_date]
