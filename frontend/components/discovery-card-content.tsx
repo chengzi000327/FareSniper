@@ -60,6 +60,11 @@ export function DiscoveryCardContent({
     error: '暂时不可用',
     empty: '暂无结果',
   }
+  const hasFreeBaggage = hasBaggage === true && baggageFee === 0
+  const isRealtimeLowest = (price: PriceItem) =>
+    price.lowest === true && price.status === 'success' && price.price !== null && computedTotal !== null
+  const hasVerifiedLowestPrice = prices.some(isRealtimeLowest)
+  const safeBookingUrl = isHttpsUrl(bookingUrl) ? bookingUrl : null
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
   const sectionGap = compact ? 'mb-3.5' : 'mb-5'
 
@@ -103,9 +108,19 @@ export function DiscoveryCardContent({
         <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <PriceBlock
           label="行李额"
-          value={baggageFee === null ? '待确认' : baggageFee > 0 ? '+¥' + baggageFee : '免费'}
+          value={
+            hasFreeBaggage
+              ? '免费'
+              : hasBaggage === false
+                ? '不含'
+                : baggageFee === null
+                  ? '待确认'
+                  : baggageFee > 0
+                    ? '+¥' + baggageFee
+                    : '待确认'
+          }
           compact={compact}
-          highlight={baggageFee !== null && baggageFee > 0}
+          highlight={hasBaggage === true && baggageFee !== null && baggageFee > 0}
         />
         <Equal className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <div className="col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0">
@@ -119,20 +134,30 @@ export function DiscoveryCardContent({
           <div className={`flex h-9 w-9 items-center justify-center rounded-full ${hasBaggage === true ? 'bg-green-50' : 'bg-brand-orange/5'}`}>
             <Briefcase className={`h-4 w-4 ${hasBaggage === true ? 'text-green-500' : 'text-brand-orange'}`} />
           </div>
-          <span className={`text-sm leading-6 font-medium ${hasBaggage === true ? 'text-green-600' : 'text-brand-orange'}`}>
-            {hasBaggage === null || baggageFee === null
+          <span className={`text-sm leading-6 font-medium ${hasFreeBaggage ? 'text-green-600' : 'text-brand-orange'}`}>
+            {hasBaggage === null
               ? '行李额以预订页为准'
-              : hasBaggage
+              : hasBaggage === false
+                ? '不含免费托运行李额度，行李额以预订页为准'
+                : hasFreeBaggage
                 ? '含免费托运行李额度'
-                : '暂无免费托运行李额度，需加购 ¥' + baggageFee + '，已为您计算至最终费用'}
+                : baggageFee === null
+                  ? '行李额以预订页为准'
+                  : '含托运行李额度，行李费用 ¥' + baggageFee + '，以预订页为准'}
           </span>
         </div>
 
-        <div className="flex items-start gap-3 rounded-2xl border border-green-100/60 bg-green-50/60 px-4 py-2">
+        <div className={`flex items-start gap-3 rounded-2xl px-4 py-2 ${hasVerifiedLowestPrice ? 'border border-green-100/60 bg-green-50/60' : 'border border-brand-text/5 bg-brand-bg/40'}`}>
           <ShieldCheck className="mt-0.5 h-4 w-4 text-green-600" />
-          <p className="text-sm leading-6 text-green-800">
-            AI 监测：该价格为综合行李后的全网<span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
-            <span className="font-bold text-brand-orange">{platform}</span> 下单。
+          <p className={`text-sm leading-6 ${hasVerifiedLowestPrice ? 'text-green-800' : 'text-brand-muted'}`}>
+            {hasVerifiedLowestPrice ? (
+              <>
+                AI 监测：该价格为综合行李后的全网<span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
+                <span className="font-bold text-brand-orange">{platform}</span> 下单。
+              </>
+            ) : (
+              '价格、税费与行李规则以预订页为准。'
+            )}
           </p>
         </div>
       </div>
@@ -140,19 +165,26 @@ export function DiscoveryCardContent({
       <div className={`${sectionGap} rounded-2xl border border-brand-text/5 bg-brand-bg/40 ${compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'}`}>
         <div className="mb-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-2 w-2 animate-pulse rounded-full bg-brand-orange" />
-            <span className="text-xs font-bold text-brand-muted sm:text-sm">全网多端实时同步</span>
+            <div className={`h-2 w-2 rounded-full bg-brand-orange ${hasVerifiedLowestPrice ? 'animate-pulse' : ''}`} />
+            <span className="text-xs font-bold text-brand-muted sm:text-sm">
+              {hasVerifiedLowestPrice ? '全网多端实时同步' : '多端价格参考'}
+            </span>
           </div>
-          <span className="rounded-md border border-brand-orange/20 bg-white/60 px-2 py-1 text-[11px] font-bold text-brand-orange">
-            实时底价
-          </span>
+          {hasVerifiedLowestPrice ? (
+            <span className="rounded-md border border-brand-orange/20 bg-white/60 px-2 py-1 text-[11px] font-bold text-brand-orange">
+              实时底价
+            </span>
+          ) : null}
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
-          {prices.map((price) => (
-            <div key={price.name} className={`flex items-center justify-between ${price.lowest === true ? 'opacity-100' : 'opacity-45'}`}>
+          {prices.map((price) => {
+            const lowest = isRealtimeLowest(price)
+
+            return (
+            <div key={price.name} className={`flex items-center justify-between ${lowest ? 'opacity-100' : 'opacity-45'}`}>
               <span className="text-sm font-medium text-brand-text">{price.name}</span>
               <div className="flex items-center gap-2">
-                {price.lowest === true && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
+                {lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
                 {price.status === 'view_live_price' && isHttpsUrl(price.url) ? (
                   <a
                     href={price.url}
@@ -163,13 +195,14 @@ export function DiscoveryCardContent({
                     查看实时价
                   </a>
                 ) : (
-                  <span className={`text-sm font-black sm:text-base ${price.lowest === true ? 'text-brand-orange' : 'text-brand-text'}`}>
+                  <span className={`text-sm font-black sm:text-base ${lowest ? 'text-brand-orange' : 'text-brand-text'}`}>
                     {price.status ? statusText[price.status] ?? money(price.price) : money(price.price)}
                   </span>
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
 
@@ -182,9 +215,9 @@ export function DiscoveryCardContent({
           <Bell className="h-4 w-4" />
           监控价格
         </button>
-        {bookingUrl ? (
+        {safeBookingUrl ? (
           <a
-            href={bookingUrl}
+            href={safeBookingUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-text px-4 py-2 text-sm font-bold text-white shadow-card transition hover:bg-brand-orange"

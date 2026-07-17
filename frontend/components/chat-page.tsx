@@ -17,6 +17,12 @@ type Message =
   | { id: string; role: 'user'; content: string }
   | { id: string; role: 'assistant'; content: string; isSpecial?: boolean; hasCard?: boolean; cardData?: DiscoveryCardContentProps }
 
+type ActiveSearch = {
+  id: string
+  assistantMessageId: string
+  controller: AbortController
+}
+
 function assistantText(response: ChatSearchResponse) {
   const deals = response.deals ?? []
   const bestDeal = deals[0]
@@ -76,14 +82,14 @@ export function ChatPage() {
   const [inputValue, setInputValue] = React.useState('')
   const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [recommendedQuestions, setRecommendedQuestions] = React.useState<string[]>([])
-  const activeSearchRef = React.useRef<string | null>(null)
-  const searchControllerRef = React.useRef<AbortController | null>(null)
+  const activeSearchRef = React.useRef<ActiveSearch | null>(null)
   const nextMessageIdRef = React.useRef(0)
 
   React.useEffect(() => {
     return () => {
+      const activeSearch = activeSearchRef.current
       activeSearchRef.current = null
-      searchControllerRef.current?.abort()
+      activeSearch?.controller.abort()
     }
   }, [])
 
@@ -115,12 +121,22 @@ export function ChatPage() {
     const value = inputValue.trim()
     if (!value) return
 
-    searchControllerRef.current?.abort()
+    const previousSearch = activeSearchRef.current
+    if (previousSearch) {
+      activeSearchRef.current = null
+      previousSearch.controller.abort()
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.role === 'assistant' && message.id === previousSearch.assistantMessageId
+            ? { ...message, content: '已取消本次搜索。', isSpecial: false }
+            : message
+        )
+      )
+    }
     const clientSearchId = `search-${++nextMessageIdRef.current}`
     const assistantMessageId = `assistant-${++nextMessageIdRef.current}`
     const controller = new AbortController()
-    activeSearchRef.current = clientSearchId
-    searchControllerRef.current = controller
+    activeSearchRef.current = { id: clientSearchId, assistantMessageId, controller }
 
     setMessages((prev) => [...prev, { id: `user-${++nextMessageIdRef.current}`, role: 'user', content: value }])
     setInputValue('')
@@ -151,9 +167,22 @@ export function ChatPage() {
     }
 
     let latestSequence = 0
-    let receivedComplete = false
+    let terminalEventReceived = false
+    const isActiveSearch = () => activeSearchRef.current?.id === clientSearchId
+    const settleIncompleteSearch = () => {
+      updateAssistant((message) => {
+        const hasCard = !!message.cardData
+        return {
+          ...message,
+          content: hasCard ? '已收到部分结果，其余来源暂时超时。' : '搜索未完整结束，请重试。',
+          isSpecial: false,
+          hasCard,
+          cardData: hasCard && message.cardData ? finalizeCard(message.cardData) : undefined,
+        }
+      })
+    }
     const handleEvent = (event: SearchStreamEvent) => {
-      if (activeSearchRef.current !== clientSearchId || event.sequence <= latestSequence) return
+      if (!isActiveSearch() || terminalEventReceived || event.sequence <= latestSequence) return
       latestSequence = event.sequence
 
       if (event.type === 'provider_status') {
@@ -176,6 +205,7 @@ export function ChatPage() {
       }
 
       if (event.type === 'validation_error') {
+        terminalEventReceived = true
         updateAssistant((message) => ({
           ...message,
           content: event.payload.message ?? '请输入完整的航班信息。',
@@ -187,7 +217,7 @@ export function ChatPage() {
       }
 
       if (event.type === 'complete') {
-        receivedComplete = true
+        terminalEventReceived = true
         if (event.payload.response) {
           completeSearch(event.payload.response)
           return
@@ -203,24 +233,16 @@ export function ChatPage() {
     }
 
     try {
-      const response = await searchApi.stream(
+      await searchApi.stream(
         { message: value, session_id: sessionId },
         handleEvent,
         controller.signal
       )
-      if (activeSearchRef.current === clientSearchId && response && !receivedComplete) completeSearch(response)
+      if (isActiveSearch() && !terminalEventReceived) settleIncompleteSearch()
     } catch {
-      if (activeSearchRef.current === clientSearchId) {
-        updateAssistant((message) => ({
-          ...message,
-          content: '搜索失败，请检查网络后重试。',
-          isSpecial: false,
-          hasCard: false,
-          cardData: undefined,
-        }))
-      }
+      if (isActiveSearch() && !terminalEventReceived) settleIncompleteSearch()
     } finally {
-      if (searchControllerRef.current === controller) searchControllerRef.current = null
+      if (isActiveSearch()) activeSearchRef.current = null
     }
   }
 

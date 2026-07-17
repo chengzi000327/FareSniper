@@ -59,3 +59,95 @@ test("renders every terminal provider state and rejects non-HTTPS live links", (
   expect(screen.queryByText("查看实时价")).not.toBeInTheDocument();
   expect(screen.queryByText("最低")).not.toBeInTheDocument();
 });
+
+test("only renders a clickable booking action for a parseable HTTPS URL", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      tax={0}
+      baggageFee={0}
+      hasBaggage
+      platform="飞猪"
+      bookingUrl="javascript:alert(1)"
+      prices={[]}
+    />
+  );
+
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+});
+
+test("does not describe unknown or excluded baggage as free", () => {
+  const { rerender } = render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      tax={0}
+      baggageFee={0}
+      hasBaggage={null}
+      platform="飞猪"
+      prices={[]}
+    />
+  );
+
+  expect(screen.queryByText("免费")).not.toBeInTheDocument();
+  expect(screen.getByText("行李额以预订页为准")).toBeInTheDocument();
+
+  rerender(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      tax={0}
+      baggageFee={0}
+      hasBaggage={false}
+      platform="飞猪"
+      prices={[]}
+    />
+  );
+
+  expect(screen.queryByText("免费")).not.toBeInTheDocument();
+  expect(screen.getByText("不含")).toBeInTheDocument();
+});
+
+test("limits lowest-price claims to a known realtime lowest offer", () => {
+  const { rerender } = render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={null}
+      totalPrice={null}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      platform="飞猪"
+      prices={[{ name: "飞猪", price: null, status: "view_live_price", lowest: true, url: "https://fly.test" }]}
+    />
+  );
+
+  expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
+  expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
+  expect(screen.queryByText(/全网.*最优解/)).not.toBeInTheDocument();
+
+  rerender(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      totalPrice={580}
+      tax={0}
+      baggageFee={0}
+      hasBaggage
+      platform="飞猪"
+      prices={[{ name: "飞猪", price: 580, status: "success", lowest: true }]}
+    />
+  );
+
+  expect(screen.getByText("实时底价")).toBeInTheDocument();
+  expect(
+    screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("最优解") === true)
+  ).toBeInTheDocument();
+});
