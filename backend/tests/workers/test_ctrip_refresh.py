@@ -100,7 +100,7 @@ async def test_overlap_skips_browser_and_seeding(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_refresh_isolates_failures_and_delays_every_demand(
+async def test_refresh_counts_collection_error_and_continues_with_later_demand(
     monkeypatch, caplog
 ):
     caplog.set_level("INFO", logger="backend.workers.ctrip_refresh")

@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 _SUCCESS_PROVIDER_CODES = {0, "0", 200, "200"}
 
 
+class _CtripStructuralParseError(Exception):
+    pass
+
+
 def _is_recognized_success_envelope(response) -> bool:
     """Accept the inventory shape used here plus repository success codes.
 
@@ -240,6 +244,14 @@ class CtripFlightClient:
                     parsed = self._parse_response(data, dcity_name, acity_name, date_str)
                     flights.extend(parsed)
                     got_response = True
+                except _CtripStructuralParseError:
+                    logger.warning(
+                        "ctrip_response_structural_parse_failed origin=%s "
+                        "destination=%s depart_date=%s",
+                        dcity,
+                        acity,
+                        date_str,
+                    )
                 except (json.JSONDecodeError, KeyError, TypeError):
                     logger.warning(
                         "ctrip_response_parse_failed origin=%s destination=%s "
@@ -407,7 +419,7 @@ class CtripFlightClient:
                     "date": date_str,
                 })
 
-            except (KeyError, TypeError, IndexError):
+            except (AttributeError, KeyError, TypeError, IndexError):
                 parse_error += 1
                 continue
 
@@ -424,6 +436,8 @@ class CtripFlightClient:
                 no_valid_price,
                 parse_error,
             )
+        if parse_error == len(fl_list):
+            raise _CtripStructuralParseError()
 
         return flights
 

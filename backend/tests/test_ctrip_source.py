@@ -319,6 +319,95 @@ def test_client_late_parse_exception_invalidates_response(monkeypatch, caplog):
     assert SENSITIVE_SENTINEL not in caplog.text
 
 
+@pytest.mark.parametrize(
+    "inventory",
+    [
+        [{}],
+        [{"flightSegments": [{}]}],
+    ],
+)
+def test_client_rejects_inventory_when_every_item_is_structurally_invalid(
+    monkeypatch, inventory
+):
+    payload = json.dumps(
+        {"code": 0, "data": {"flightItineraryList": inventory}}
+    )
+    _, client = _real_client_with_responses(monkeypatch, [payload])
+
+    flights, got_response = client.search_oneway(
+        "PEK", "NRT", "北京", "东京", "2099-08-01"
+    )
+
+    assert flights == []
+    assert got_response is False
+
+
+@pytest.mark.asyncio
+async def test_structurally_invalid_inventory_raises_through_source(monkeypatch):
+    ctrip_api = _load_ctrip_api(monkeypatch)
+    payload = json.dumps(
+        {"code": 0, "data": {"flightItineraryList": [{}]}}
+    )
+    driver = _FakeDriver(json.dumps([payload]))
+
+    async def no_retry_delay(fn, *args, **kwargs):
+        return await fn(*args)
+
+    monkeypatch.setattr(
+        ctrip_api, "init_browser", lambda **kwargs: (driver, None)
+    )
+    monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
+    monkeypatch.setattr(
+        "backend.data_sources.ctrip_source.retry_with_backoff", no_retry_delay
+    )
+
+    source = CtripSource(enable_mock_fallback=False, headless=True)
+    with pytest.raises(CtripCollectionError):
+        await source.search_flights(
+            "PEK", "NRT", "2099-08-01", "2099-08-01"
+        )
+
+
+@pytest.mark.parametrize(
+    "price_list",
+    [
+        [],
+        [{"cabin": "C", "adultPrice": 800}],
+    ],
+)
+def test_client_accepts_structurally_valid_inventory_filtered_without_fares(
+    monkeypatch, price_list
+):
+    item = {
+        "flightSegments": [
+            {
+                "flightList": [
+                    {
+                        "flightNo": "CA901",
+                        "marketAirlineName": "Airline",
+                        "departureDateTime": "2099-08-01 08:00:00",
+                        "arrivalDateTime": "2099-08-01 10:00:00",
+                        "duration": 120,
+                    }
+                ]
+            }
+        ],
+        "priceList": price_list,
+    }
+    payload = json.dumps(
+        {"code": 0, "data": {"flightItineraryList": [item]}}
+    )
+    _, client = _real_client_with_responses(monkeypatch, [payload])
+
+    flights, got_response = client.search_oneway(
+        "PEK", "NRT", "北京", "东京", "2099-08-01"
+    )
+
+    assert flights == []
+    assert got_response is True
+
+
 def test_client_exception_text_is_not_logged(monkeypatch, caplog):
     ctrip_api = _load_ctrip_api(monkeypatch)
     client = ctrip_api.CtripFlightClient(headless=True)
