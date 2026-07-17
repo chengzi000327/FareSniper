@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import json
 import re
 
@@ -66,6 +66,7 @@ def test_nixpacks_pins_flyai_cli_and_node():
     import tomllib
 
     config = tomllib.loads(text)
+    assert config["phases"]["install"]["dependsOn"] == ["setup"]
     assert config["start"]["cmd"] == (
         "sh -c 'exec uvicorn backend.main:app --host 0.0.0.0 "
         '--port "${PORT:-8000}"\''
@@ -95,11 +96,12 @@ def test_backend_dockerfile_has_complete_shared_runtime():
 
 
 def test_docker_context_excludes_secrets_and_build_artifacts():
-    entries = {
+    ordered_entries = [
         line.strip()
         for line in Path(".dockerignore").read_text().splitlines()
         if line.strip() and not line.lstrip().startswith("#")
-    }
+    ]
+    entries = set(ordered_entries)
 
     for required in {
         ".git",
@@ -121,6 +123,18 @@ def test_docker_context_excludes_secrets_and_build_artifacts():
         "frontend/.next",
     }:
         assert required in entries
+
+    assert ".env*" in entries
+    assert "**/.env*" in entries
+    assert "!.env.example" in entries
+    assert "!**/.env.example" in entries
+    assert ordered_entries.index(".env*") < ordered_entries.index("!.env.example")
+    assert ordered_entries.index("**/.env*") < ordered_entries.index(
+        "!**/.env.example"
+    )
+    assert PurePosixPath(".env.local").match(".env*")
+    assert PurePosixPath("backend/.env.production").match("**/.env*")
+    assert PurePosixPath("backend/.env.example").match("!**/.env.example"[1:])
 
     assert "backend" not in entries
     assert "backend/requirements.txt" not in entries

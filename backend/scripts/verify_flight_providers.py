@@ -8,6 +8,7 @@ import hmac
 import json
 import re
 import sys
+import unicodedata
 from collections.abc import Mapping, Sequence
 from datetime import date
 from typing import Any
@@ -29,11 +30,38 @@ from backend.infrastructure.flight_data.providers.factory import (
 _ALLOWED_PROVIDERS = ("flyai", "ctrip", "serpapi")
 _ALLOWED_STATUSES = {status.value for status in ProviderStatus}
 _USABLE_STATUSES = {ProviderStatus.success.value, ProviderStatus.empty.value}
-_SELLER_PATTERN = re.compile(
-    r"^[A-Za-z0-9\u3400-\u9fff][A-Za-z0-9\u3400-\u9fff .&'()\-]{0,79}$"
-)
-_OPAQUE_SELLER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{24,}$")
 _SENSITIVE_SELLER_MARKERS = ("www.", "sk-", "lsv2_", "token", "secret", "auth", "bearer")
+_KNOWN_SELLERS = {
+    "飞猪": "飞猪",
+    "飞猪旅行": "飞猪旅行",
+    "携程": "携程",
+    "携程旅行": "携程旅行",
+    "trip.com": "Trip.com",
+    "google flights": "Google Flights",
+}
+_KNOWN_SHORT_CHINESE_AIRLINES = {
+    "国航",
+    "东航",
+    "南航",
+    "海航",
+    "厦航",
+    "川航",
+    "山航",
+    "深航",
+}
+_CHINESE_AIRLINE_PATTERN = re.compile(r"^[\u3400-\u9fff]{2,24}(?:航空|航司)$")
+_ENGLISH_AIRLINE_PATTERN = re.compile(
+    r"^[A-Za-z][A-Za-z'&-]*(?: [A-Za-z][A-Za-z'&-]*){1,5}$"
+)
+_ENGLISH_AIRLINE_PREFIXES = {"air"}
+_ENGLISH_AIRLINE_SUFFIXES = {
+    "air",
+    "airlines",
+    "airways",
+    "aviation",
+    "flights",
+    "travel",
+}
 _SECRET_SETTING_NAMES = (
     "flyai_api_key",
     "serpapi_api_key",
@@ -56,8 +84,17 @@ _EMPTY_SUMMARY = {
 }
 
 
+class _SafeArgumentError(Exception):
+    pass
+
+
+class _SafeArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        raise _SafeArgumentError from None
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _SafeArgumentParser(
         description="Verify configured flight providers with a safe JSON summary."
     )
     parser.add_argument("--origin", required=True)
@@ -121,13 +158,31 @@ def _contains_configured_secret(value: str) -> bool:
     return False
 
 
+def _normalize_seller(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).strip().split())
+
+
+def _is_confirmed_seller_name(value: str) -> bool:
+    if value.casefold() in _KNOWN_SELLERS:
+        return True
+    if value in _KNOWN_SHORT_CHINESE_AIRLINES:
+        return True
+    if _CHINESE_AIRLINE_PATTERN.fullmatch(value):
+        return True
+    if not _ENGLISH_AIRLINE_PATTERN.fullmatch(value):
+        return False
+    words = value.casefold().split()
+    return (
+        words[0] in _ENGLISH_AIRLINE_PREFIXES
+        or words[-1] in _ENGLISH_AIRLINE_SUFFIXES
+    )
+
+
 def _safe_seller(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
-    seller = value.strip()
-    if not seller or _OPAQUE_SELLER_PATTERN.fullmatch(seller):
-        return None
-    if not _SELLER_PATTERN.fullmatch(seller):
+    seller = _normalize_seller(value)
+    if not seller or len(seller) > 80:
         return None
     normalized = seller.casefold()
     if any(marker in normalized for marker in _SENSITIVE_SELLER_MARKERS):
@@ -136,7 +191,9 @@ def _safe_seller(value: Any) -> str | None:
         return None
     if _contains_configured_secret(seller):
         return None
-    return seller
+    if not _is_confirmed_seller_name(seller):
+        return None
+    return _KNOWN_SELLERS.get(normalized, seller)
 
 
 def _safe_summary(result: Any) -> dict[str, Any]:
@@ -195,7 +252,15 @@ def _has_usable_provider(summary: Mapping[str, Any]) -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    try:
+        args = _parser().parse_args(argv)
+    except _SafeArgumentError:
+        _print_summary(_EMPTY_SUMMARY)
+        print(
+            "Flight provider smoke check rejected invalid arguments.",
+            file=sys.stderr,
+        )
+        return 2
     try:
         summary = asyncio.run(
             _run(args.origin, args.destination, args.depart_date)

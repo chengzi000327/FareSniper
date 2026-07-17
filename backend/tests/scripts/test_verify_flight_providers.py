@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -197,6 +199,85 @@ def test_smoke_omits_sensitive_seller_shapes(seller, smoke_module):
     )
 
     assert summary["sellers"] == ["Singapore Airlines", "中国国际航空"]
+
+
+@pytest.mark.parametrize(
+    "seller",
+    [
+        "A1B2C3D4E5F6",
+        "0123456789abcdefABCD",
+        "eyJhbGciOiJIUzI1NiJ9.abc123.signature",
+        "https://seller.example/path",
+    ],
+)
+def test_safe_seller_rejects_unconfirmed_or_opaque_values(seller, smoke_module):
+    assert smoke_module._safe_seller(seller) is None
+
+
+@pytest.mark.parametrize(
+    ("seller", "expected"),
+    [
+        ("飞猪", "飞猪"),
+        ("携程", "携程"),
+        ("Trip.com", "Trip.com"),
+        ("Google Flights", "Google Flights"),
+        ("  Singapore   Airlines  ", "Singapore Airlines"),
+        ("Partner Air", "Partner Air"),
+        ("Air France", "Air France"),
+        ("中国国际航空", "中国国际航空"),
+    ],
+)
+def test_safe_seller_normalizes_confirmed_platform_and_airline_names(
+    seller, expected, smoke_module
+):
+    assert smoke_module._safe_seller(seller) == expected
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        [
+            "--origin",
+            "北京",
+            "--destination",
+            "上海",
+            "--depart-date",
+            "2099-08-01",
+            "--unknown-provider-argument",
+            "https://private.example/path?token=ARG_SECRET_SENTINEL",
+        ],
+        [
+            "--origin",
+            "https://private.example/path?token=ARG_SECRET_SENTINEL",
+            "--destination",
+            "上海",
+            "--depart-date",
+        ],
+    ],
+)
+def test_smoke_argument_errors_never_echo_unknown_values(arguments):
+    injected = "https://private.example/path?token=ARG_SECRET_SENTINEL"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "backend.scripts.verify_flight_providers",
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert json.loads(result.stdout) == {
+        "provider_statuses": {},
+        "deal_count": 0,
+        "sellers": [],
+    }
+    assert result.stderr == "Flight provider smoke check rejected invalid arguments.\n"
+    assert injected not in result.stdout + result.stderr
+    assert "ARG_SECRET_SENTINEL" not in result.stdout + result.stderr
 
 
 def test_smoke_omits_configured_secret_and_secret_substrings(

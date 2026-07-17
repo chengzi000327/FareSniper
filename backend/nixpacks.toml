@@ -2,6 +2,7 @@
 nixPkgs = ["...", "chromium", "chromedriver", "nodejs_22", "python313", "gcc"]
 
 [phases.install]
+dependsOn = ["setup"]
 cmds = [
   "pip install -r backend/requirements.txt -r backend/third_party/flights_monitor/requirements.txt",
   "npm install -g @fly-ai/flyai-cli@1.0.16"
