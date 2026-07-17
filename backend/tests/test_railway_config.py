@@ -36,9 +36,7 @@ def test_api_uses_shared_backend_dockerfile_and_predeploy_migration():
     assert config["deploy"]["preDeployCommand"] == [
         "alembic -c backend/alembic.ini upgrade head"
     ]
-    assert config["deploy"]["startCommand"] == (
-        "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
-    )
+    assert "startCommand" not in config["deploy"]
     assert config["deploy"]["healthcheckPath"] == "/health"
 
 
@@ -55,16 +53,12 @@ def test_worker_uses_shared_image_without_migration():
     )
 
 
-def test_frontend_build_and_start_are_explicit_from_repo_root():
+def test_frontend_build_and_start_are_explicit_from_frontend_root():
     config = _config("frontend")
 
     assert config["build"]["builder"] == "RAILPACK"
-    assert config["build"]["buildCommand"] == (
-        "npm --prefix frontend ci && npm --prefix frontend run build"
-    )
-    assert config["deploy"]["startCommand"] == (
-        "npm --prefix frontend run start -- -p $PORT"
-    )
+    assert config["build"]["buildCommand"] == "npm ci && npm run build"
+    assert config["deploy"]["startCommand"] == "npm run start -- -p $PORT"
 
 
 def test_railway_configs_only_use_supported_keys():
@@ -90,7 +84,12 @@ def test_deployment_docs_define_dashboard_contract_and_safety_limits():
     combined = railway_docs + "\n" + readme
 
     assert "Root Directory" in railway_docs
-    assert "`/`" in railway_docs
+    assert "| `backend` | `/` | `/backend/railway.api.toml`" in railway_docs
+    assert "| `worker` | `/` | `/backend/railway.worker.toml`" in railway_docs
+    assert (
+        "| `frontend` | `/frontend` | `/frontend/railway.toml`"
+        in railway_docs
+    )
     for config_path in (
         "/backend/railway.api.toml",
         "/backend/railway.worker.toml",
@@ -100,9 +99,12 @@ def test_deployment_docs_define_dashboard_contract_and_safety_limits():
     assert "backend/Dockerfile" in combined
     assert "生产" in railway_docs and "Dockerfile" in railway_docs
     assert "严格单副本" in railway_docs
+    assert "FARESNIPER_LANGSMITH_TRACING=true" in combined
+    assert "LANGSMITH_TRACING=false" in combined
     assert "LANGCHAIN_TRACING_V2=false" in combined
     assert "不要开启 `LANGCHAIN_TRACING_V2`" in railway_docs
     assert "VARIFLIGHT_API_KEY=" in railway_docs
     assert "未配置" in railway_docs and "hourly_scrape" in railway_docs
     assert "root `railway.toml`" not in combined
     assert "根目录的 [`railway.toml`]" not in combined
+    assert "nixpacks build . --config backend/nixpacks.toml" in railway_docs

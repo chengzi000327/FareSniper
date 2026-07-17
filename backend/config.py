@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List
 
+from langsmith import configure as configure_langsmith
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -89,7 +90,10 @@ class Settings(BaseSettings):
         default="https://api.smith.langchain.com",
         alias="LANGSMITH_ENDPOINT",
     )
-    langsmith_tracing: bool = Field(default=False, alias="LANGSMITH_TRACING")
+    faresniper_langsmith_tracing: bool = Field(
+        default=False,
+        alias="FARESNIPER_LANGSMITH_TRACING",
+    )
     langsmith_prompt_prefix: str = Field(default="faresniper-")
     prompt_cache_ttl_seconds: float = Field(default=300.0)
 
@@ -152,11 +156,11 @@ def langsmith_tracing_enabled(
     runtime_settings: Settings | None = None,
 ) -> bool:
     current = runtime_settings or get_settings()
-    explicit_langsmith = _environment_flag("LANGSMITH_TRACING")
+    explicit_langsmith = _environment_flag("FARESNIPER_LANGSMITH_TRACING")
     requested = (
         explicit_langsmith
         if explicit_langsmith is not None
-        else current.langsmith_tracing
+        else current.faresniper_langsmith_tracing
     )
     api_key = os.getenv("LANGSMITH_API_KEY") or current.langsmith_api_key
     return bool(requested and api_key)
@@ -170,7 +174,9 @@ _trace_endpoint = (
     os.getenv("LANGSMITH_ENDPOINT") or settings.langsmith_endpoint
 )
 
+os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
+configure_langsmith(enabled=False)
 if _trace_api_key:
     os.environ["LANGCHAIN_API_KEY"] = _trace_api_key
 os.environ["LANGCHAIN_PROJECT"] = _trace_project

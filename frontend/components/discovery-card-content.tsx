@@ -27,6 +27,7 @@ export type DiscoveryCardContentProps = {
   compact?: boolean
   onMonitorPrice?: () => void
   bookingUrl?: string | null
+  placeholder?: boolean
 }
 
 export function DiscoveryCardContent({
@@ -44,6 +45,7 @@ export function DiscoveryCardContent({
   compact,
   onMonitorPrice,
   bookingUrl,
+  placeholder = false,
 }: DiscoveryCardContentProps) {
   const computedTotal =
     totalPrice ??
@@ -83,7 +85,9 @@ export function DiscoveryCardContent({
               <ArrowRight className="h-4 w-4 text-brand-muted/60" />
               <h3 className={`font-black leading-none ${compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{to}</h3>
             </div>
-            <p className={`font-medium text-brand-muted ${compact ? 'text-xs' : 'text-sm'}`}>直飞特惠 · {date || '实时价格'}</p>
+            <p className={`font-medium text-brand-muted ${compact ? 'text-xs' : 'text-sm'}`}>
+              {placeholder ? '待查询 · 正在获取数据' : `直飞特惠 · ${date || '实时价格'}`}
+            </p>
           </div>
         </div>
         <div className="flex flex-col items-start sm:items-end">

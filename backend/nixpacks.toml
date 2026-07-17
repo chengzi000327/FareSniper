@@ -1,8 +1,15 @@
 [phases.setup]
-nixPkgs = ["chromium", "chromedriver", "nodejs_22", "python313"]
+nixPkgs = ["...", "chromium", "chromedriver", "nodejs_22", "python313", "gcc"]
 
 [phases.install]
 cmds = [
   "pip install -r backend/requirements.txt -r backend/third_party/flights_monitor/requirements.txt",
   "npm install -g @fly-ai/flyai-cli@1.0.16"
 ]
+
+[variables]
+PYTHONUNBUFFERED = "1"
+PIP_NO_CACHE_DIR = "1"
+
+[start]
+cmd = "sh -c 'exec uvicorn backend.main:app --host 0.0.0.0 --port \"${PORT:-8000}\"'"

@@ -83,18 +83,19 @@ RUN_SCHEDULER_IN_API=false
 ## LangSmith
 
 ```dotenv
-LANGSMITH_TRACING=true
+FARESNIPER_LANGSMITH_TRACING=true
+LANGSMITH_TRACING=false
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=faresniper
 LANGCHAIN_TRACING_V2=false
 ```
 
-Tracing 必须同时有显式 `LANGSMITH_TRACING=true` 和 key 才启用。`LANGCHAIN_TRACING_V2` 始终保持 false；只有 Task 10 手工 wrapper 在局部 context 中启用自定义安全 span。
+Tracing 必须同时有私有 `FARESNIPER_LANGSMITH_TRACING=true` 和 key 才启用。官方 `LANGSMITH_TRACING` 与 `LANGCHAIN_TRACING_V2` 始终保持 false；只有 Task 10 手工 wrapper 在局部 context 中启用自定义安全 span。
 
 ## Railway
 
-Railway dashboard 中的三个服务都把 Root Directory 设为 `/`，Config File 分别设置为 `/backend/railway.api.toml`、`/backend/railway.worker.toml`、`/frontend/railway.toml`。backend 与 worker 生产构建共享 [`backend/Dockerfile`](backend/Dockerfile)；worker 必须严格单副本。
+Railway dashboard 中 backend/worker 的 Root Directory 设为 `/`，frontend 设为 `/frontend`；Config File 分别设置为 `/backend/railway.api.toml`、`/backend/railway.worker.toml`、`/frontend/railway.toml`。backend 与 worker 生产构建共享 [`backend/Dockerfile`](backend/Dockerfile)；worker 必须严格单副本。
 
 完整变量归属、Dockerfile/Nixpacks fallback、部署顺序、FlyAI 命令、NDJSON curl 和安全 smoke 语义见 [`docs/deployment/RAILWAY.md`](docs/deployment/RAILWAY.md)。
 

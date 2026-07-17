@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import json
 import re
 import sys
@@ -31,7 +32,23 @@ _USABLE_STATUSES = {ProviderStatus.success.value, ProviderStatus.empty.value}
 _SELLER_PATTERN = re.compile(
     r"^[A-Za-z0-9\u3400-\u9fff][A-Za-z0-9\u3400-\u9fff .&'()\-]{0,79}$"
 )
+_OPAQUE_SELLER_PATTERN = re.compile(r"^[A-Za-z0-9_-]{24,}$")
 _SENSITIVE_SELLER_MARKERS = ("www.", "sk-", "lsv2_", "token", "secret", "auth", "bearer")
+_SECRET_SETTING_NAMES = (
+    "flyai_api_key",
+    "serpapi_api_key",
+    "variflight_api_key",
+    "langsmith_api_key",
+    "langchain_api_key",
+    "model_api_key",
+    "llm_api_key",
+    "jwt_secret",
+    "sms_aliyun_access_key_id",
+    "sms_twilio_sid",
+    "sms_twilio_token",
+    "vapid_private_key",
+    "flight_status_api_key",
+)
 _EMPTY_SUMMARY = {
     "provider_statuses": {},
     "deal_count": 0,
@@ -82,16 +99,42 @@ def _safe_provider_statuses(value: Any) -> dict[str, str]:
     return statuses
 
 
+def _configured_secrets() -> tuple[str, ...]:
+    return tuple(
+        value
+        for name in _SECRET_SETTING_NAMES
+        if isinstance(value := getattr(settings, name, ""), str)
+        and len(value) >= 8
+    )
+
+
+def _contains_configured_secret(value: str) -> bool:
+    value_bytes = value.encode("utf-8")
+    for secret in _configured_secrets():
+        secret_bytes = secret.encode("utf-8")
+        if len(secret_bytes) > len(value_bytes):
+            continue
+        for offset in range(len(value_bytes) - len(secret_bytes) + 1):
+            candidate = value_bytes[offset : offset + len(secret_bytes)]
+            if hmac.compare_digest(candidate, secret_bytes):
+                return True
+    return False
+
+
 def _safe_seller(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
     seller = value.strip()
-    if not seller or not _SELLER_PATTERN.fullmatch(seller):
+    if not seller or _OPAQUE_SELLER_PATTERN.fullmatch(seller):
+        return None
+    if not _SELLER_PATTERN.fullmatch(seller):
         return None
     normalized = seller.casefold()
     if any(marker in normalized for marker in _SENSITIVE_SELLER_MARKERS):
         return None
     if re.search(r"(?:^|[ .&'()\-])key(?:$|[ .&'()\-])", normalized):
+        return None
+    if _contains_configured_secret(seller):
         return None
     return seller
 

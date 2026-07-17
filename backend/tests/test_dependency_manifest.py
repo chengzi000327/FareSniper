@@ -55,11 +55,22 @@ def test_nixpacks_pins_flyai_cli_and_node():
 
     assert "nodejs_22" in text
     assert "python313" in text
+    assert '"..."' in text
+    assert "gcc" in text
     assert "backend/requirements.txt" in text
     assert "backend/third_party/flights_monitor/requirements.txt" in text
     assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
     assert "npx" not in text
     assert "flyai config set" not in text
+
+    import tomllib
+
+    config = tomllib.loads(text)
+    assert config["start"]["cmd"] == (
+        "sh -c 'exec uvicorn backend.main:app --host 0.0.0.0 "
+        '--port "${PORT:-8000}"\''
+    )
+    assert config["variables"]["PYTHONUNBUFFERED"] == "1"
 
 
 def test_backend_dockerfile_has_complete_shared_runtime():
@@ -75,6 +86,44 @@ def test_backend_dockerfile_has_complete_shared_runtime():
     assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
     assert "npx" not in text
     assert "flyai config set" not in text
+    assert 'CMD ["uvicorn"' not in text
+    cmd_line = next(line for line in text.splitlines() if line.startswith("CMD "))
+    command = json.loads(cmd_line.removeprefix("CMD "))
+    assert command[:2] == ["sh", "-c"]
+    assert "exec uvicorn backend.main:app" in command[2]
+    assert '"${PORT:-8000}"' in command[2]
+
+
+def test_docker_context_excludes_secrets_and_build_artifacts():
+    entries = {
+        line.strip()
+        for line in Path(".dockerignore").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    for required in {
+        ".git",
+        ".venv",
+        "**/.venv",
+        ".env",
+        "**/.env",
+        "node_modules",
+        "**/node_modules",
+        "**/__pycache__",
+        ".pytest_cache",
+        "**/.pytest_cache",
+        ".coverage",
+        "coverage",
+        "**/coverage",
+        ".superpowers",
+        "tmp",
+        "**/tmp",
+        "frontend/.next",
+    }:
+        assert required in entries
+
+    assert "backend" not in entries
+    assert "backend/requirements.txt" not in entries
 
 
 def test_env_example_has_safe_flight_provider_defaults():
@@ -95,7 +144,8 @@ def test_env_example_has_safe_flight_provider_defaults():
     assert values["CTRIP_SNAPSHOT_TTL_MINUTES"] == "75"
     assert values["CTRIP_REFRESH_BATCH_SIZE"] == "20"
     assert values["RUN_SCHEDULER_IN_API"] == "false"
-    assert values["LANGSMITH_TRACING"] == "true"
+    assert values["FARESNIPER_LANGSMITH_TRACING"] == "true"
+    assert values["LANGSMITH_TRACING"] == "false"
     assert values["LANGCHAIN_TRACING_V2"] == "false"
     assert values["LANGSMITH_API_KEY"] == ""
     assert values["LANGSMITH_PROJECT"] == "faresniper"

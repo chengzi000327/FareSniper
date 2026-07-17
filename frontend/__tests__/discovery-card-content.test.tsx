@@ -31,6 +31,26 @@ test("renders source states without fake zeroes", () => {
   expect(screen.queryByText("¥0")).not.toBeInTheDocument();
 });
 
+test("renders a neutral header for landing placeholders", () => {
+  render(
+    <DiscoveryCardContent
+      from="上海"
+      to="三亚"
+      basePrice={null}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      platform="飞猪"
+      prices={[{ name: "飞猪", price: null, status: "loading" }]}
+      placeholder
+    />
+  );
+
+  expect(screen.getByText("待查询 · 正在获取数据")).toBeInTheDocument();
+  expect(screen.queryByText(/直飞特惠/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/实时价格/)).not.toBeInTheDocument();
+});
+
 test("renders every terminal provider state and rejects non-HTTPS live links", () => {
   render(
     <DiscoveryCardContent

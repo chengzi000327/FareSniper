@@ -239,12 +239,13 @@ async def test_flight_search_trace_tree_contains_only_safe_summaries(trace_recor
 
 @pytest.mark.asyncio
 async def test_real_sdk_disables_automatic_graph_span_but_restores_provider_child(
-    monkeypatch, sdk_runs
+    monkeypatch, sdk_runs, request
 ):
     client, creates, updates = sdk_runs
-    monkeypatch.setattr(
-        tracing, "langsmith_tracing_enabled", lambda: True
-    )
+    monkeypatch.setenv("FARESNIPER_LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "ls-test-key")
+    get_settings.cache_clear()
+    request.addfinalizer(get_settings.cache_clear)
     secret_message = "full-user-message-must-not-leak"
     query = build_flight_query("北京", "上海", "2099-08-01")
     provider_result = ProviderResult(
@@ -452,7 +453,8 @@ async def test_disabled_tracing_uses_no_sdk_runs_or_network(
     monkeypatch, sdk_runs
 ):
     client, creates, updates = sdk_runs
-    monkeypatch.setenv("LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("FARESNIPER_LANGSMITH_TRACING", "false")
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls-test-key")
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "true")
     get_settings.cache_clear()

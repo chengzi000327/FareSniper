@@ -14,6 +14,9 @@ describe('AppShell source claims', () => {
     expect(screen.getAllByText('正在获取数据').length).toBeGreaterThan(0)
     expect(screen.getAllByText('等待下次刷新').length).toBeGreaterThan(0)
     expect(screen.getAllByText('待确认').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('待查询 · 正在获取数据')).toHaveLength(2)
+    expect(screen.queryByText(/直飞特惠/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/实时价格/)).not.toBeInTheDocument()
 
     for (const unsupported of [
       '去哪儿网',
@@ -39,5 +42,6 @@ describe('AppShell source claims', () => {
     expect(source).not.toMatch(/price:\s*\d/)
     expect(source).not.toContain('lowest: true')
     expect(source).not.toMatch(/recommendScore="\d/)
+    expect(source.match(/placeholder/g)).toHaveLength(2)
   })
 })

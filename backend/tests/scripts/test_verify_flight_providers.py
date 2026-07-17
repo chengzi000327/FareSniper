@@ -175,6 +175,8 @@ def test_smoke_failure_omits_exception_text_and_traceback(
         r"seller\path",
         "seller@example",
         "seller:443",
+        "a" * 64,
+        "0123456789abcdef" * 4,
     ],
 )
 def test_smoke_omits_sensitive_seller_shapes(seller, smoke_module):
@@ -195,6 +197,42 @@ def test_smoke_omits_sensitive_seller_shapes(seller, smoke_module):
     )
 
     assert summary["sellers"] == ["Singapore Airlines", "中国国际航空"]
+
+
+def test_smoke_omits_configured_secret_and_secret_substrings(
+    monkeypatch, capsys, smoke_module
+):
+    configured_key = "AlphaBetaCredential987654321"
+    compare_calls = []
+    original_compare = smoke_module.hmac.compare_digest
+
+    def capture_compare(left, right):
+        compare_calls.append((left, right))
+        return original_compare(left, right)
+
+    monkeypatch.setattr(smoke_module.hmac, "compare_digest", capture_compare)
+    monkeypatch.setattr(smoke_module.settings, "model_api_key", configured_key)
+
+    summary = smoke_module._safe_summary(
+        {
+            "provider_statuses": {"flyai": "success"},
+            "deals": [
+                {
+                    "platform": configured_key,
+                    "prices": [
+                        {"name": f"Airline {configured_key} Partner"},
+                        {"name": "中国国际航空"},
+                    ],
+                }
+            ],
+        }
+    )
+    smoke_module._print_summary(summary)
+
+    output = capsys.readouterr().out
+    assert summary["sellers"] == ["中国国际航空"]
+    assert configured_key not in output
+    assert compare_calls
 
 
 @pytest.mark.parametrize(

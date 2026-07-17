@@ -101,6 +101,7 @@ export function AppShell() {
                     platform="飞猪旅行"
                     recommendScore="--"
                     compact
+                    placeholder
                     prices={[
                       { name: '飞猪旅行', price: null, status: 'loading' },
                       { name: '携程旅行', price: null, status: 'queued' },
@@ -125,6 +126,7 @@ export function AppShell() {
                     platform="国际航司/销售平台"
                     recommendScore="--"
                     compact
+                    placeholder
                     prices={[
                       {
                         name: '国际航司/销售平台',

@@ -4,13 +4,13 @@ FareSniper 在 Railway dashboard 中创建三个独立服务：`backend`、`work
 
 ## Dashboard 设置
 
-三个服务都共享完整 monorepo，Root Directory 一律设为 `/`。Config File 使用仓库绝对路径：
+backend 与 worker 从完整 monorepo 构建，Root Directory 设为 `/`；frontend 的 Root Directory 设为 `/frontend`。Config File 都使用仓库绝对路径：
 
 | 服务 | Root Directory | Config File | 副本 |
 | --- | --- | --- | --- |
 | `backend` | `/` | `/backend/railway.api.toml` | 1 或按 API 流量扩展 |
 | `worker` | `/` | `/backend/railway.worker.toml` | **严格单副本** |
-| `frontend` | `/` | `/frontend/railway.toml` | 1 或按前端流量扩展 |
+| `frontend` | `/frontend` | `/frontend/railway.toml` | 1 或按前端流量扩展 |
 
 worker 必须严格单副本。携程每小时任务本身有数据库 advisory lock，但同一进程中的告警扫描和旧 `hourly_scrape` 没有全局跨副本锁；增加 worker 副本会重复执行这些任务。
 
@@ -23,13 +23,21 @@ backend/requirements.txt
 backend/third_party/flights_monitor/requirements.txt
 ```
 
-容器 `WORKDIR` 是仓库根 `/app`，因此 `python -m backend...` 可以正常导入。`backend/nixpacks.toml` 仅是明确的人工 fallback，不是生产 Railway builder；它同样使用 repo-root requirements 路径并固定 Node/FlyAI CLI。
+容器 `WORKDIR` 是仓库根 `/app`，因此 `python -m backend...` 可以正常导入。API 镜像使用 Dockerfile 的 shell CMD，在容器内展开 `${PORT:-8000}`；Railway API config 不覆盖该 CMD。
+
+`backend/nixpacks.toml` 仅是可执行的 API 人工 fallback，不是 backend/worker 的生产 Railway builder。从仓库根运行：
+
+```bash
+nixpacks build . --config backend/nixpacks.toml
+```
+
+该 config 从 repo root 安装两套 requirements、Python 3.13/GCC、Chromium/ChromeDriver、Node 22 和固定 FlyAI CLI，并以 Uvicorn API 命令启动。worker 生产构建仍使用 Dockerfile 和独立 worker start override。
 
 服务生命周期由各自 config 管理：
 
-- API：`preDeployCommand` 单独运行 `alembic -c backend/alembic.ini upgrade head`；start 只运行 Uvicorn；healthcheck 是 `/health`。
+- API：`preDeployCommand` 单独运行 `alembic -c backend/alembic.ini upgrade head`；Docker CMD 只运行 Uvicorn；healthcheck 是 `/health`。
 - worker：start 保持 `python -m backend.workers.run_all`，不重复 migration。
-- frontend：从 repo root 显式执行 `npm --prefix frontend ci`、build 和 start。
+- frontend：在 `/frontend` Root Directory 中显式执行 `npm ci && npm run build`，并以 `npm run start -- -p $PORT` 启动。
 
 FlyAI 运行时直接调用 `flyai` 并从环境读取 `FLYAI_API_KEY`。构建和请求路径不执行 `npx`，也不执行 `flyai config set`。
 
@@ -57,7 +65,8 @@ FLIGHT_PROVIDER_TIMEOUT_SECONDS=10
 CTRIP_SNAPSHOT_TTL_MINUTES=75
 RUN_SCHEDULER_IN_API=false
 
-LANGSMITH_TRACING=true
+FARESNIPER_LANGSMITH_TRACING=true
+LANGSMITH_TRACING=false
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=faresniper
@@ -78,7 +87,8 @@ CTRIP_REQUEST_DELAY_MAX_SECONDS=5
 VARIFLIGHT_API_KEY=
 RUN_SCHEDULER_IN_API=false
 
-LANGSMITH_TRACING=true
+FARESNIPER_LANGSMITH_TRACING=true
+LANGSMITH_TRACING=false
 LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=faresniper
@@ -97,7 +107,7 @@ NEXT_PUBLIC_API_BASE_URL=https://<backend>.up.railway.app
 
 ## Custom-only LangSmith
 
-`LANGSMITH_TRACING=true` 只启用 Task 10 的手工安全 span。应用进程始终把 `LANGCHAIN_TRACING_V2` 保持为 `false`，同时把 LangSmith key/project/endpoint 提供给局部 `tracing_context(enabled=True)`。不要开启 `LANGCHAIN_TRACING_V2`，否则第三方自动 instrumentation 可能记录未经 allowlist 处理的输入。
+`FARESNIPER_LANGSMITH_TRACING=true` 只启用 Task 10 的手工安全 span。应用初始化会调用官方 `langsmith.configure(enabled=False)`，并始终把 `LANGSMITH_TRACING` 和 `LANGCHAIN_TRACING_V2` 保持为 `false`；LangSmith key/project/endpoint 仍提供给局部 `tracing_context(enabled=True)`。不要开启 `LANGSMITH_TRACING`。不要开启 `LANGCHAIN_TRACING_V2`。任一官方自动 tracing 开关都可能让第三方 instrumentation 记录未经 allowlist 处理的输入。
 
 自定义 span 只记录航线/日期、状态、数量、延迟与缓存年龄等摘要，不记录密钥、完整用户消息、raw offer、预订 URL 或第三方原始错误。`/health` 的 `langsmith_ok` 使用同一个 custom-tracing 安全启用条件。
 
