@@ -1,2 +1,8 @@
 [phases.setup]
-nixPkgs = ["chromium", "chromedriver"]
+nixPkgs = ["chromium", "chromedriver", "nodejs_22"]
+
+[phases.install]
+cmds = [
+  "pip install -r requirements.txt",
+  "npm install -g @fly-ai/flyai-cli@1.0.16"
+]

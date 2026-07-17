@@ -48,3 +48,34 @@ def test_frontend_uses_npm_test_script():
         "@testing-library/jest-dom",
     ]:
         assert name in deps, f"missing devDependency in frontend/package.json: {name}"
+
+
+def test_nixpacks_pins_flyai_cli_and_node():
+    text = Path("backend/nixpacks.toml").read_text()
+
+    assert "nodejs_22" in text
+    assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
+    assert "npx" not in text
+    assert "flyai config set" not in text
+
+
+def test_env_example_has_safe_flight_provider_defaults():
+    lines = Path("backend/.env.example").read_text().splitlines()
+    values = {
+        key: value
+        for line in lines
+        if line and not line.lstrip().startswith("#") and "=" in line
+        for key, value in [line.split("=", 1)]
+    }
+
+    assert values["ENABLE_MOCK_FALLBACK"] == "false"
+    assert values["FLYAI_API_KEY"] == ""
+    assert values["FLYAI_CLI_PATH"] == "flyai"
+    assert values["SERPAPI_API_KEY"] == ""
+    assert values["FLIGHT_PROVIDER_TIMEOUT_SECONDS"] == "10"
+    assert values["CTRIP_SNAPSHOT_TTL_MINUTES"] == "75"
+    assert values["CTRIP_REFRESH_BATCH_SIZE"] == "20"
+    assert values["RUN_SCHEDULER_IN_API"] == "false"
+    assert values["LANGSMITH_TRACING"] == "true"
+    assert values["LANGSMITH_API_KEY"] == ""
+    assert values["LANGSMITH_PROJECT"] == "faresniper"

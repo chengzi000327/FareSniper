@@ -43,7 +43,7 @@ export function AppShell() {
               >
                 <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-brand-orange/20 bg-orange-50 px-4 py-2 text-[11px] font-bold text-brand-orange sm:px-5 sm:text-xs">
                   <Radar className="h-4 w-4 animate-pulse" />
-                  <span className="leading-relaxed">全网巡航中 · 实时聚合 5 大平台特价</span>
+                  <span className="leading-relaxed">携程、飞猪与国际航司/销售平台实时比价</span>
                 </div>
 
                 <h1 className="font-serif text-[clamp(3rem,12vw,4.2rem)] leading-[0.94] sm:text-[clamp(3.8rem,9vw,5rem)] lg:text-[clamp(2.9rem,4vw,4.8rem)] xl:text-[clamp(3.15rem,3.7vw,5rem)]">
@@ -66,7 +66,7 @@ export function AppShell() {
                     开启特价发现之旅
                   </motion.button>
                   <p className="text-sm leading-7 text-brand-muted">
-                    已实时同步携程、去哪儿、同程、飞猪、航旅纵横全网底价
+                    携程、飞猪与国际航司/销售平台实时比价
                   </p>
                 </div>
 

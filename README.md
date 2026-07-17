@@ -1,131 +1,104 @@
 # FareSniper
 
-FareSniper 是一个面向自然语言机票搜索、低价发现和价格监控的全栈应用。用户可以直接输入「下周末北京去三亚，预算 600」这类口语化需求，系统会解析意图、补全槽位、查询航班与历史价格，并生成可执行的推荐结果。
+FareSniper 是一个面向自然语言机票搜索、低价发现和价格监控的全栈应用。用户可以输入“8 月 1 日北京到上海”一类需求，系统解析航线和日期，并把多个可用来源的状态与报价渐进更新到现有航班卡片。
 
-## 核心能力
+## 当前能力
 
-- 自然语言航班搜索：基于 LangGraph 工作流解析出发地、目的地、日期、预算和偏好。
-- 低价推荐：结合平台价格、偏好匹配、历史价格和推荐评分生成前端卡片。
-- 价格监控：支持告警、推送订阅、价格历史和定时任务。
-- 用户记忆：保存常用偏好、查询历史和个性化推荐线索。
-- 可观测性：支持 LangSmith trace、Langfuse prompt/score、延迟中间件和健康检查。
-- Railway 部署：仓库内置 `railway.toml`，包含 backend、worker、frontend 三个服务入口。
+- 自然语言航班搜索：LangGraph 工作流解析出发地、目的地、未来日期、预算和偏好。
+- 多来源渐进搜索：NDJSON 接口先返回来源状态，再增量返回报价，普通 JSON 搜索接口保持兼容。
+- 国内航线：组合 FlyAI 的飞猪实时结果与独立 worker 每小时采集的携程快照。
+- 国际航线：组合 FlyAI、SerpAPI Google Flights 销售平台/航司结果，以及匹配的携程快照。
+- 价格监控：支持价格告警、推送订阅、价格历史和后台调度。
+- 安全观测：LangSmith 记录搜索、provider 和携程 worker 的状态、数量、延迟等摘要，不记录密钥、raw offer、完整预订 URL 或第三方原始错误。
+- Railway 部署：`backend`、`worker`、`frontend` 三个服务入口；backend 启动前执行 Alembic migration，worker 负责每小时携程刷新。
+
+## 能力边界
+
+FareSniper 是搜索与比价工具，不在站内出票或支付。预订操作会跳转到第三方销售平台，价格与库存以对方页面为准。携程数据是最长 75 分钟有效的 worker 快照，不是每次请求现场抓取；缺少 provider key、来源超时或无库存时，对应来源会显示状态，其他来源仍可继续。
 
 ## 技术栈
 
-- Frontend: Next.js App Router, React, TypeScript, Tailwind CSS, Vitest
-- Backend: FastAPI, Pydantic v2, SQLAlchemy async, Alembic, Redis, APScheduler
-- Agent: LangGraph, LangChain, OpenAI-compatible chat model providers
-- Observability: LangSmith tracing, Langfuse callback, structured health status
-- Infra: Railway, PostgreSQL, Redis
+- Frontend: Next.js App Router、React、TypeScript、Tailwind CSS、Vitest
+- Backend: FastAPI、Pydantic v2、SQLAlchemy async、Alembic、Redis、APScheduler
+- Agent: LangGraph、LangChain、OpenAI-compatible chat model providers
+- Flight providers: FlyAI CLI、携程快照、SerpAPI Google Flights
+- Observability: LangSmith 安全摘要 tracing、健康检查
+- Infra: Railway、PostgreSQL、Redis、Node.js 22、Chromium
 
 ## 目录结构
 
 ```text
-backend/      FastAPI API、LangGraph workflow、数据库、任务调度、观测能力
-frontend/     Next.js 前端应用、PWA、页面和组件
-docs/         部署文档和阶段计划
+backend/      FastAPI、Provider 聚合、数据库、worker 和观测能力
+frontend/     Next.js 前端、PWA、渐进搜索和航班卡片
+docs/         架构、计划和部署文档
 scripts/      本地检查脚本
-railway.toml  Railway 多服务启动配置
+railway.toml  Railway 三服务启动配置
 ```
 
 ## 本地开发
 
-### 后端
+后端：
 
 ```bash
-cd backend
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+pip install -r backend/requirements.txt
+cp backend/.env.example backend/.env
 uvicorn backend.main:app --reload
 ```
 
-### 前端
+FlyAI provider 需要 Node.js 22、全局 `@fly-ai/flyai-cli@1.0.16` 和环境中的 `FLYAI_API_KEY`。生产运行时直接调用 `flyai`，不会在请求时通过 `npx` 下载 CLI，也不会写入 FlyAI 全局配置。
+
+前端：
 
 ```bash
-cd frontend
-npm install
-npm run dev
+npm --prefix frontend install
+npm --prefix frontend run dev
 ```
 
-前端默认通过 `/api/*` 代理到后端。生产环境可以设置：
+前端默认通过 `/api/*` 访问后端；分离部署时设置：
 
-```bash
-NEXT_PUBLIC_API_BASE_URL=https://<your-backend>.up.railway.app
+```dotenv
+NEXT_PUBLIC_API_BASE_URL=https://<backend>.up.railway.app
 ```
 
-## 环境变量
+## Provider 配置
 
-后端变量参考 [backend/.env.example](backend/.env.example)。Railway 至少需要配置：
+完整变量见 [`backend/.env.example`](backend/.env.example)。关键生产设置：
 
-```bash
-DATABASE_URL=postgresql+asyncpg://...
-REDIS_URL=redis://...
-JWT_SECRET=<strong-secret>
-MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MODEL_API_KEY=<provider-api-key>
-MODEL_AGENT=qwen-plus
-MODEL_INTENT=qwen-plus
-MODEL_JUDGE=deepseek-v3
-CORS_ORIGINS=["https://<frontend>.up.railway.app"]
+```dotenv
+ENABLE_MOCK_FALLBACK=false
+FLYAI_API_KEY=
+FLYAI_CLI_PATH=flyai
+SERPAPI_API_KEY=
+FLIGHT_PROVIDER_TIMEOUT_SECONDS=10
+CTRIP_SNAPSHOT_TTL_MINUTES=75
+CTRIP_REFRESH_BATCH_SIZE=20
+RUN_SCHEDULER_IN_API=false
 ```
 
-### LangSmith Trace
+真实 key 只写入本地未跟踪的 `backend/.env` 或 Railway Variables，不写入示例文件。
 
-部署时配置下面变量即可打开 LangSmith trace：
+## LangSmith
 
-```bash
-LANGSMITH_API_KEY=lsv2_...
-LANGSMITH_PROJECT=faresniper
-LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+```dotenv
 LANGSMITH_TRACING=true
-LANGCHAIN_TRACING_V2=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=
+LANGSMITH_PROJECT=faresniper
 ```
 
-代码会自动把 `LANGSMITH_API_KEY` 映射到 LangChain tracing 所需的 `LANGCHAIN_API_KEY`，因此只配置 LangSmith 变量也可以产生日志链路。上线后访问 `/health`，返回里的 `langsmith_ok: true` 代表 trace 配置已生效。
+Tracing 必须同时有显式 `LANGSMITH_TRACING=true` 和 key 才启用。自定义 span 只包含航线/日期、状态、数量、延迟和缓存年龄等允许字段。
 
-### Langfuse
+## Railway
 
-如果需要 prompt 版本化和打分写回，配置：
+根目录的 [`railway.toml`](railway.toml) 定义：
 
-```bash
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_HOST=https://cloud.langfuse.com
-```
+- `backend`：执行 migration 后启动 FastAPI；镜像固定 Node.js 22 和 FlyAI CLI 1.0.16。
+- `worker`：保持 `python -m backend.workers.run_all`，每小时刷新携程快照。
+- `frontend`：启动 Next.js production server。
 
-## Railway 部署
-
-仓库根目录的 [railway.toml](railway.toml) 定义了三个服务：
-
-- `backend`: 运行 Alembic migration 后启动 FastAPI。
-- `worker`: 运行后台调度任务。
-- `frontend`: 启动 Next.js production server。
-
-推荐流程：
-
-```bash
-railway link
-railway up
-```
-
-部署完成后检查：
-
-```bash
-curl https://<backend>.up.railway.app/health
-```
-
-关键字段应包含：
-
-```json
-{
-  "graph_compiled": true,
-  "scheduler_ok": true,
-  "langsmith_ok": true
-}
-```
+变量边界、部署顺序、FlyAI 命令、NDJSON curl 和安全 smoke 命令见 [`docs/deployment/RAILWAY.md`](docs/deployment/RAILWAY.md)。
 
 ## 测试
 
@@ -133,7 +106,17 @@ curl https://<backend>.up.railway.app/health
 pytest
 npm --prefix frontend run lint
 npm --prefix frontend test
+npm --prefix frontend run build
 ```
+
+默认测试不会调用付费 provider。只有环境中已经安全配置真实 key 时，才显式运行：
+
+```bash
+python -m backend.scripts.verify_flight_providers \
+  --origin 北京 --destination 上海 --depart-date 2099-08-01
+```
+
+`2099-08-01` 仅为未来日期示例，过期后须替换为执行日之后的日期。
 
 ## 相关文档
 
