@@ -389,6 +389,96 @@ async def test_seed_ctrip_demands_uses_alert_and_hot_route_priorities(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_seed_skips_malicious_alert_and_continues_all_routes(
+    monkeypatch, caplog
+):
+    caplog.set_level("WARNING", logger="backend.workers.ctrip_refresh")
+    sentinel = "DATE_SECRET_SENTINEL in a complete malicious sentence"
+    calls = []
+
+    async def fake_enqueue(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.list_active_alert_routes",
+        lambda: _async_value(
+            [
+                ("北京", "上海", sentinel),
+                ("广州", "上海", "2099-08-02"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.enqueue_demand", fake_enqueue
+    )
+    monkeypatch.setattr("backend.workers.ctrip_refresh.HOT_ROUTES", [("BJS", "SYX")])
+
+    await seed_ctrip_demands()
+
+    assert len(calls) == 4
+    assert calls[0] == {
+        "origin_code": "CAN",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-02",
+        "priority": 100,
+        "source": "price_alert",
+    }
+    assert [call["source"] for call in calls[1:]] == ["hot_route"] * 3
+    assert sentinel not in repr(calls)
+    assert sentinel not in caplog.text
+    assert "depart_date=<invalid>" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_seed_continues_after_expected_enqueue_rejection(monkeypatch, caplog):
+    caplog.set_level("WARNING", logger="backend.workers.ctrip_refresh")
+    calls = []
+
+    async def fake_enqueue(**kwargs):
+        if kwargs["source"] == "price_alert" and kwargs["origin_code"] == "BJS":
+            raise ValueError("fixed enqueue rejection")
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.list_active_alert_routes",
+        lambda: _async_value(
+            [
+                ("北京", "上海", "2099-08-01"),
+                ("广州", "上海", "2099-08-02"),
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.enqueue_demand", fake_enqueue
+    )
+    monkeypatch.setattr("backend.workers.ctrip_refresh.HOT_ROUTES", [("BJS", "SYX")])
+
+    await seed_ctrip_demands()
+
+    assert len(calls) == 4
+    assert calls[0]["origin_code"] == "CAN"
+    assert [call["source"] for call in calls[1:]] == ["hot_route"] * 3
+    assert "reason=rejected" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_seed_propagates_unexpected_enqueue_failure(monkeypatch):
+    async def fail_enqueue(**kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.list_active_alert_routes",
+        lambda: _async_value([("北京", "上海", "2099-08-01")]),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.enqueue_demand", fail_enqueue
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await seed_ctrip_demands()
+
+
+@pytest.mark.asyncio
 async def test_claim_order_and_past_date_inactivation(seeded_pg):
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     demands = [

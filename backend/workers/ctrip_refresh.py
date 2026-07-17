@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from backend.application.services._routes import HOT_ROUTES
+from backend.application.services.flight_dates import is_canonical_depart_date
 from backend.config import settings
 from backend.data_sources.ctrip_source import CtripSource
 from backend.infrastructure.db.alert_repo import list_active_alert_routes
@@ -19,7 +20,6 @@ from backend.infrastructure.db.base import get_session
 from backend.infrastructure.db.flight_demand_repo import (
     claim_due_demands,
     enqueue_demand,
-    is_canonical_depart_date,
 )
 from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
 from backend.infrastructure.observability.provider_tracing import (
@@ -60,11 +60,19 @@ async def try_ctrip_worker_lease() -> AsyncIterator[bool]:
 
 async def seed_ctrip_demands() -> None:
     for origin, destination, depart_date in await list_active_alert_routes():
+        if not is_canonical_depart_date(depart_date):
+            logger.warning(
+                "ctrip_seed_alert_skipped origin=%s destination=%s "
+                "depart_date=<invalid> reason=invalid_date",
+                origin,
+                destination,
+            )
+            continue
         origin_ref = resolve_airport(origin)
         destination_ref = resolve_airport(destination)
         if origin_ref is None or destination_ref is None:
             continue
-        await enqueue_demand(
+        await _enqueue_seed_demand(
             origin_code=origin_ref.code,
             destination_code=destination_ref.code,
             depart_date=depart_date,
@@ -75,13 +83,42 @@ async def seed_ctrip_demands() -> None:
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     for origin, destination in HOT_ROUTES:
         for offset in range(1, 4):
-            await enqueue_demand(
+            await _enqueue_seed_demand(
                 origin_code=origin,
                 destination_code=destination,
                 depart_date=(today + timedelta(days=offset)).isoformat(),
                 priority=5,
                 source="hot_route",
             )
+
+
+async def _enqueue_seed_demand(
+    *,
+    origin_code: str,
+    destination_code: str,
+    depart_date: str,
+    priority: int,
+    source: str,
+) -> None:
+    try:
+        await enqueue_demand(
+            origin_code=origin_code,
+            destination_code=destination_code,
+            depart_date=depart_date,
+            priority=priority,
+            source=source,
+        )
+    except ValueError:
+        safe_depart_date = (
+            depart_date if is_canonical_depart_date(depart_date) else "<invalid>"
+        )
+        logger.warning(
+            "ctrip_seed_demand_skipped origin=%s destination=%s "
+            "depart_date=%s reason=rejected",
+            origin_code,
+            destination_code,
+            safe_depart_date,
+        )
 
 
 async def refresh_ctrip_once() -> CtripRefreshSummary:

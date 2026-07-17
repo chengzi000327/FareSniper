@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
@@ -19,6 +19,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from backend.application.services.flight_dates import (
+    validate_canonical_depart_date,
+)
 from backend.infrastructure.db.base import Base, get_session
 
 
@@ -81,14 +84,6 @@ class FlightSearchDemand:
         )
 
 
-def is_canonical_depart_date(value: str) -> bool:
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError:
-        return False
-    return parsed.isoformat() == value
-
-
 async def enqueue_demand(
     *,
     origin_code: str,
@@ -97,8 +92,7 @@ async def enqueue_demand(
     priority: int,
     source: str,
 ) -> None:
-    if not is_canonical_depart_date(depart_date):
-        raise ValueError("depart_date must be a valid YYYY-MM-DD date")
+    validate_canonical_depart_date(depart_date)
 
     now = datetime.now(timezone.utc)
     demand_id = hashlib.sha1(

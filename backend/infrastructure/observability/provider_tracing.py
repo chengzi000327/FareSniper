@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import date
 from typing import Any, Protocol, TypeVar
 
 from langsmith import trace, tracing_context
 
 from backend.application.contracts.decision import FrontendResponse
 from backend.application.contracts.flight_provider import FlightQuery, ProviderResult
+from backend.application.services.flight_dates import is_canonical_depart_date
 from backend.application.services.search_events import emit_search_event
 from backend.config import langsmith_tracing_enabled
 
@@ -42,7 +41,6 @@ _SAFE_STAGE_INPUT_KEYS = {
     "provider_count",
     "result_count",
 }
-_VALID_DEPART_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
 
 def safe_provider_inputs(
@@ -85,13 +83,8 @@ def _safe_stage_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _safe_depart_date_inputs(depart_date: str) -> dict[str, str | bool]:
-    if _VALID_DEPART_DATE.fullmatch(depart_date):
-        try:
-            date.fromisoformat(depart_date)
-        except ValueError:
-            pass
-        else:
-            return {"depart_date": depart_date}
+    if is_canonical_depart_date(depart_date):
+        return {"depart_date": depart_date}
 
     return {"depart_date_present": bool(depart_date)}
 

@@ -5,6 +5,9 @@ import uuid
 from sqlalchemy import Column, DateTime, Integer, String, select, update
 from sqlalchemy.sql import func
 
+from backend.application.services.flight_dates import (
+    validate_canonical_depart_date,
+)
 from backend.infrastructure.db.base import Base, get_session
 
 
@@ -30,6 +33,7 @@ async def create_alert(
     depart_date: str,
     target_price: int,
 ) -> str:
+    validate_canonical_depart_date(depart_date)
     aid = f"alert_{uuid.uuid4().hex[:12]}"
     async with get_session() as s:
         s.add(
