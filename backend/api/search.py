@@ -17,7 +17,6 @@ from backend.application.graph.factory import get_graph
 from backend.application.services.search_events import (
     SearchEventEmitter,
     bind_search_event_emitter,
-    emit_search_event,
 )
 
 router = APIRouter(prefix="/search", tags=["search"])
@@ -27,6 +26,17 @@ logger = logging.getLogger("faresniper.search")
 class SearchReq(BaseModel):
     session_id: str | None = None
     message: str
+
+
+class _GraphEventEmitter:
+    """Forward graph progress while reserving ``complete`` for the API."""
+
+    def __init__(self, emitter: SearchEventEmitter) -> None:
+        self._emitter = emitter
+
+    def emit(self, event_type: str, payload: dict) -> None:
+        if event_type != "complete":
+            self._emitter.emit(event_type, payload)
 
 
 async def _invoke_graph(
@@ -53,7 +63,6 @@ async def _invoke_graph(
     )
     response: FrontendResponse = out["response"]
     response.session_id = out.get("request_session_id")
-    emit_search_event("complete", {"response": response.model_dump(mode="json")})
     return response
 
 
@@ -110,11 +119,15 @@ async def search_stream(
         queue.put_nowait(event)
 
     emitter = SearchEventEmitter(request_id, enqueue)
+    graph_emitter = _GraphEventEmitter(emitter)
 
     async def run_graph() -> None:
         try:
-            with bind_search_event_emitter(emitter):
-                await _invoke_graph(req, request, uid, request_id)
+            with bind_search_event_emitter(graph_emitter):
+                response = await _invoke_graph(req, request, uid, request_id)
+            emitter.emit(
+                "complete", {"response": response.model_dump(mode="json")}
+            )
         except asyncio.CancelledError:
             raise
         except Exception:

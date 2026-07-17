@@ -137,7 +137,7 @@ async def test_stream_graph_error_emits_one_sanitized_complete_event(
 
 
 @pytest.mark.asyncio
-async def test_stream_suppresses_events_after_graph_emits_complete(
+async def test_stream_uses_api_complete_after_graph_emits_complete(
     search_client: AsyncClient, valid_jwt_for_u1, monkeypatch
 ):
     import backend.api.search as search_mod
@@ -168,10 +168,54 @@ async def test_stream_suppresses_events_after_graph_emits_complete(
     )
     events = [json.loads(line) for line in response.text.splitlines()]
 
+    assert [event["type"] for event in events] == ["started", "results", "complete"]
+    assert [event["sequence"] for event in events] == [1, 2, 3]
+    assert len([event for event in events if event["type"] == "complete"]) == 1
+    assert events[-1]["payload"] == {
+        "response": {
+            "user_id": "u1",
+            "session_id": "s_terminal",
+            "query": None,
+            "deals": [{"price": 580}],
+            "analysis": {},
+            "recommendation": {},
+            "meta": {},
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_stream_emits_sanitized_failure_after_graph_emits_complete(
+    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch, caplog
+):
+    import backend.api.search as search_mod
+
+    secret = "graph-terminal-secret?query=private&api_key=also-secret"
+
+    class _GraphWithTerminalFailure:
+        async def ainvoke(self, state, config=None):
+            emit_search_event("started", {"providers": ["flyai"]})
+            emit_search_event("complete", {"source": "graph"})
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(search_mod, "get_graph", lambda: _GraphWithTerminalFailure())
+    caplog.set_level(logging.ERROR, logger="faresniper.search")
+
+    response = await search_client.post(
+        "/api/search/stream",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        json={"session_id": None, "message": "北京到上海"},
+    )
+    events = [json.loads(line) for line in response.text.splitlines()]
+
     assert [event["type"] for event in events] == ["started", "complete"]
     assert [event["sequence"] for event in events] == [1, 2]
-    assert len([event for event in events if event["type"] == "complete"]) == 1
-    assert events[-1]["payload"] == {"source": "graph"}
+    assert events[-1]["payload"] == {
+        "error": "search_failed",
+        "message": "搜索暂时不可用，请稍后重试",
+    }
+    assert secret not in response.text
+    assert secret not in caplog.text
 
 
 @pytest.mark.asyncio
