@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 
 import pytest
 
@@ -241,6 +242,45 @@ async def test_events_are_request_scoped_sanitized_and_reset():
     assert "?" not in left[0]["payload"]["url"]
 
 
+def test_event_redaction_is_recursive_key_agnostic_and_non_mutating():
+    payload = {
+        "href": "https://example.test/path?campaign=summer#details",
+        "link": "http://example.test/other?token=secret#top",
+        "ordinary": "https://example.test/plain?a=1#fragment",
+        "relative": "/search?q=kept#kept",
+        "malformed": "https://[",
+        "rawPayload": {"secret": "raw"},
+        "httpHeaders": {"Authorization": "Bearer secret"},
+        "authorizationHeader": "Bearer secret",
+        "api-key": "secret-key",
+        "nested": [
+            "https://example.test/list?tracking=1#row",
+            {
+                "value": "http://example.test/nested?tracking=2#item",
+                "raw-payload": {"secret": "nested-raw"},
+            },
+        ],
+    }
+    original = deepcopy(payload)
+    events: list[dict] = []
+
+    SearchEventEmitter("redaction", events.append).emit("results", payload)
+
+    clean = events[0]["payload"]
+    assert clean["href"] == "https://example.test/path"
+    assert clean["link"] == "http://example.test/other"
+    assert clean["ordinary"] == "https://example.test/plain"
+    assert clean["nested"][0] == "https://example.test/list"
+    assert clean["nested"][1]["value"] == "http://example.test/nested"
+    assert clean["relative"] == "/search?q=kept#kept"
+    assert clean["malformed"] == "https://["
+    assert set(clean).isdisjoint(
+        {"rawPayload", "httpHeaders", "authorizationHeader", "api-key"}
+    )
+    assert "raw-payload" not in clean["nested"][1]
+    assert payload == original
+
+
 @pytest.mark.asyncio
 async def test_events_report_loading_then_completion_without_exception_details():
     events: list[dict] = []
@@ -264,6 +304,59 @@ async def test_events_report_loading_then_completion_without_exception_details()
     assert "secret upstream" not in str(events)
     assert [event["sequence"] for event in events] == list(
         range(1, len(events) + 1)
+    )
+
+
+@pytest.mark.asyncio
+async def test_status_only_results_stay_observable_without_synthetic_deals():
+    statuses = {
+        "status_queued": ProviderStatus.queued,
+        "status_timeout": ProviderStatus.timeout,
+        "status_error": ProviderStatus.error,
+        "status_disabled": ProviderStatus.disabled,
+        "status_empty": ProviderStatus.empty,
+    }
+    providers = [
+        FakeProvider(
+            name,
+            ProviderResult(
+                provider=name,
+                status=status,
+                error_code=(
+                    f"{status.value}_code"
+                    if status in {ProviderStatus.timeout, ProviderStatus.error}
+                    else None
+                ),
+            ),
+        )
+        for name, status in statuses.items()
+    ]
+    events: list[dict] = []
+
+    with bind_search_event_emitter(SearchEventEmitter("statuses", events.append)):
+        result = await FlightSearchAggregator(
+            providers, timeout_seconds=0.2
+        ).collect(_query())
+
+    assert result["deals"] == []
+    assert result["provider_statuses"] == {
+        name: status.value for name, status in statuses.items()
+    }
+    provider_events: dict[str, list[str]] = {name: [] for name in statuses}
+    for event in events:
+        if event["type"] == "provider_status":
+            provider_events[event["payload"]["provider"]].append(
+                event["payload"]["status"]
+            )
+    assert provider_events == {
+        name: ["loading", status.value] for name, status in statuses.items()
+    }
+    result_events = [event for event in events if event["type"] == "results"]
+    assert result_events
+    assert all(event["payload"]["deals"] == [] for event in result_events)
+    assert any(
+        "loading" in event["payload"]["provider_statuses"].values()
+        for event in result_events
     )
 
 
@@ -294,3 +387,65 @@ async def test_three_provider_timeouts_open_process_wide_breaker():
 
     assert provider.calls == 3
     assert circuit_open["errors"] == {provider.name: "circuit_open"}
+
+
+@pytest.mark.parametrize(
+    ("status", "error_code"),
+    [
+        (ProviderStatus.error, "upstream"),
+        (ProviderStatus.timeout, "provider_timeout"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_three_returned_failures_open_process_wide_breaker(
+    status: ProviderStatus, error_code: str
+):
+    provider_name = f"returned_{status.value}_breaker"
+    provider = FakeProvider(
+        provider_name,
+        ProviderResult(
+            provider=provider_name,
+            status=status,
+            error_code=error_code,
+        ),
+    )
+    aggregator = FlightSearchAggregator([provider], timeout_seconds=0.2)
+
+    for _ in range(3):
+        result = await aggregator.collect(_query())
+        assert result["provider_statuses"] == {provider_name: status.value}
+        assert result["errors"] == {provider_name: error_code}
+
+    circuit_open = await aggregator.collect(_query())
+
+    assert provider.calls == 3
+    assert circuit_open["provider_statuses"] == {provider_name: "error"}
+    assert circuit_open["errors"] == {provider_name: "circuit_open"}
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        ProviderStatus.disabled,
+        ProviderStatus.empty,
+        ProviderStatus.queued,
+        ProviderStatus.stale,
+        ProviderStatus.success,
+    ],
+)
+@pytest.mark.asyncio
+async def test_returned_non_failure_statuses_do_not_open_breaker(
+    status: ProviderStatus,
+):
+    provider_name = f"returned_{status.value}_non_failure"
+    provider = FakeProvider(
+        provider_name,
+        ProviderResult(provider=provider_name, status=status),
+    )
+    aggregator = FlightSearchAggregator([provider], timeout_seconds=0.2)
+
+    for _ in range(4):
+        result = await aggregator.collect(_query())
+        assert result["provider_statuses"] == {provider_name: status.value}
+
+    assert provider.calls == 4

@@ -18,6 +18,13 @@ from backend.resilience.circuit_breaker import CircuitBreaker, CircuitOpenError
 
 
 _PROVIDER_BREAKERS: dict[str, CircuitBreaker] = {}
+_BREAKER_FAILURE_STATUSES = {ProviderStatus.error, ProviderStatus.timeout}
+
+
+class _ReturnedProviderFailure(Exception):
+    def __init__(self, result: ProviderResult) -> None:
+        super().__init__()
+        self.result = result
 
 
 def _breaker_for(provider_name: str) -> CircuitBreaker:
@@ -59,12 +66,17 @@ class FlightSearchAggregator:
         self, provider: FlightProvider, query: FlightQuery
     ) -> tuple[str, ProviderResult]:
         async def search_with_timeout() -> ProviderResult:
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 provider.search(query), timeout=self._timeout_seconds
             )
+            if result.status in _BREAKER_FAILURE_STATUSES:
+                raise _ReturnedProviderFailure(result)
+            return result
 
         try:
             result = await _breaker_for(provider.name).call(search_with_timeout)
+        except _ReturnedProviderFailure as exc:
+            result = exc.result
         except CircuitOpenError:
             result = ProviderResult(
                 provider=provider.name,

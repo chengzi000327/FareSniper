@@ -154,6 +154,22 @@ def test_status_rows_cover_provider_without_offers():
     }
 
 
+def test_provider_statuses_without_any_offer_do_not_create_fare_card():
+    results = {
+        status.value: ProviderResult(provider=status.value, status=status)
+        for status in (
+            ProviderStatus.loading,
+            ProviderStatus.queued,
+            ProviderStatus.timeout,
+            ProviderStatus.error,
+            ProviderStatus.disabled,
+            ProviderStatus.empty,
+        )
+    }
+
+    assert offers_to_deals(_query(), results) == []
+
+
 def test_dedup_identity_does_not_include_currency():
     results = {
         "flyai": ProviderResult(

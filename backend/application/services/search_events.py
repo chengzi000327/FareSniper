@@ -8,36 +8,42 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 
-_SENSITIVE_KEYS = {
-    "api_key",
+_SENSITIVE_KEY_SUFFIXES = (
+    "apikey",
     "authorization",
+    "authorizationheader",
     "headers",
-    "raw_payload",
+    "rawpayload",
     "token",
-}
+)
 
 
-def _is_sensitive_key(key: object) -> bool:
-    normalized = str(key).lower().replace("-", "_")
-    return (
-        normalized in _SENSITIVE_KEYS
-        or normalized.endswith("_api_key")
-        or normalized.endswith("apikey")
-        or normalized.endswith("_headers")
+def _canonical_key(key: object) -> str:
+    return "".join(
+        character
+        for character in str(key).casefold()
+        if character.isalnum()
     )
 
 
-def _safe_event_value(value: Any, *, key: str = "") -> Any:
+def _is_sensitive_key(key: object) -> bool:
+    return _canonical_key(key).endswith(_SENSITIVE_KEY_SUFFIXES)
+
+
+def _safe_event_value(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {
-            str(item_key): _safe_event_value(item_value, key=str(item_key))
+            str(item_key): _safe_event_value(item_value)
             for item_key, item_value in value.items()
             if not _is_sensitive_key(item_key)
         }
     if isinstance(value, (list, tuple)):
         return [_safe_event_value(item) for item in value]
-    if isinstance(value, str) and key.lower().endswith("url"):
-        parsed = urlsplit(value)
+    if isinstance(value, str):
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return value
         if parsed.scheme in {"http", "https"} and parsed.netloc:
             return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
     return value
