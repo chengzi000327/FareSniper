@@ -159,13 +159,115 @@ function isProviderDisplayStatus(value: unknown): value is ProviderDisplayStatus
   );
 }
 
-function isChatSearchResponse(value: unknown): value is ChatSearchResponse {
-  if (!isPlainRecord(value) || typeof value.session_id !== "string") return false;
-  if (hasOwn(value, "deals") && !Array.isArray(value.deals)) return false;
-  if (hasOwn(value, "recommendation") && !isPlainRecord(value.recommendation)) {
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function isNullableFiniteNumber(value: unknown): value is number | null {
+  return value === null || isFiniteNumber(value);
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === "string");
+}
+
+function hasOptionalField(
+  record: Record<string, unknown>,
+  key: string,
+  isValid: (value: unknown) => boolean
+): boolean {
+  return !hasOwn(record, key) || isValid(record[key]);
+}
+
+function isPriceItem(value: unknown): value is PriceItem {
+  if (
+    !isPlainRecord(value) ||
+    typeof value.name !== "string" ||
+    !isNullableFiniteNumber(value.price) ||
+    !isProviderDisplayStatus(value.status)
+  ) {
     return false;
   }
-  return !hasOwn(value, "fallback") || value.fallback === null || isPlainRecord(value.fallback);
+  return (
+    hasOptionalField(value, "lowest", (item) => typeof item === "boolean") &&
+    hasOptionalField(value, "url", (item) => item === null || typeof item === "string") &&
+    hasOptionalField(value, "data_provider", (item) => item === null || typeof item === "string")
+  );
+}
+
+function isDealCardDto(value: unknown): value is DealCardDto {
+  if (!isPlainRecord(value)) return false;
+
+  const requiredStrings = [
+    "id",
+    "system_id",
+    "platform",
+    "origin_city",
+    "origin_code",
+    "destination_city",
+    "destination_code",
+    "depart_date",
+    "airline",
+    "depart_time",
+    "arrive_time",
+    "currency",
+    "recommend_score",
+  ];
+  if (requiredStrings.some((key) => typeof value[key] !== "string")) return false;
+  if (
+    !isNullableFiniteNumber(value.price) ||
+    !isNullableFiniteNumber(value.tax) ||
+    !isNullableFiniteNumber(value.baggage_fee) ||
+    !isNullableFiniteNumber(value.total_price) ||
+    (value.has_baggage !== null && typeof value.has_baggage !== "boolean") ||
+    !Array.isArray(value.prices) ||
+    !value.prices.every(isPriceItem) ||
+    !isStringArray(value.signals)
+  ) {
+    return false;
+  }
+  return (
+    hasOptionalField(value, "original_price", isFiniteNumber) &&
+    hasOptionalField(value, "discount_rate", isFiniteNumber) &&
+    hasOptionalField(value, "cabin", (item) => typeof item === "string") &&
+    hasOptionalField(value, "booking_url", (item) => item === null || typeof item === "string") &&
+    hasOptionalField(value, "data_freshness", (item) => typeof item === "string")
+  );
+}
+
+function isRecommendation(value: unknown): value is NonNullable<ChatSearchResponse["recommendation"]> {
+  if (!isPlainRecord(value) || typeof value.text !== "string") return false;
+  return (
+    hasOptionalField(value, "action", (item) => typeof item === "string") &&
+    hasOptionalField(value, "confidence", (item) => typeof item === "string")
+  );
+}
+
+function isFallbackDirective(value: unknown): value is FallbackDirective {
+  return (
+    isPlainRecord(value) &&
+    value.ui === "modal" &&
+    isStringArray(value.fields) &&
+    typeof value.reason === "string"
+  );
+}
+
+function isChatSearchResponse(value: unknown): value is ChatSearchResponse {
+  if (!isPlainRecord(value) || typeof value.session_id !== "string") return false;
+  if (
+    hasOwn(value, "deals") &&
+    (!Array.isArray(value.deals) || !value.deals.every(isDealCardDto))
+  ) {
+    return false;
+  }
+  if (hasOwn(value, "recommendation") && !isRecommendation(value.recommendation)) {
+    return false;
+  }
+  return (
+    !hasOwn(value, "fallback") ||
+    value.fallback === null ||
+    isFallbackDirective(value.fallback)
+  );
 }
 
 function hasValidKnownPayloadFields(payload: Record<string, unknown>): boolean {

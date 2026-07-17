@@ -34,6 +34,54 @@ function completeEvent(response: Record<string, unknown> = { session_id: "sessio
   };
 }
 
+function validPriceItem(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "飞猪",
+    price: 580,
+    lowest: true,
+    status: "success",
+    url: "https://example.com/book",
+    data_provider: "flyai",
+    ...overrides,
+  };
+}
+
+function validDeal(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "deal-1",
+    system_id: "system-1",
+    platform: "飞猪",
+    origin_city: "北京",
+    origin_code: "PEK",
+    destination_city: "上海",
+    destination_code: "SHA",
+    depart_date: "2026-08-01",
+    airline: "MU",
+    depart_time: "08:00",
+    arrive_time: "10:30",
+    price: 580,
+    tax: 50,
+    baggage_fee: null,
+    has_baggage: null,
+    total_price: 630,
+    currency: "CNY",
+    recommend_score: "8.8",
+    prices: [validPriceItem()],
+    signals: ["历史低价"],
+    ...overrides,
+  };
+}
+
+function completeResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    session_id: "session-1",
+    deals: [validDeal()],
+    recommendation: { text: "建议尽快预订", action: "buy_now", confidence: "high" },
+    fallback: { ui: "modal", fields: ["depart_date"], reason: "需要确认日期" },
+    ...overrides,
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -282,7 +330,7 @@ test("stream accepts valid lifecycle events and a canonical complete response", 
     completeEvent({
       session_id: "session-1",
       deals: [],
-      recommendation: {},
+      recommendation: { text: "建议尽快预订" },
       fallback: null,
     }),
   ];
@@ -363,4 +411,83 @@ test.each([
 
   expect(onEvent).toHaveBeenCalledTimes(1);
   expect(onEvent.mock.calls[0][0].payload.response.session_id).toBe("first");
+});
+
+test.each([
+  ["an empty recommendation", { recommendation: {} }],
+  ["a recommendation with non-string text", { recommendation: { text: 1 } }],
+  ["a recommendation with non-string action", { recommendation: { text: "预订", action: 1 } }],
+  ["a recommendation with non-string confidence", { recommendation: { text: "预订", confidence: 1 } }],
+  ["an empty fallback", { fallback: {} }],
+  ["a fallback with the wrong ui", { fallback: { ui: "banner", fields: [], reason: "x" } }],
+  ["a fallback with non-string fields", { fallback: { ui: "modal", fields: [1], reason: "x" } }],
+  ["a fallback with non-string reason", { fallback: { ui: "modal", fields: [], reason: 1 } }],
+])("stream rejects complete with %s before invoking onEvent", async (_description, overrides) => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents(completeEvent(completeResponse(overrides)))
+  );
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test.each([
+  ["a null deal", [null]],
+  ["a deal missing id", [validDeal({ id: undefined })]],
+  ["a deal with non-string required fields", [validDeal({ origin_city: 1 })]],
+  ["a deal with non-array prices", [validDeal({ prices: {} })]],
+  ["a deal with non-string signals", [validDeal({ signals: [1] })]],
+  ["a deal with non-nullable money type", [validDeal({ tax: "50" })]],
+  ["a deal with an invalid baggage flag", [validDeal({ has_baggage: 0 })]],
+  ["a price item with non-string name", [validDeal({ prices: [validPriceItem({ name: 1 })] })]],
+  ["a price item with invalid price", [validDeal({ prices: [validPriceItem({ price: "580" })] })]],
+  ["a price item with invalid status", [validDeal({ prices: [validPriceItem({ status: "priced" })] })]],
+  ["a price item with invalid lowest", [validDeal({ prices: [validPriceItem({ lowest: "true" })] })]],
+  ["a price item with invalid url", [validDeal({ prices: [validPriceItem({ url: 1 })] })]],
+  ["a price item with invalid data provider", [validDeal({ prices: [validPriceItem({ data_provider: 1 })] })]],
+  ["a deal with invalid optional fields", [validDeal({ original_price: "650", discount_rate: "0.1", cabin: 1, booking_url: 1, data_freshness: 1 })]],
+])("stream rejects complete with %s before invoking onEvent", async (_description, deals) => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents(completeEvent(completeResponse({ deals })))
+  );
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test("stream rejects a deal with non-finite nullable money", async () => {
+  const rawEvent = JSON.stringify(completeEvent(completeResponse())).replace(
+    '"price":580',
+    '"price":1e400'
+  );
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    ndjsonResponse([new TextEncoder().encode(`${rawEvent}\n`)])
+  );
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test("stream accepts a complete response with fully validated nested DTOs", async () => {
+  const response = completeResponse();
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(streamEvents(completeEvent(response)));
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).resolves.toEqual(response);
+
+  expect(onEvent).toHaveBeenCalledTimes(1);
 });
