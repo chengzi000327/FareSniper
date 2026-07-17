@@ -5,9 +5,13 @@
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 
 import backend.application.services.recommendation_service as svc
+from backend.application.contracts.recommendations import RecCard
 from backend.infrastructure.db.flight_snapshot_repo import upsert_flights
 
 
@@ -16,17 +20,21 @@ def _flight(
     price: int,
     fno: str,
     *,
-    depart_date: str = "2020-01-01",
+    depart_date: str | None = None,
     history_avg_90d: int | None = None,
     history_low_90d: int | None = None,
     platform: str = "ctrip",
 ) -> dict:
+    effective_date = depart_date or (
+        datetime.now(ZoneInfo("Asia/Shanghai")).date() + timedelta(days=1)
+    ).isoformat()
     return {
         "flight_no": fno,
         "airline": "东方航空",
         "origin_code": "BJS",
         "destination_code": dest,
-        "depart_date": depart_date,
+        "depart_date": effective_date,
+        "currency": "CNY",
         "dep_time": "08:00",
         "arr_time": "10:00",
         "duration": "2h",
@@ -34,7 +42,7 @@ def _flight(
         "lowest_price": price,
         "history_avg_90d": history_avg_90d,
         "history_low_90d": history_low_90d,
-        "prices": [{"platform": platform, "price": price, "lowest": True, "url": ""}],
+        "prices": [{"platform": platform, "price": price, "currency": "CNY", "lowest": True, "url": ""}],
     }
 
 
@@ -45,10 +53,33 @@ def patched_redis(fake_redis, monkeypatch):
     return fake_redis
 
 
+def _patch_renderable_pool(monkeypatch) -> None:
+    cards = [
+        RecCard(
+            id=f"card-{destination}",
+            title=(
+                f"{svc.CITY_NAMES.get(origin, origin)}→"
+                f"{svc.CITY_NAMES.get(destination, destination)}"
+            ),
+            reason="future inventory",
+            preview_deal={"depart_date": "2099-08-01"},
+        )
+        for origin, destination in svc.HOT_ROUTES
+    ]
+
+    async def fake_pool():
+        return cards
+
+    monkeypatch.setattr(svc, "_get_card_pool", fake_pool)
+
+
 # ── 分页 ──────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_pagination_first_page_has_more(seeded_pg, patched_redis):
+async def test_pagination_first_page_has_more(
+    seeded_pg, patched_redis, monkeypatch
+):
+    _patch_renderable_pool(monkeypatch)
     rsp = await svc.build_recommendations("anon-page", limit=6, offset=0)
     assert len(rsp.cards) == 6
     # 路线池有 14 条 → 还有下一页
@@ -57,7 +88,10 @@ async def test_pagination_first_page_has_more(seeded_pg, patched_redis):
 
 
 @pytest.mark.asyncio
-async def test_pagination_offset_slices(seeded_pg, patched_redis):
+async def test_pagination_offset_slices(
+    seeded_pg, patched_redis, monkeypatch
+):
+    _patch_renderable_pool(monkeypatch)
     page1 = await svc.build_recommendations("anon-page", limit=6, offset=0)
     page2 = await svc.build_recommendations("anon-page", limit=6, offset=6)
     ids1 = {c.title for c in page1.cards}
@@ -66,7 +100,10 @@ async def test_pagination_offset_slices(seeded_pg, patched_redis):
 
 
 @pytest.mark.asyncio
-async def test_pagination_last_page_no_more(seeded_pg, patched_redis):
+async def test_pagination_last_page_no_more(
+    seeded_pg, patched_redis, monkeypatch
+):
+    _patch_renderable_pool(monkeypatch)
     rsp = await svc.build_recommendations("anon-page", limit=6, offset=12)
     assert rsp.has_more is False
     assert len(rsp.cards) <= 6
@@ -152,7 +189,10 @@ async def test_l1_pool_shared_across_users(seeded_pg, patched_redis):
 
 
 @pytest.mark.asyncio
-async def test_l2_personalization_moves_preferred_first(seeded_pg, patched_redis):
+async def test_l2_personalization_moves_preferred_first(
+    seeded_pg, patched_redis, monkeypatch
+):
+    _patch_renderable_pool(monkeypatch)
     from backend.infrastructure.db.base import get_session
     from backend.memory.long_term import LongTermMemory
 

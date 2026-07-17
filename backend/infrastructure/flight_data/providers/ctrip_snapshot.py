@@ -56,7 +56,27 @@ def ctrip_rows_to_offers(
         prices = row.get("prices") or []
         if not prices:
             continue
-        price = min(prices, key=lambda item: int(item["price"]))
+        preferred_prices = [
+            price
+            for price in prices
+            if str(price.get("currency") or "").upper() == query.currency
+        ]
+        if preferred_prices:
+            comparable_prices = preferred_prices
+        else:
+            selected_currency = sorted(
+                {
+                    str(price.get("currency") or query.currency).upper()
+                    for price in prices
+                }
+            )[0]
+            comparable_prices = [
+                price
+                for price in prices
+                if str(price.get("currency") or query.currency).upper()
+                == selected_currency
+            ]
+        price = min(comparable_prices, key=lambda item: int(item["price"]))
         offers.append(
             FlightOffer(
                 data_provider="ctrip_snapshot",

@@ -36,10 +36,13 @@ function completeEvent(response: Record<string, unknown> = { session_id: "sessio
 
 function validPriceItem(overrides: Record<string, unknown> = {}) {
   return {
+    id: "flyai-cny",
     name: "飞猪",
     price: 580,
+    currency: "CNY",
     lowest: true,
-    status: "success",
+    price_status: "priced",
+    provider_status: "success",
     url: "https://example.com/book",
     data_provider: "flyai",
     ...overrides,
@@ -50,6 +53,7 @@ function validDeal(overrides: Record<string, unknown> = {}) {
   return {
     id: "deal-1",
     system_id: "system-1",
+    flight_no: "MU5137",
     platform: "飞猪",
     origin_city: "北京",
     origin_code: "PEK",
@@ -59,7 +63,10 @@ function validDeal(overrides: Record<string, unknown> = {}) {
     airline: "MU",
     depart_time: "08:00",
     arrive_time: "10:30",
+    duration_minutes: 150,
+    stops: 0,
     price: 580,
+    lowest_price: 580,
     tax: 50,
     baggage_fee: null,
     has_baggage: null,
@@ -522,7 +529,9 @@ test.each([
   ["a deal with an invalid baggage flag", [validDeal({ has_baggage: 0 })]],
   ["a price item with non-string name", [validDeal({ prices: [validPriceItem({ name: 1 })] })]],
   ["a price item with invalid price", [validDeal({ prices: [validPriceItem({ price: "580" })] })]],
-  ["a price item with invalid status", [validDeal({ prices: [validPriceItem({ status: "priced" })] })]],
+  ["a price item with invalid price status", [validDeal({ prices: [validPriceItem({ price_status: "unknown" })] })]],
+  ["a price item with invalid provider status", [validDeal({ prices: [validPriceItem({ provider_status: "priced" })] })]],
+  ["a price item with invalid currency", [validDeal({ prices: [validPriceItem({ currency: "usd" })] })]],
   ["a price item with invalid lowest", [validDeal({ prices: [validPriceItem({ lowest: "true" })] })]],
   ["a price item with invalid url", [validDeal({ prices: [validPriceItem({ url: 1 })] })]],
   ["a price item with invalid data provider", [validDeal({ prices: [validPriceItem({ data_provider: 1 })] })]],
@@ -567,4 +576,17 @@ test("stream accepts a complete response with fully validated nested DTOs", asyn
   ).resolves.toEqual(response);
 
   expect(onEvent).toHaveBeenCalledTimes(1);
+});
+
+test("stream accepts backend-valid null lowest state", async () => {
+  const response = completeResponse({
+    deals: [validDeal({ prices: [validPriceItem({ lowest: null })] })],
+  });
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents(completeEvent(response))
+  );
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, () => undefined)
+  ).resolves.toEqual(response);
 });

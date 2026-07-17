@@ -22,8 +22,9 @@ export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
     tax: deal.tax,
     baggageFee: deal.baggage_fee,
     hasBaggage: deal.has_baggage,
+    currency: deal.currency,
     platform: deal.platform,
-    recommendScore: deal.recommend_score || undefined,
+    recommendScore: deal.recommend_score ?? undefined,
     prices: deal.prices,
     bookingUrl: deal.booking_url ?? null,
   }

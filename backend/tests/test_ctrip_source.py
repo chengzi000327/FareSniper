@@ -4,8 +4,11 @@ Step 7 CtripSource 测试
 """
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
+import os
+import signal
 import sys
 from types import SimpleNamespace
 
@@ -15,6 +18,10 @@ from backend.data_sources.ctrip_source import CtripCollectionError, CtripSource
 
 
 SENSITIVE_SENTINEL = "SENSITIVE_SENTINEL_DO_NOT_LOG"
+
+
+def test_ctrip_source_defaults_to_no_mock_fallback():
+    assert CtripSource().enable_mock_fallback is False
 
 
 # ── raw flight dict（模拟 CtripFlightClient.search_oneway 返回的一条记录）──
@@ -64,6 +71,8 @@ def test_normalize_real_result_has_only_ctrip_seller_and_unknown_fees():
     assert result["tax"] is None
     assert result["baggage_fee"] is None
     assert result["has_baggage"] is None
+    assert result["currency"] == "CNY"
+    assert result["recommend_score"] is None
     assert result["flight_no"] == "CA901"
     assert result["dep_time"] == "08:00"
     assert result["arr_time"] == "13:30"
@@ -73,6 +82,7 @@ def test_normalize_real_result_has_only_ctrip_seller_and_unknown_fees():
         {
             "platform": "携程",
             "price": 2580,
+            "currency": "CNY",
             "url": "https://flights.ctrip.com/booking/CA901",
         }
     ]
@@ -143,6 +153,7 @@ def test_normalize_discount_rate():
 async def test_production_import_failure_raises_typed_sanitized_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "ctrip_api", None)
     monkeypatch.setitem(sys.modules, "shared", None)
+    _install_fake_client(monkeypatch, flights=[], got_response=False)
     source = CtripSource(enable_mock_fallback=False)
 
     with pytest.raises(CtripCollectionError) as exc_info:
@@ -155,6 +166,7 @@ async def test_production_import_failure_raises_typed_sanitized_error(monkeypatc
 async def test_import_failure_uses_mock_fallback_when_enabled(monkeypatch):
     monkeypatch.setitem(sys.modules, "ctrip_api", None)
     monkeypatch.setitem(sys.modules, "shared", None)
+    _install_fake_client(monkeypatch, flights=[], got_response=False)
     source = CtripSource(enable_mock_fallback=True)
 
     results = await source.search_flights(
@@ -189,32 +201,13 @@ async def test_valid_empty_response_is_success(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_browser_failure_is_sanitized_and_propagated(monkeypatch):
-    class FailingClient:
-        def __init__(self, *, headless):
-            assert headless is True
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-        def search_oneway(self, **kwargs):
-            raise RuntimeError(SENSITIVE_SENTINEL)
+    async def fail_worker(self, *args):
+        raise RuntimeError(SENSITIVE_SENTINEL)
 
     async def no_retry_delay(fn, *args, **kwargs):
         return await fn(*args)
 
-    monkeypatch.setitem(
-        sys.modules,
-        "ctrip_api",
-        SimpleNamespace(CtripFlightClient=FailingClient),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "shared",
-        SimpleNamespace(resolve_city=lambda code: code),
-    )
+    monkeypatch.setattr(CtripSource, "_run_worker_once", fail_worker)
     monkeypatch.setattr(
         "backend.data_sources.ctrip_source.retry_with_backoff", no_retry_delay
     )
@@ -227,6 +220,108 @@ async def test_browser_failure_is_sanitized_and_propagated(monkeypatch):
 
     assert str(exc_info.value) == "Ctrip browser collection failed"
     assert SENSITIVE_SENTINEL not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_hanging_navigation_kills_browser_process_group_without_live_browser(
+    monkeypatch,
+):
+    communicate_started = asyncio.Event()
+    waited = asyncio.Event()
+    launches = []
+    killed: list[tuple[int, signal.Signals]] = []
+
+    class HangingProcess:
+        pid = 42001
+        returncode = None
+
+        async def communicate(self):
+            communicate_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def wait(self):
+            self.returncode = -signal.SIGKILL
+            waited.set()
+            return self.returncode
+
+    async def fake_create(*args, **kwargs):
+        launches.append((args, kwargs))
+        return HangingProcess()
+
+    async def no_retry(fn, *args, **kwargs):
+        return await fn(*args)
+
+    def fake_killpg(process_group: int, sig: signal.Signals) -> None:
+        killed.append((process_group, sig))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+    monkeypatch.setattr(
+        "backend.data_sources.ctrip_source.retry_with_backoff", no_retry
+    )
+    source = CtripSource(
+        enable_mock_fallback=False,
+        headless=True,
+        collection_timeout_seconds=0.001,
+    )
+
+    with pytest.raises(CtripCollectionError):
+        await source.search_flights("BJS", "SHA", "2099-08-01", "2099-08-01")
+
+    assert communicate_started.is_set()
+    assert launches[0][1]["start_new_session"] is True
+    assert killed == [(42001, signal.SIGKILL)]
+    assert waited.is_set()
+
+
+@pytest.mark.asyncio
+async def test_malformed_worker_payload_kills_process_group_and_awaits_cleanup(
+    monkeypatch,
+):
+    waited = asyncio.Event()
+    killed: list[tuple[int, signal.Signals]] = []
+
+    class MalformedProcess:
+        pid = 42002
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"ok":false}', b""
+
+        async def wait(self):
+            waited.set()
+            return self.returncode
+
+    async def fake_create(*args, **kwargs):
+        return MalformedProcess()
+
+    def fake_killpg(process_group: int, sig: signal.Signals) -> None:
+        killed.append((process_group, sig))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+
+    with pytest.raises(CtripCollectionError):
+        await CtripSource(enable_mock_fallback=False)._run_worker_once(
+            "BJS", "SHA", "2099-08-01", "2099-08-01"
+        )
+
+    assert killed == [(42002, signal.SIGKILL)]
+    assert waited.is_set()
+
+
+def test_ctrip_client_sets_a_page_load_timeout(monkeypatch):
+    ctrip_api = _load_ctrip_api(monkeypatch)
+    driver = _FakeDriver("[]")
+    monkeypatch.setattr(
+        ctrip_api, "init_browser", lambda **kwargs: (driver, None)
+    )
+    client = ctrip_api.CtripFlightClient(headless=True)
+
+    client.init_session()
+
+    assert driver.page_load_timeout == client.PAGE_LOAD_TIMEOUT
 
 
 def test_client_error_response_payload_is_not_logged_or_written(
@@ -290,6 +385,14 @@ async def test_client_accepts_code_zero_empty_inventory_through_source(
     monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
 
+    with ctrip_api.CtripFlightClient(headless=True) as client:
+        flights, got_response = client.search_oneway(
+            "PEK", "NRT", "北京", "东京", "2099-08-01"
+        )
+    _install_fake_client(
+        monkeypatch, flights=flights, got_response=got_response
+    )
+
     source = CtripSource(enable_mock_fallback=False, headless=True)
     results = await source.search_flights(
         "PEK", "NRT", "2099-08-01", "2099-08-01"
@@ -350,16 +453,17 @@ async def test_structurally_invalid_inventory_raises_through_source(monkeypatch)
     )
     driver = _FakeDriver(json.dumps([payload]))
 
-    async def no_retry_delay(fn, *args, **kwargs):
-        return await fn(*args)
-
     monkeypatch.setattr(
         ctrip_api, "init_browser", lambda **kwargs: (driver, None)
     )
     monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
-    monkeypatch.setattr(
-        "backend.data_sources.ctrip_source.retry_with_backoff", no_retry_delay
+    with ctrip_api.CtripFlightClient(headless=True) as client:
+        flights, got_response = client.search_oneway(
+            "PEK", "NRT", "北京", "东京", "2099-08-01"
+        )
+    _install_fake_client(
+        monkeypatch, flights=flights, got_response=got_response
     )
 
     source = CtripSource(enable_mock_fallback=False, headless=True)
@@ -441,32 +545,15 @@ def test_mock_fallback_returns_deals():
 
 
 def _install_fake_client(monkeypatch, *, flights, got_response):
-    class FakeClient:
-        def __init__(self, *, headless):
-            assert headless is True
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-        def search_oneway(self, **kwargs):
-            return flights, got_response
+    async def fake_worker(self, *args):
+        if not got_response:
+            raise CtripCollectionError()
+        return flights
 
     async def no_retry_delay(fn, *args, **kwargs):
         return await fn(*args)
 
-    monkeypatch.setitem(
-        sys.modules,
-        "ctrip_api",
-        SimpleNamespace(CtripFlightClient=FakeClient),
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "shared",
-        SimpleNamespace(resolve_city=lambda code: code),
-    )
+    monkeypatch.setattr(CtripSource, "_run_worker_once", fake_worker)
     monkeypatch.setattr(
         "backend.data_sources.ctrip_source.retry_with_backoff", no_retry_delay
     )
@@ -486,6 +573,10 @@ class _FakeDriver:
 
     def __init__(self, response_json):
         self.response_json = response_json
+        self.page_load_timeout = None
+
+    def set_page_load_timeout(self, timeout):
+        self.page_load_timeout = timeout
 
     def get(self, url):
         return None

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -52,6 +54,72 @@ async def test_executes_search_flights_tool_call(monkeypatch):
     assert isinstance(tm, ToolMessage)
     assert tm.tool_call_id == "c1"
     assert out["search_result"] is not None
+
+
+@pytest.mark.asyncio
+async def test_search_tool_message_is_url_free_while_state_keeps_public_links(
+    monkeypatch,
+):
+    import backend.application.graph.nodes.tool_router as tr
+
+    booking_url = (
+        "https://book.example.test/flight"
+        "?offer=fixture-token-not-secret&channel=web"
+    )
+    result = {
+        "jwt_secret": "model-secret-sentinel",
+        "jwt_secret_hint": "model-secret-hint-sentinel",
+        "access_token_metadata": "token-metadata-sentinel",
+        "deals": [
+            {
+                "flight_no": "MU5137",
+                "price": 480,
+                "currency": "CNY",
+                "booking_url": booking_url,
+                "prices": [
+                    {
+                        "password": "nested-secret-sentinel",
+                        "name": "飞猪",
+                        "price": 480,
+                        "currency": "CNY",
+                        "url": booking_url,
+                    }
+                ],
+            }
+        ],
+        "provider_statuses": {"flyai": "success"},
+    }
+    fake = _make_fake_tool("search_flights", result)
+    monkeypatch.setattr(tr, "load_available_tools", lambda: [fake])
+    ai = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "safe-search",
+                "name": "search_flights",
+                "args": {
+                    "origin": "BJS",
+                    "destination": "SHA",
+                    "depart_date": "2099-08-01",
+                },
+            }
+        ],
+    )
+
+    out = await tr.tool_router(
+        {"messages": [ai], "clarify_count": 0, "request_user_id": "u1"}
+    )
+    model_payload = json.loads(out["messages"][-1].content)
+
+    assert out["search_result"]["deals"][0]["booking_url"] == booking_url
+    assert "fixture-token-not-secret" not in out["messages"][-1].content
+    assert "model-secret-sentinel" not in out["messages"][-1].content
+    assert "model-secret-hint-sentinel" not in out["messages"][-1].content
+    assert "token-metadata-sentinel" not in out["messages"][-1].content
+    assert "nested-secret-sentinel" not in out["messages"][-1].content
+    assert "https://" not in out["messages"][-1].content
+    assert "booking_url" not in model_payload["deals"][0]
+    assert "url" not in model_payload["deals"][0]["prices"][0]
 
 
 @pytest.mark.asyncio

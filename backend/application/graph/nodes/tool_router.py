@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 
 from langchain_core.messages import ToolMessage
 
 from backend.application.graph.tools import load_available_tools
+from backend.application.services.search_events import safe_model_payload
 
 INJECT_USER_ID_TOOLS = {"set_alert", "get_preferences"}
 logger = logging.getLogger("faresniper.graph.tool_router")
@@ -70,7 +72,16 @@ async def tool_router(state: dict) -> dict:
             type(result).__name__,
         )
         out_msgs.append(
-            ToolMessage(content=str(result), tool_call_id=tc["id"], name=tc["name"])
+            ToolMessage(
+                content=json.dumps(
+                    safe_model_payload(result),
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    default=str,
+                ),
+                tool_call_id=tc["id"],
+                name=tc["name"],
+            )
         )
 
         if tc["name"] == "search_flights":

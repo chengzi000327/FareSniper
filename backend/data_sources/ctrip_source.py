@@ -2,20 +2,35 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+import os
+import signal
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from backend.application.contracts.flight_provider import is_complete_https_url
 from backend.data_sources.base import DataSource
 from backend.resilience.retry import retry_with_backoff
 
-# 把 third_party/flights_monitor 加入 sys.path（其内部用相对 import）
-_FM_PATH = str(Path(__file__).resolve().parents[1] / "third_party" / "flights_monitor")
+_FM_PATH = str(
+    Path(__file__).resolve().parents[1] / "third_party" / "flights_monitor"
+)
 if _FM_PATH not in sys.path:
     sys.path.insert(0, _FM_PATH)
 
 _COUNTER = 0  # system_id 自增计数器
+
+_WORKER_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "DISPLAY",
+    "XDG_RUNTIME_DIR",
+)
 
 
 class CtripCollectionError(RuntimeError):
@@ -45,9 +60,15 @@ def _fmt_time(dt_str: str) -> str:
 class CtripSource(DataSource):
     name = "ctrip"
 
-    def __init__(self, enable_mock_fallback: bool = True, headless: bool = True) -> None:
+    def __init__(
+        self,
+        enable_mock_fallback: bool = False,
+        headless: bool = True,
+        collection_timeout_seconds: float = 90.0,
+    ) -> None:
         self.enable_mock_fallback = enable_mock_fallback
         self.headless = headless
+        self.collection_timeout_seconds = collection_timeout_seconds
 
     async def search_flights(
         self,
@@ -81,50 +102,108 @@ class CtripSource(DataSource):
         self, origin: str, destination: str, date_start: str, date_end: str
     ) -> List[Dict[str, Any]]:
         try:
-            from ctrip_api import CtripFlightClient  # type: ignore
-            from shared import resolve_city  # type: ignore
+            async with asyncio.timeout(self.collection_timeout_seconds):
+                raw_flights = await retry_with_backoff(
+                    self._run_worker_once,
+                    origin,
+                    destination,
+                    date_start,
+                    date_end,
+                    max_retries=2,
+                    base_delay=1.0,
+                    max_delay=10.0,
+                )
         except Exception:
             raise CtripCollectionError() from None
+        return [
+            self._normalize(flight, origin, destination)
+            for flight in raw_flights
+        ]
 
-        def _run() -> List[Dict[str, Any]]:
-            origin_name = resolve_city(origin) or origin
-            dest_name = resolve_city(destination) or destination
-
-            results: List[Dict[str, Any]] = []
-            with CtripFlightClient(headless=self.headless) as client:
-                try:
-                    start = datetime.strptime(date_start, "%Y-%m-%d").date()
-                    end = datetime.strptime(date_end, "%Y-%m-%d").date()
-                except ValueError:
-                    start = end = datetime.now(timezone.utc).date()
-
-                current = start
-                while current <= end:
-                    flights, got_response = client.search_oneway(
-                        dcity=origin,
-                        acity=destination,
-                        dcity_name=origin_name,
-                        acity_name=dest_name,
-                        date_str=current.isoformat(),
-                    )
-                    if not got_response:
-                        raise CtripCollectionError()
-                    for f in flights:
-                        results.append(self._normalize(f, origin, destination))
-                    current += timedelta(days=1)
-
-            return results
+    async def _run_worker_once(
+        self, origin: str, destination: str, date_start: str, date_end: str
+    ) -> list[dict[str, Any]]:
+        args = [
+            sys.executable,
+            "-m",
+            "backend.data_sources.ctrip_browser_worker",
+            "--origin",
+            origin,
+            "--destination",
+            destination,
+            "--date-start",
+            date_start,
+            "--date-end",
+            date_end,
+        ]
+        if self.headless:
+            args.append("--headless")
+        env = {
+            key: os.environ[key]
+            for key in _WORKER_ENV_ALLOWLIST
+            if key in os.environ
+        }
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=env,
+                start_new_session=os.name == "posix",
+            )
+        except OSError:
+            raise CtripCollectionError() from None
 
         try:
-            return await retry_with_backoff(
-                asyncio.to_thread,
-                _run,
-                max_retries=2,
-                base_delay=1.0,
-                max_delay=10.0,
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=self.collection_timeout_seconds,
             )
+        except asyncio.CancelledError:
+            await self._terminate_worker_group(process)
+            raise
         except Exception:
+            await self._terminate_worker_group(process)
             raise CtripCollectionError() from None
+
+        if process.returncode != 0:
+            await self._terminate_worker_group(process)
+            raise CtripCollectionError()
+        try:
+            payload = json.loads(stdout.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError
+            flights = payload.get("flights")
+            if payload.get("ok") is not True or not isinstance(flights, list):
+                raise ValueError
+            if not all(isinstance(flight, dict) for flight in flights):
+                raise ValueError
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+            await self._terminate_worker_group(process)
+            raise CtripCollectionError() from None
+        return flights
+
+    @staticmethod
+    async def _terminate_worker_group(
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        pid = getattr(process, "pid", None)
+        killed_group = False
+        if os.name == "posix" and isinstance(pid, int):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+                killed_group = True
+            except ProcessLookupError:
+                killed_group = True
+        if not killed_group and process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            await process.wait()
+        except ProcessLookupError:
+            pass
 
     def _normalize(
         self,
@@ -157,7 +236,10 @@ class CtripSource(DataSource):
         arr_time = _fmt_time(str(item.get("arr_time") or ""))
         flight_no = str(item.get("flight_number") or item.get("flight_no") or "")
         unique_key = f"{flight_no}-{depart_date}-{price}"
-        booking_url = str(item.get("url") or item.get("jump_url") or "")
+        candidate_url = str(item.get("url") or item.get("jump_url") or "")
+        booking_url = (
+            candidate_url if is_complete_https_url(candidate_url) else ""
+        )
 
         return {
             "id": hashlib.md5(unique_key.encode()).hexdigest()[:12],
@@ -177,14 +259,16 @@ class CtripSource(DataSource):
             "depart_time": dep_time,
             "arrive_time": arr_time,
             "price": price,
+            "currency": "CNY",
             "tax": None,
             "baggage_fee": None,
             "has_baggage": None,
-            "recommend_score": "9.0" if confidence == "high" else "8.0",
+            "recommend_score": None,
             "prices": [
                 {
                     "platform": "携程",
                     "price": price,
+                    "currency": "CNY",
                     "url": booking_url,
                 },
             ],
@@ -221,7 +305,6 @@ class CtripSource(DataSource):
             confidence = "high" if discount < 0.75 else "medium"
             has_baggage = idx % 2 == 0
             baggage_fee = 0 if has_baggage else 50
-            recommend_score = f"{9.8 - idx * 0.2:.1f}"
             results.append({
                 "id": f"mock-{seed}-{idx}",
                 "system_id": _next_system_id(),
@@ -235,15 +318,16 @@ class CtripSource(DataSource):
                 "depart_time": f"{dep_h:02d}:10",
                 "arrive_time": f"{arr_h:02d}:40",
                 "price": price,
+                "currency": "CNY",
                 "tax": 120,
                 "baggage_fee": baggage_fee,
                 "has_baggage": has_baggage,
-                "recommend_score": recommend_score,
+                "recommend_score": None,
                 "prices": [
-                    {"name": "携程旅行", "price": price, "lowest": True},
-                    {"name": "去哪儿网", "price": price + 30},
-                    {"name": "飞猪旅行", "price": price + 45},
-                    {"name": "同程旅行", "price": price + 60},
+                    {"platform": "携程旅行", "price": price, "currency": "CNY", "lowest": True},
+                    {"platform": "去哪儿网", "price": price + 30, "currency": "CNY"},
+                    {"platform": "飞猪旅行", "price": price + 45, "currency": "CNY"},
+                    {"platform": "同程旅行", "price": price + 60, "currency": "CNY"},
                 ],
                 "original_price": original,
                 "discount_rate": discount,

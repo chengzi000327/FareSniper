@@ -6,6 +6,7 @@ from backend.application.contracts.flight_provider import PriceStatus, ProviderS
 from backend.application.services.flight_query import build_flight_query
 from backend.infrastructure.flight_data.providers.ctrip_snapshot import (
     CtripSnapshotProvider,
+    ctrip_rows_to_offers,
 )
 
 
@@ -171,3 +172,24 @@ async def test_mixed_freshness_sets_price_status_per_offer(monkeypatch):
         "MU5106": PriceStatus.stale,
         "MU5108": PriceStatus.priced,
     }
+
+
+def test_snapshot_price_selection_prefers_query_currency_before_amount():
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    rows = [
+        {
+            "flight_no": "MU5106",
+            "airline": "东方航空",
+            "dep_time": "08:00",
+            "arr_time": "10:00",
+            "prices": [
+                {"platform": "Global", "price": 80, "currency": "USD"},
+                {"platform": "携程", "price": 550, "currency": "CNY"},
+            ],
+        }
+    ]
+
+    offer = ctrip_rows_to_offers(rows, query, stale=False)[0]
+
+    assert offer.currency == "CNY"
+    assert offer.total_price == 550

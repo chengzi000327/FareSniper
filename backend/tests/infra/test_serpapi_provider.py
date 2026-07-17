@@ -40,6 +40,35 @@ async def test_uses_actual_booking_seller():
     assert result.offers[0].has_baggage is None
 
 
+@pytest.mark.asyncio
+async def test_retains_response_currency_instead_of_assuming_query_currency():
+    search = deepcopy(SEARCH)
+    booking = deepcopy(BOOKING)
+    search["search_parameters"] = {"currency": "USD"}
+    booking["search_parameters"] = {"currency": "USD"}
+    booking["booking_options"][0]["together"]["currency"] = "USD"
+    booking["booking_options"][0]["together"]["booking_request"]["url"] = (
+        "https://booking.example.com/checkout"
+        "?offer=fixture-usd-token-not-secret"
+    )
+
+    async def handler(request):
+        payload = booking if request.url.params.get("booking_token") else search
+        return httpx.Response(200, json=payload)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    result = await SerpApiProvider(api_key="secret", client=client).search(
+        build_flight_query("上海", "新加坡", "2099-08-01")
+    )
+    await client.aclose()
+
+    assert result.status is ProviderStatus.success
+    assert result.offers[0].currency == "USD"
+    assert result.offers[0].booking_url.endswith(
+        "?offer=fixture-usd-token-not-secret"
+    )
+
+
 def test_mainland_route_is_not_supported():
     assert SerpApiProvider(api_key="x").supports(
         build_flight_query("北京", "上海", "2099-08-01")

@@ -172,6 +172,7 @@ def test_env_example_has_safe_flight_provider_defaults():
     assert values["FLIGHT_PROVIDER_TIMEOUT_SECONDS"] == "10"
     assert values["CTRIP_SNAPSHOT_TTL_MINUTES"] == "75"
     assert values["CTRIP_REFRESH_BATCH_SIZE"] == "20"
+    assert values["CTRIP_COLLECTION_TIMEOUT_SECONDS"] == "90"
     assert values["RUN_SCHEDULER_IN_API"] == "false"
     assert values["FARESNIPER_LANGSMITH_TRACING"] == "true"
     assert values["LANGSMITH_TRACING"] == "false"

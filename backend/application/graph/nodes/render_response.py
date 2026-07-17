@@ -74,7 +74,8 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         else:
             deals = sort_deals(deals, pref_results)
 
-    prices = _extract_prices(search_result, deals)
+    primary_currency = _primary_currency(deals)
+    prices = _extract_prices(search_result, deals, primary_currency)
     pref_reasons: list[str] = []
     if pref_result:
         if isinstance(pref_result, dict):
@@ -99,6 +100,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         "min_price": min(prices) if prices else None,
         "max_price": max(prices) if prices else None,
         "avg_price": int(sum(prices) / len(prices)) if prices else None,
+        "currency": primary_currency,
         "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
         "lower_than_avg": lower_than_avg,
         "price_spread_pct": None,
@@ -142,9 +144,18 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "signals": decision.signals,
         }
     elif deals:
+        lowest_text = (
+            f"{primary_currency} {min(prices)}"
+            if prices and primary_currency
+            else str(min(prices)) if prices else ""
+        )
         recommendation = {
             "action": "watch",
-            "text": f"为你找到 {len(deals)} 个航班，最低价 ¥{min(prices)}。" if prices else f"为你找到 {len(deals)} 个航班。",
+            "text": (
+                f"为你找到 {len(deals)} 个航班，最低价 {lowest_text}。"
+                if prices
+                else f"为你找到 {len(deals)} 个航班。"
+            ),
             "confidence": "medium",
             "signals": [],
         }
@@ -264,17 +275,43 @@ def _match_score(pref_result, deal_count: int) -> float:
     )
 
 
-def _extract_prices(search_result, deals: list[dict]) -> list[int]:
+def _primary_currency(deals: list[dict]) -> str | None:
+    for deal in deals:
+        currency = deal.get("currency")
+        if isinstance(currency, str) and len(currency.strip()) == 3:
+            return currency.strip().upper()
+    return None
+
+
+def _extract_prices(
+    search_result, deals: list[dict], primary_currency: str | None
+) -> list[int]:
     if search_result and not isinstance(search_result, dict):
         return [c.lowest_price for c in search_result.candidates]
     prices: list[int] = []
     for deal in deals:
-        price = deal.get("price") or deal.get("lowest_price")
+        deal_currency = deal.get("currency")
+        if (
+            primary_currency
+            and isinstance(deal_currency, str)
+            and deal_currency.upper() != primary_currency
+        ):
+            continue
+        price = deal.get("price")
+        if not isinstance(price, (int, float)):
+            price = deal.get("lowest_price")
         if isinstance(price, (int, float)):
             prices.append(int(price))
             continue
         nested_prices = deal.get("prices") or []
         for item in nested_prices:
+            if (
+                primary_currency
+                and isinstance(item, dict)
+                and isinstance(item.get("currency"), str)
+                and item["currency"].upper() != primary_currency
+            ):
+                continue
             nested_price = item.get("price") if isinstance(item, dict) else None
             if isinstance(nested_price, (int, float)):
                 prices.append(int(nested_price))

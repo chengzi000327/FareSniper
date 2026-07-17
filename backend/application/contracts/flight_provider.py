@@ -4,7 +4,26 @@ from enum import Enum
 from typing import Protocol
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def is_complete_https_url(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = urlparse(value)
+        return parsed.scheme == "https" and bool(parsed.netloc and parsed.hostname)
+    except ValueError:
+        return False
+
+
+def normalize_currency_code(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    currency = value.strip().upper()
+    if len(currency) != 3 or not currency.isalpha():
+        raise ValueError("currency must be a three-letter code")
+    return currency
 
 
 class ProviderStatus(str, Enum):
@@ -35,6 +54,11 @@ class FlightQuery(BaseModel):
     currency: str = "CNY"
     is_mainland_domestic: bool
 
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, value: object) -> object:
+        return normalize_currency_code(value)
+
 
 class FlightOffer(BaseModel):
     data_provider: str
@@ -64,14 +88,20 @@ class FlightOffer(BaseModel):
     is_realtime: bool = True
     raw_reference: str | None = None
 
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, value: object) -> object:
+        return normalize_currency_code(value)
+
+    @field_validator("booking_url", mode="before")
+    @classmethod
+    def keep_only_complete_https_booking_url(cls, value: object) -> str | None:
+        return value if is_complete_https_url(value) else None
+
     @model_validator(mode="after")
     def validate_price_status(self) -> FlightOffer:
         is_live_price = self.price_status is PriceStatus.view_live_price
-        has_https_booking_url = (
-            self.booking_url is not None
-            and urlparse(self.booking_url).scheme == "https"
-            and bool(urlparse(self.booking_url).netloc)
-        )
+        has_https_booking_url = is_complete_https_url(self.booking_url)
         if self.total_price is None:
             if not is_live_price:
                 raise ValueError("未知总价必须使用 view_live_price 状态")

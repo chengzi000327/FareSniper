@@ -56,7 +56,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type ProviderDisplayStatus =
+export type ProviderStatus =
   | "loading"
   | "queued"
   | "success"
@@ -64,21 +64,26 @@ export type ProviderDisplayStatus =
   | "stale"
   | "timeout"
   | "disabled"
-  | "error"
-  | "view_live_price";
+  | "error";
+
+export type PriceStatus = "priced" | "view_live_price" | "stale";
 
 export interface PriceItem {
+  id: string;
   name: string;
   price: number | null;
-  lowest?: boolean;
-  status: ProviderDisplayStatus;
+  currency: string;
+  lowest?: boolean | null;
+  price_status: PriceStatus | null;
+  provider_status: ProviderStatus;
   url?: string | null;
-  data_provider?: string | null;
+  data_provider: string;
 }
 
 export interface DealCardDto {
   id: string;
   system_id: string;
+  flight_no: string;
   platform: string;
   origin_city: string;
   origin_code: string;
@@ -88,20 +93,26 @@ export interface DealCardDto {
   airline: string;
   depart_time: string;
   arrive_time: string;
+  duration_minutes: number | null;
+  stops: number;
   price: number | null;
+  lowest_price: number | null;
   tax: number | null;
   baggage_fee: number | null;
   has_baggage: boolean | null;
   total_price: number | null;
   currency: string;
-  recommend_score: string;
+  recommend_score: string | null;
   prices: PriceItem[];
-  original_price?: number;
-  discount_rate?: number;
-  cabin?: string;
+  original_price?: number | null;
+  discount_rate?: number | null;
+  cabin?: string | null;
   signals: string[];
   booking_url?: string | null;
-  data_freshness?: string;
+  h5_fallback_url?: string | null;
+  data_freshness?: string | null;
+  confidence?: "high" | "medium" | "low";
+  verdict?: string;
 }
 
 export interface ChatSearchRequest {
@@ -130,7 +141,7 @@ export interface SearchStreamEvent {
     response?: ChatSearchResponse;
     deals?: DealCardDto[];
     provider?: string;
-    status?: ProviderDisplayStatus;
+    status?: ProviderStatus;
     message?: string;
     error?: string;
     [key: string]: unknown;
@@ -145,7 +156,7 @@ function hasOwn(record: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-function isProviderDisplayStatus(value: unknown): value is ProviderDisplayStatus {
+function isProviderStatus(value: unknown): value is ProviderStatus {
   return (
     value === "loading" ||
     value === "queued" ||
@@ -154,9 +165,30 @@ function isProviderDisplayStatus(value: unknown): value is ProviderDisplayStatus
     value === "stale" ||
     value === "timeout" ||
     value === "disabled" ||
-    value === "error" ||
-    value === "view_live_price"
+    value === "error"
   );
+}
+
+function isPriceStatus(value: unknown): value is PriceStatus {
+  return (
+    value === "priced" ||
+    value === "view_live_price" ||
+    value === "stale"
+  );
+}
+
+function isCurrency(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Z]{3}$/.test(value);
+}
+
+function isCompleteHttpsUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && Boolean(url.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -182,16 +214,19 @@ function hasOptionalField(
 function isPriceItem(value: unknown): value is PriceItem {
   if (
     !isPlainRecord(value) ||
+    typeof value.id !== "string" ||
     typeof value.name !== "string" ||
     !isNullableFiniteNumber(value.price) ||
-    !isProviderDisplayStatus(value.status)
+    !isCurrency(value.currency) ||
+    (value.price_status !== null && !isPriceStatus(value.price_status)) ||
+    !isProviderStatus(value.provider_status) ||
+    typeof value.data_provider !== "string"
   ) {
     return false;
   }
   return (
-    hasOptionalField(value, "lowest", (item) => typeof item === "boolean") &&
-    hasOptionalField(value, "url", (item) => item === null || typeof item === "string") &&
-    hasOptionalField(value, "data_provider", (item) => item === null || typeof item === "string")
+    hasOptionalField(value, "lowest", (item) => item === null || typeof item === "boolean") &&
+    hasOptionalField(value, "url", (item) => item === null || isCompleteHttpsUrl(item))
   );
 }
 
@@ -201,6 +236,7 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   const requiredStrings = [
     "id",
     "system_id",
+    "flight_no",
     "platform",
     "origin_city",
     "origin_code",
@@ -211,11 +247,15 @@ function isDealCardDto(value: unknown): value is DealCardDto {
     "depart_time",
     "arrive_time",
     "currency",
-    "recommend_score",
   ];
   if (requiredStrings.some((key) => typeof value[key] !== "string")) return false;
   if (
+    !isCurrency(value.currency) ||
+    (value.recommend_score !== null && typeof value.recommend_score !== "string") ||
     !isNullableFiniteNumber(value.price) ||
+    !isNullableFiniteNumber(value.lowest_price) ||
+    !isNullableFiniteNumber(value.duration_minutes) ||
+    !Number.isInteger(value.stops) ||
     !isNullableFiniteNumber(value.tax) ||
     !isNullableFiniteNumber(value.baggage_fee) ||
     !isNullableFiniteNumber(value.total_price) ||
@@ -227,11 +267,14 @@ function isDealCardDto(value: unknown): value is DealCardDto {
     return false;
   }
   return (
-    hasOptionalField(value, "original_price", isFiniteNumber) &&
-    hasOptionalField(value, "discount_rate", isFiniteNumber) &&
-    hasOptionalField(value, "cabin", (item) => typeof item === "string") &&
-    hasOptionalField(value, "booking_url", (item) => item === null || typeof item === "string") &&
-    hasOptionalField(value, "data_freshness", (item) => typeof item === "string")
+    hasOptionalField(value, "original_price", isNullableFiniteNumber) &&
+    hasOptionalField(value, "discount_rate", isNullableFiniteNumber) &&
+    hasOptionalField(value, "cabin", (item) => item === null || typeof item === "string") &&
+    hasOptionalField(value, "booking_url", (item) => item === null || isCompleteHttpsUrl(item)) &&
+    hasOptionalField(value, "h5_fallback_url", (item) => item === null || isCompleteHttpsUrl(item)) &&
+    hasOptionalField(value, "data_freshness", (item) => item === null || typeof item === "string") &&
+    hasOptionalField(value, "confidence", (item) => item === "high" || item === "medium" || item === "low") &&
+    hasOptionalField(value, "verdict", (item) => typeof item === "string")
   );
 }
 
@@ -283,7 +326,7 @@ function hasValidKnownPayloadFields(payload: Record<string, unknown>): boolean {
   if (hasOwn(payload, "provider") && typeof payload.provider !== "string") {
     return false;
   }
-  if (hasOwn(payload, "status") && !isProviderDisplayStatus(payload.status)) {
+  if (hasOwn(payload, "status") && !isProviderStatus(payload.status)) {
     return false;
   }
   if (hasOwn(payload, "message") && typeof payload.message !== "string") {
@@ -316,7 +359,7 @@ function parseSearchStreamEvent(line: string): SearchStreamEvent {
   if (
     (parsed.type === "provider_status" &&
       (typeof payload.provider !== "string" ||
-        !isProviderDisplayStatus(payload.status))) ||
+        !isProviderStatus(payload.status))) ||
     (parsed.type === "results" && !Array.isArray(payload.deals)) ||
     (parsed.type === "validation_error" && typeof payload.message !== "string")
   ) {
@@ -434,7 +477,7 @@ export interface RecCardDto {
   reason?: string;
   tags?: string[];
   discount_pct?: number | null;
-  preview_deal?: DealCardDto;
+  preview_deal?: DealCardDto | null;
   query_hint?: string;
   [key: string]: unknown;
 }

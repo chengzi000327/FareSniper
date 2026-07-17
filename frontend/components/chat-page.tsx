@@ -9,6 +9,7 @@ import rehypeSanitize from 'rehype-sanitize'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import { RecommendationCard } from '@/components/shared-components'
 import { recApi, searchApi } from '@/lib/api'
+import { formatCurrency } from '@/lib/currency'
 import { dealToCardProps } from '@/lib/mappers'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
 import type { ChatSearchResponse, DealCardDto, SearchStreamEvent } from '@/lib/api'
@@ -32,7 +33,7 @@ function assistantText(response: ChatSearchResponse) {
   if (!bestDeal) return '暂未找到符合条件的航班，请换个搜索词试试。'
   return bestDeal.price === null
     ? `为您找到 ${deals.length} 个航班，请查看实时价格。`
-    : `为您找到 ${deals.length} 个航班，最低价 ¥${bestDeal.price}`
+    : `为您找到 ${deals.length} 个航班，最低价 ${formatCurrency(bestDeal.price, bestDeal.currency)}`
 }
 
 function cardPropsFromDeal(deal: DealCardDto): DiscoveryCardContentProps {
@@ -43,8 +44,12 @@ function finalizeCard(cardData: DiscoveryCardContentProps): DiscoveryCardContent
   return {
     ...cardData,
     prices: cardData.prices.map((price) =>
-      price.status === 'loading'
-        ? { ...price, status: price.data_provider === 'ctrip_snapshot' ? 'queued' : 'timeout' }
+      price.provider_status === 'loading'
+        ? {
+            ...price,
+            provider_status:
+              price.data_provider === 'ctrip_snapshot' ? 'queued' : 'timeout',
+          }
         : price
     ),
   }
@@ -61,7 +66,12 @@ function applyProviderStatus(
   return {
     ...cardData,
     prices: cardData.prices.map((price) =>
-      price.data_provider === provider || price.name === provider ? { ...price, status } : price
+      price.data_provider === provider ||
+      (provider === 'ctrip' && price.data_provider === 'ctrip_snapshot') ||
+      (provider === 'serpapi' && price.data_provider === 'serpapi_google_flights') ||
+      price.name === provider
+        ? { ...price, provider_status: status }
+        : price
     ),
   }
 }

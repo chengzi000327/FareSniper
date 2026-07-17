@@ -1,8 +1,13 @@
 """TG-12 Task 4: GET /api/recommendations cold-start and personalized."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 import pytest
 from httpx import AsyncClient
+
+from backend.infrastructure.db.flight_snapshot_repo import upsert_flights
 
 
 @pytest.mark.asyncio
@@ -16,7 +21,8 @@ async def test_cold_start_returns_hot_cards(
     assert r.status_code == 200
     body = r.json()
     assert body["personalized"] is False
-    assert len(body["cards"]) >= 3
+    assert body["cards"] == []
+    assert body["has_more"] is False
 
 
 @pytest.mark.asyncio
@@ -32,6 +38,33 @@ async def test_personalized_when_memories_present(
     async with get_session() as db:
         await LongTermMemory(db).upsert_preferences("u1", {"frequent_cities": ["上海"]})
         await db.commit()
+    depart_date = (
+        datetime.now(ZoneInfo("Asia/Shanghai")).date() + timedelta(days=1)
+    ).isoformat()
+    await upsert_flights(
+        [
+            {
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": depart_date,
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "2h",
+                "stops": 0,
+                "lowest_price": 580,
+                "currency": "CNY",
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 580,
+                        "currency": "CNY",
+                    }
+                ],
+            }
+        ]
+    )
 
     r = await client.get(
         "/api/recommendations",

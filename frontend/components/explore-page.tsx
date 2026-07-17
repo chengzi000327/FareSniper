@@ -6,6 +6,7 @@ import { Gift, MapPin, Plane, Sparkles, TrendingDown, X } from 'lucide-react'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import { recApi } from '@/lib/api'
 import { dealToCardProps } from '@/lib/mappers'
+import { formatCurrency } from '@/lib/currency'
 import type { RecCardDto } from '@/lib/api'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
 
@@ -43,7 +44,7 @@ function mapCard(c: RecCardDto): Deal | null {
     from: deal.origin_city,
     to: deal.destination_city,
     destCode,
-    price: String(deal.price),
+    price: formatCurrency(deal.price, deal.currency),
     date: deal.depart_date,
     reason: c.reason ?? '',
     tags: (c.tags as string[]) ?? [],
@@ -69,14 +70,33 @@ export function ExplorePage() {
   const stateRef = React.useRef({ hasMore: false, loadingMore: false, nextOffset: 0 })
   stateRef.current = { hasMore, loadingMore, nextOffset }
 
-  const loadPage = React.useCallback(async (offset: number) => {
-    const resp = await recApi.list({ limit: PAGE_SIZE, offset })
-    const mapped = resp.cards.map(mapCard).filter((d): d is Deal => d !== null)
-    setPersonalized(resp.personalized ?? false)
-    setHasMore(resp.has_more ?? false)
-    setNextOffset(resp.next_offset ?? offset + PAGE_SIZE)
+  const loadPage = React.useCallback(async (initialOffset: number) => {
+    let offset = initialOffset
+    let mapped: Deal[] = []
+    let personalized = false
+    let hasMore = false
+    let nextOffset = initialOffset
+    const visitedOffsets = new Set<number>()
+
+    while (!visitedOffsets.has(offset)) {
+      visitedOffsets.add(offset)
+      const resp = await recApi.list({ limit: PAGE_SIZE, offset })
+      personalized = resp.personalized ?? false
+      hasMore = resp.has_more ?? false
+      nextOffset = resp.next_offset ?? offset + PAGE_SIZE
+      mapped = [
+        ...mapped,
+        ...resp.cards.map(mapCard).filter((deal): deal is Deal => deal !== null),
+      ]
+      if (mapped.length > 0 || !hasMore || nextOffset <= offset) break
+      offset = nextOffset
+    }
+
+    setPersonalized(personalized)
+    setHasMore(hasMore)
+    setNextOffset(nextOffset)
     setDeals((prev) => {
-      if (offset === 0) return mapped
+      if (initialOffset === 0) return mapped
       const seen = new Set(prev.map((d) => d.id))
       return [...prev, ...mapped.filter((d) => !seen.has(d.id))]
     })
@@ -286,7 +306,7 @@ function DealCard({ deal, onSelect }: { deal: Deal; onSelect: () => void }) {
 
         {/* 价格 */}
         <div className="mb-1 flex items-baseline gap-2">
-          <span className="text-3xl font-black text-brand-text">¥{deal.price}</span>
+          <span className="text-3xl font-black text-brand-text">{deal.price}</span>
           <span className="text-sm text-brand-muted">起 · {deal.date}</span>
         </div>
 

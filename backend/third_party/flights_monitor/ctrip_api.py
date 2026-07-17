@@ -54,6 +54,7 @@ class CtripFlightClient:
 
     LIST_URL_TPL = "https://flights.ctrip.com/online/list/oneway-{dcity}-{acity}?depdate={date}"
     PAGE_LOAD_WAIT = 12  # 等待页面加载和 API 响应的秒数
+    PAGE_LOAD_TIMEOUT = 20
 
     def __init__(self, headless: bool = False):
         self.headless = headless
@@ -67,6 +68,7 @@ class CtripFlightClient:
                 headless=self.headless,
                 intercept_js=BATCH_INTERCEPT_JS,
             )
+            self.driver.set_page_load_timeout(self.PAGE_LOAD_TIMEOUT)
         except WebDriverException:
             logger.error("ctrip_browser_init_failed")
             raise

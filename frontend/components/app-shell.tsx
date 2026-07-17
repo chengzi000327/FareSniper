@@ -98,13 +98,13 @@ export function AppShell() {
                     tax={null}
                     baggageFee={null}
                     hasBaggage={null}
+                    currency="CNY"
                     platform="飞猪旅行"
-                    recommendScore="--"
                     compact
                     placeholder
                     prices={[
-                      { name: '飞猪旅行', price: null, status: 'loading' },
-                      { name: '携程旅行', price: null, status: 'queued' },
+                      { id: 'landing-flyai', name: '飞猪旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'loading', data_provider: 'flyai' },
+                      { id: 'landing-ctrip', name: '携程旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'queued', data_provider: 'ctrip_snapshot' },
                     ]}
                   />
                 </motion.div>
@@ -123,17 +123,21 @@ export function AppShell() {
                     tax={null}
                     baggageFee={null}
                     hasBaggage={null}
+                    currency="USD"
                     platform="国际航司/销售平台"
-                    recommendScore="--"
                     compact
                     placeholder
                     prices={[
                       {
                         name: '国际航司/销售平台',
                         price: null,
-                        status: 'loading',
+                        id: 'landing-serpapi',
+                        currency: 'USD',
+                        price_status: null,
+                        provider_status: 'loading',
+                        data_provider: 'serpapi_google_flights',
                       },
-                      { name: '飞猪旅行', price: null, status: 'empty' },
+                      { id: 'landing-flyai-global', name: '飞猪旅行', price: null, currency: 'USD', price_status: null, provider_status: 'empty', data_provider: 'flyai' },
                     ]}
                   />
                 </motion.div>

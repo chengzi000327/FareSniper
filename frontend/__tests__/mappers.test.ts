@@ -24,6 +24,7 @@ test("preserves null price and baggage fields when mapping a deal", () => {
   const card = dealToCardProps({
     id: "deal-1",
     system_id: "system-1",
+    flight_no: "MU5137",
     platform: "flyai",
     origin_city: "北京",
     origin_code: "PEK",
@@ -33,7 +34,10 @@ test("preserves null price and baggage fields when mapping a deal", () => {
     airline: "MU",
     depart_time: "08:00",
     arrive_time: "10:30",
+    duration_minutes: 150,
+    stops: 0,
     price: null,
+    lowest_price: null,
     tax: null,
     baggage_fee: null,
     has_baggage: null,
@@ -42,9 +46,12 @@ test("preserves null price and baggage fields when mapping a deal", () => {
     recommend_score: "8.6",
     prices: [
       {
+        id: "flyai-live-cny",
         name: "飞猪",
         price: null,
-        status: "view_live_price",
+        currency: "CNY",
+        price_status: "view_live_price",
+        provider_status: "success",
         url: "https://example.com/book",
         data_provider: "flyai",
       },
@@ -57,4 +64,50 @@ test("preserves null price and baggage fields when mapping a deal", () => {
   expect(card.baggageFee).toBeNull();
   expect(card.hasBaggage).toBeNull();
   expect(card.prices[0].price).toBeNull();
+  expect(card.currency).toBe("CNY");
+  expect(card.recommendScore).toBe("8.6");
+});
+
+test("preserves a nullable score and per-row currencies", () => {
+  const card = dealToCardProps({
+    id: "deal-usd",
+    system_id: "system-usd",
+    flight_no: "SQ833",
+    platform: "Global Seller",
+    origin_city: "上海",
+    origin_code: "SHA",
+    destination_city: "新加坡",
+    destination_code: "SIN",
+    depart_date: "2099-08-01",
+    airline: "Fixture Air",
+    depart_time: "08:00",
+    arrive_time: "14:00",
+    duration_minutes: 360,
+    stops: 0,
+    price: 80,
+    lowest_price: 80,
+    tax: null,
+    baggage_fee: null,
+    has_baggage: null,
+    total_price: 80,
+    currency: "USD",
+    recommend_score: null,
+    prices: [
+      {
+        id: "serpapi-global-usd",
+        name: "Global Seller",
+        price: 80,
+        currency: "USD",
+        lowest: true,
+        price_status: "priced",
+        provider_status: "success",
+        data_provider: "serpapi_google_flights",
+      },
+    ],
+    signals: [],
+  });
+
+  expect(card.currency).toBe("USD");
+  expect(card.prices[0].currency).toBe("USD");
+  expect(card.recommendScore).toBeUndefined();
 });

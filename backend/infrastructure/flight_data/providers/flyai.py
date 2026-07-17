@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -38,6 +39,63 @@ class _RunResult:
     returncode: int | None = None
     timed_out: bool = False
     launch_error: OSError | None = None
+    run_error: bool = False
+    process: asyncio.subprocess.Process | None = None
+
+
+_CHILD_ENV_ALLOWLIST = (
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+)
+
+
+def _child_environment(api_key: str) -> dict[str, str]:
+    env = {
+        key: os.environ[key]
+        for key in _CHILD_ENV_ALLOWLIST
+        if key in os.environ
+    }
+    env["FLYAI_API_KEY"] = api_key
+    return env
+
+
+async def _terminate_process_group(process: asyncio.subprocess.Process) -> None:
+    terminated = False
+    pid = getattr(process, "pid", None)
+    if os.name == "posix" and isinstance(pid, int):
+        try:
+            os.killpg(pid, signal.SIGKILL)
+            terminated = True
+        except ProcessLookupError:
+            terminated = True
+    if not terminated and process.returncode is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        await process.wait()
+    except ProcessLookupError:
+        pass
+
+
+async def _cleanup_error_run(run: _RunResult) -> None:
+    if run.process is not None:
+        await _terminate_process_group(run.process)
+
+
+def _error_result(error_code: str) -> ProviderResult:
+    return ProviderResult(
+        provider="flyai",
+        status=ProviderStatus.error,
+        error_code=error_code,
+    )
 
 
 def _is_https_url(value: object) -> bool:
@@ -182,8 +240,6 @@ class FlyAIProvider:
         return True
 
     async def _run_once(self, query: FlightQuery) -> _RunResult:
-        env = os.environ.copy()
-        env["FLYAI_API_KEY"] = self._api_key
         try:
             process = await asyncio.create_subprocess_exec(
                 self._cli_path,
@@ -198,7 +254,8 @@ class FlyAIProvider:
                 "3",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=env,
+                env=_child_environment(self._api_key),
+                start_new_session=os.name == "posix",
             )
         except OSError as exc:
             return _RunResult(launch_error=exc)
@@ -208,30 +265,25 @@ class FlyAIProvider:
                 process.communicate(), timeout=self._timeout_seconds
             )
         except asyncio.TimeoutError:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-            await process.wait()
+            await _terminate_process_group(process)
             return _RunResult(timed_out=True)
+        except asyncio.CancelledError:
+            await _terminate_process_group(process)
+            raise
+        except Exception:
+            await _terminate_process_group(process)
+            return _RunResult(run_error=True)
         return _RunResult(
             stdout=stdout,
             stderr=stderr,
             returncode=process.returncode,
+            process=process,
         )
 
     @staticmethod
     def _is_transient(stderr: bytes) -> bool:
         text = stderr.decode("utf-8", errors="replace").lower()
         return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
-
-    @staticmethod
-    def _error_result(error_code: str) -> ProviderResult:
-        return ProviderResult(
-            provider="flyai",
-            status=ProviderStatus.error,
-            error_code=error_code,
-        )
 
     async def search(self, query: FlightQuery) -> ProviderResult:
         if not self._api_key:
@@ -240,33 +292,42 @@ class FlyAIProvider:
         run = await self._run_once(query)
         if run.timed_out:
             return ProviderResult(provider=self.name, status=ProviderStatus.timeout)
-        if run.launch_error is not None:
-            return self._error_result("cli_failed")
+        if run.launch_error is not None or run.run_error:
+            return _error_result("cli_failed")
 
         if run.returncode != 0 and self._is_transient(run.stderr):
+            await _cleanup_error_run(run)
             run = await self._run_once(query)
             if run.timed_out:
                 return ProviderResult(provider=self.name, status=ProviderStatus.timeout)
-            if run.launch_error is not None:
-                return self._error_result("cli_failed")
+            if run.launch_error is not None or run.run_error:
+                return _error_result("cli_failed")
 
         if run.returncode != 0:
+            await _cleanup_error_run(run)
             text = run.stderr.decode("utf-8", errors="replace").lower()
             auth = any(token in text for token in ("401", "unauthorized", "api key"))
-            return self._error_result("authentication" if auth else "cli_failed")
+            return _error_result("authentication" if auth else "cli_failed")
 
         try:
             payload = json.loads(run.stdout.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return self._error_result("invalid_json")
+            await _cleanup_error_run(run)
+            return _error_result("invalid_json")
 
         if not isinstance(payload, Mapping):
-            return self._error_result("upstream_response")
+            await _cleanup_error_run(run)
+            return _error_result("upstream_response")
 
         if payload.get("status") not in (None, 0, "0"):
-            return self._error_result("upstream_response")
+            await _cleanup_error_run(run)
+            return _error_result("upstream_response")
 
-        offers = parse_flyai_payload(payload, query)
+        try:
+            offers = parse_flyai_payload(payload, query)
+        except Exception:
+            await _cleanup_error_run(run)
+            return _error_result("upstream_response")
         return ProviderResult(
             provider=self.name,
             status=ProviderStatus.success if offers else ProviderStatus.empty,

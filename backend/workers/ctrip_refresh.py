@@ -134,7 +134,13 @@ async def _refresh_ctrip_once() -> CtripRefreshSummary:
 
         await seed_ctrip_demands()
         demands = await claim_due_demands(settings.ctrip_refresh_batch_size)
-        source = CtripSource(enable_mock_fallback=False, headless=True)
+        source = CtripSource(
+            enable_mock_fallback=False,
+            headless=True,
+            collection_timeout_seconds=(
+                settings.ctrip_collection_timeout_seconds
+            ),
+        )
         succeeded = 0
         failed = 0
 
@@ -156,12 +162,14 @@ async def _refresh_ctrip_once() -> CtripRefreshSummary:
                     depart_date=demand.depart_date,
                     operation=operation,
                 )
-                if rows:
-                    await upsert_provider_flights(
-                        "ctrip_snapshot",
-                        rows,
-                        ttl_minutes=settings.ctrip_snapshot_ttl_minutes,
-                    )
+                await upsert_provider_flights(
+                    "ctrip_snapshot",
+                    rows,
+                    ttl_minutes=settings.ctrip_snapshot_ttl_minutes,
+                    origin_code=demand.origin_code,
+                    destination_code=demand.destination_code,
+                    depart_date=demand.depart_date,
+                )
                 succeeded += 1
             except Exception:
                 failed += 1

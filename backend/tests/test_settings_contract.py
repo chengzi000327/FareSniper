@@ -47,6 +47,7 @@ def test_settings_exposes_flight_provider_defaults(monkeypatch):
         "FLIGHT_PROVIDER_TIMEOUT_SECONDS",
         "CTRIP_SNAPSHOT_TTL_MINUTES",
         "CTRIP_REFRESH_BATCH_SIZE",
+        "CTRIP_COLLECTION_TIMEOUT_SECONDS",
         "CTRIP_REQUEST_DELAY_MIN_SECONDS",
         "CTRIP_REQUEST_DELAY_MAX_SECONDS",
         "RUN_SCHEDULER_IN_API",
@@ -61,6 +62,7 @@ def test_settings_exposes_flight_provider_defaults(monkeypatch):
     assert s.flight_provider_timeout_seconds == 10.0
     assert s.ctrip_snapshot_ttl_minutes == 75
     assert s.ctrip_refresh_batch_size == 20
+    assert s.ctrip_collection_timeout_seconds == 90.0
     assert s.ctrip_request_delay_min_seconds == 2.0
     assert s.ctrip_request_delay_max_seconds == 5.0
     assert s.run_scheduler_in_api is False

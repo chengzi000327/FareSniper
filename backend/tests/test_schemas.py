@@ -13,6 +13,7 @@ def _deal_payload(**overrides) -> dict:
     base = {
         "id": "deal-001",
         "system_id": "SYS.042",
+        "flight_no": "CA901",
         "platform": "ctrip",
         "origin_city": "北京",
         "origin_code": "PEK",
@@ -23,6 +24,7 @@ def _deal_payload(**overrides) -> dict:
         "depart_time": "08:00",
         "arrive_time": "13:30",
         "price": 2580,
+        "currency": "CNY",
         "original_price": None,
         "discount_rate": None,
         "cabin": "economy",
@@ -62,6 +64,16 @@ def test_deal_card_missing_required_field():
 
     payload = _deal_payload()
     del payload["price"]
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(payload)
+
+
+def test_deal_card_requires_currency_instead_of_fabricating_one():
+    from backend.schemas.common import DealCardDto
+
+    payload = _deal_payload()
+    del payload["currency"]
+
     with pytest.raises(ValidationError):
         DealCardDto.model_validate(payload)
 

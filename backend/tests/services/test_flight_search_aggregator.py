@@ -281,6 +281,50 @@ async def test_events_are_request_scoped_sanitized_and_reset():
     assert "?" not in left[0]["payload"]["url"]
 
 
+def test_public_event_preserves_complete_https_booking_deep_link() -> None:
+    events: list[dict] = []
+    booking_url = (
+        "https://book.example.test/flight"
+        "?offer=fixture-token-not-secret&channel=web#checkout"
+    )
+
+    with bind_search_event_emitter(SearchEventEmitter("public-link", events.append)):
+        emit_search_event(
+            "results",
+            {
+                "deals": [
+                    {
+                        "booking_url": booking_url,
+                        "prices": [{"url": booking_url}],
+                    }
+                ]
+            },
+        )
+
+    assert events[0]["payload"]["deals"][0]["booking_url"] == booking_url
+    assert events[0]["payload"]["deals"][0]["prices"][0]["url"] == booking_url
+
+
+def test_public_event_drops_non_https_booking_links() -> None:
+    events: list[dict] = []
+
+    with bind_search_event_emitter(SearchEventEmitter("unsafe-link", events.append)):
+        emit_search_event(
+            "results",
+            {
+                "deals": [
+                    {
+                        "booking_url": "http://book.example.test/flight",
+                        "prices": [{"url": "javascript:alert(1)"}],
+                    }
+                ]
+            },
+        )
+
+    assert events[0]["payload"]["deals"][0]["booking_url"] is None
+    assert events[0]["payload"]["deals"][0]["prices"][0]["url"] is None
+
+
 def test_event_redaction_is_recursive_key_agnostic_and_non_mutating():
     payload = {
         "href": "https://example.test/path?campaign=summer#details",

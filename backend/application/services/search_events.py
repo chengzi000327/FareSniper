@@ -7,13 +7,21 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+from backend.application.contracts.flight_provider import is_complete_https_url
 
-_SENSITIVE_KEY_SUFFIXES = (
+
+_SENSITIVE_KEY_MARKERS = (
     "apikey",
     "authorization",
     "authorizationheader",
+    "cookie",
+    "credential",
     "headers",
+    "password",
+    "passwd",
+    "privatekey",
     "rawpayload",
+    "secret",
     "token",
 )
 
@@ -27,7 +35,8 @@ def _canonical_key(key: object) -> str:
 
 
 def _is_sensitive_key(key: object) -> bool:
-    return _canonical_key(key).endswith(_SENSITIVE_KEY_SUFFIXES)
+    canonical = _canonical_key(key)
+    return any(marker in canonical for marker in _SENSITIVE_KEY_MARKERS)
 
 
 def _is_recognized_uri_reference(value: str, parsed: SplitResult) -> bool:
@@ -57,17 +66,62 @@ def _safe_uri_reference(value: str) -> str:
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
 
-def _safe_event_value(value: Any) -> Any:
+_BOOKING_URL_KEYS = {"bookingurl", "h5fallbackurl"}
+_MODEL_URL_KEYS = {"url", "bookingurl", "h5fallbackurl", "href", "link"}
+
+
+def _is_booking_url_field(key: object, path: tuple[str, ...]) -> bool:
+    canonical = _canonical_key(key)
+    return canonical in _BOOKING_URL_KEYS or (
+        canonical == "url" and "prices" in path
+    )
+
+
+def _is_model_url_key(key: object) -> bool:
+    canonical = _canonical_key(key)
+    return canonical in _MODEL_URL_KEYS or canonical.endswith(
+        ("url", "uri", "href", "link")
+    )
+
+
+def _safe_event_value(value: Any, path: tuple[str, ...] = ()) -> Any:
     if isinstance(value, Mapping):
-        return {
-            str(item_key): _safe_event_value(item_value)
-            for item_key, item_value in value.items()
-            if not _is_sensitive_key(item_key)
-        }
+        safe: dict[str, Any] = {}
+        for item_key, item_value in value.items():
+            if _is_sensitive_key(item_key):
+                continue
+            key = str(item_key)
+            if _is_booking_url_field(item_key, path):
+                safe[key] = (
+                    item_value if is_complete_https_url(item_value) else None
+                )
+            else:
+                safe[key] = _safe_event_value(item_value, (*path, key))
+        return safe
     if isinstance(value, (list, tuple)):
-        return [_safe_event_value(item) for item in value]
+        return [_safe_event_value(item, path) for item in value]
     if isinstance(value, str):
         return _safe_uri_reference(value)
+    return value
+
+
+def safe_model_payload(value: Any) -> Any:
+    """Return JSON-safe tool context without links, raw payloads, or secrets."""
+    if isinstance(value, Mapping):
+        return {
+            str(item_key): safe_model_payload(item_value)
+            for item_key, item_value in value.items()
+            if not _is_sensitive_key(item_key)
+            and not _is_model_url_key(item_key)
+        }
+    if isinstance(value, (list, tuple)):
+        return [safe_model_payload(item) for item in value]
+    if isinstance(value, str):
+        try:
+            parsed = urlsplit(value)
+        except ValueError:
+            return value
+        return None if _is_recognized_uri_reference(value, parsed) else value
     return value
 
 

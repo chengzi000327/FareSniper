@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -140,12 +141,95 @@ async def test_search_uses_safe_arguments_and_inherited_key(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_child_environment_is_a_minimal_allowlist(monkeypatch):
+    calls = []
+    monkeypatch.setenv("DATABASE_URL", "db-secret-sentinel")
+    monkeypatch.setenv("JWT_SECRET", "jwt-secret-sentinel")
+    monkeypatch.setenv("SERPAPI_API_KEY", "serp-secret-sentinel")
+    monkeypatch.setenv("LANGSMITH_API_KEY", "trace-secret-sentinel")
+    monkeypatch.setenv("OPENAI_API_KEY", "model-secret-sentinel")
+
+    class FakeProcess:
+        pid = 41001
+        returncode = 0
+
+        async def communicate(self):
+            return FIXTURE.read_bytes(), b""
+
+    async def fake_create(*args, **kwargs):
+        calls.append(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+
+    result = await FlyAIProvider(api_key="flyai-key-sentinel").search(_query())
+
+    child_env = calls[0]["env"]
+    assert child_env["FLYAI_API_KEY"] == "flyai-key-sentinel"
+    assert child_env["PATH"] == os.environ["PATH"]
+    assert calls[0]["start_new_session"] is True
+    for forbidden in (
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "SERPAPI_API_KEY",
+        "LANGSMITH_API_KEY",
+        "OPENAI_API_KEY",
+    ):
+        assert forbidden not in child_env
+
+
+@pytest.mark.asyncio
+async def test_outer_cancellation_kills_process_group_and_awaits_cleanup(
+    monkeypatch,
+):
+    communicate_started = asyncio.Event()
+    waited = asyncio.Event()
+    killed: list[tuple[int, signal.Signals]] = []
+
+    class FakeProcess:
+        pid = 41002
+        returncode = None
+
+        async def communicate(self):
+            communicate_started.set()
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def wait(self):
+            self.returncode = -signal.SIGKILL
+            waited.set()
+            return self.returncode
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    def fake_killpg(process_group: int, sig: signal.Signals) -> None:
+        killed.append((process_group, sig))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+
+    task = asyncio.create_task(FlyAIProvider(api_key="key").search(_query()))
+    await communicate_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert killed == [(41002, signal.SIGKILL)]
+    assert waited.is_set()
+
+
+@pytest.mark.asyncio
 async def test_zero_exit_with_upstream_error_status_is_error(monkeypatch):
     class FakeProcess:
         returncode = 0
 
         async def communicate(self):
             return b'{"status": 401, "data": {"itemList": []}}', b""
+
+        async def wait(self):
+            return self.returncode
 
     async def fake_create(*args, **kwargs):
         return FakeProcess()
@@ -164,6 +248,9 @@ async def test_non_object_json_payload_is_upstream_error(monkeypatch):
 
         async def communicate(self):
             return b"[]", b""
+
+        async def wait(self):
+            return self.returncode
 
     async def fake_create(*args, **kwargs):
         return FakeProcess()
@@ -184,6 +271,9 @@ async def test_nonzero_exit_classifies_authentication(monkeypatch):
 
         async def communicate(self):
             return b"", b"401 unauthorized: api key is invalid"
+
+        async def wait(self):
+            return self.returncode
 
     async def fake_create(*args, **kwargs):
         nonlocal calls
@@ -208,6 +298,9 @@ async def test_non_auth_non_transient_cli_failure_is_not_retried(monkeypatch):
         async def communicate(self):
             return b"", b"invalid argument"
 
+        async def wait(self):
+            return self.returncode
+
     async def fake_create(*args, **kwargs):
         nonlocal calls
         calls += 1
@@ -219,6 +312,38 @@ async def test_non_auth_non_transient_cli_failure_is_not_retried(monkeypatch):
     assert calls == 1
     assert result.status is ProviderStatus.error
     assert result.error_code == "cli_failed"
+
+
+@pytest.mark.asyncio
+async def test_nonzero_exit_kills_process_group_and_awaits_cleanup(monkeypatch):
+    killed: list[tuple[int, signal.Signals]] = []
+    waited = asyncio.Event()
+
+    class FakeProcess:
+        pid = 41003
+        returncode = 2
+
+        async def communicate(self):
+            return b"", b"invalid argument"
+
+        async def wait(self):
+            waited.set()
+            return self.returncode
+
+    async def fake_create(*args, **kwargs):
+        return FakeProcess()
+
+    def fake_killpg(process_group: int, sig: signal.Signals) -> None:
+        killed.append((process_group, sig))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+
+    result = await FlyAIProvider(api_key="secret").search(_query())
+
+    assert result.status is ProviderStatus.error
+    assert killed == [(41003, signal.SIGKILL)]
+    assert waited.is_set()
 
 
 @pytest.mark.asyncio
@@ -264,6 +389,9 @@ async def test_retries_once_for_transient_network_failure(monkeypatch):
         async def communicate(self):
             return self._stdout, self._stderr
 
+        async def wait(self):
+            return self.returncode
+
     async def fake_create(*args, **kwargs):
         nonlocal calls
         calls += 1
@@ -287,6 +415,9 @@ async def test_invalid_json_is_error_without_retry(monkeypatch):
 
         async def communicate(self):
             return b"not json", b"temporary network failure"
+
+        async def wait(self):
+            return self.returncode
 
     async def fake_create(*args, **kwargs):
         nonlocal calls

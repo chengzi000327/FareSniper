@@ -257,3 +257,38 @@ async def test_multi_provider_deal_order_is_preserved_when_price_is_missing():
         "SNAPSHOT_ONLY",
     ]
     assert all(deal["recommend_score"] for deal in out["response"].deals)
+
+
+@pytest.mark.asyncio
+async def test_final_analysis_does_not_compare_unlike_currencies():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "source": "multi_provider",
+            "deals": [
+                {
+                    "flight_no": "CNY1",
+                    "price": 550,
+                    "total_price": 550,
+                    "currency": "CNY",
+                    "stops": 0,
+                },
+                {
+                    "flight_no": "USD1",
+                    "price": 80,
+                    "total_price": 80,
+                    "currency": "USD",
+                    "stops": 0,
+                },
+            ],
+        },
+    }
+
+    out = await render_response(state)
+    response = out["response"]
+
+    assert response.analysis["min_price"] == 550
+    assert response.analysis["max_price"] == 550
+    assert response.analysis["currency"] == "CNY"
+    assert "CNY 550" in response.recommendation["text"]
+    assert "¥80" not in response.recommendation["text"]

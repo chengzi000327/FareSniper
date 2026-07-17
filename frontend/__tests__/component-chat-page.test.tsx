@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, expect, test, vi } from "vitest";
 import { ChatPage } from "@/components/chat-page";
 import { searchApi } from "@/lib/api";
-import type { ChatSearchResponse, DealCardDto, SearchStreamEvent } from "@/lib/api";
+import type { ChatSearchResponse, DealCardDto, PriceItem, SearchStreamEvent } from "@/lib/api";
 
 vi.mock("@/lib/api", () => ({
   searchApi: {
@@ -28,10 +28,26 @@ type StreamCall = {
 const calls: StreamCall[] = [];
 const streamMock = vi.mocked(searchApi.stream);
 
+function priceRow(overrides: Partial<PriceItem> = {}): PriceItem {
+  const name = overrides.name ?? "测试来源";
+  return {
+    id: `row-${name}`,
+    name,
+    price: null,
+    currency: "CNY",
+    lowest: false,
+    price_status: null,
+    provider_status: "success",
+    data_provider: "fixture",
+    ...overrides,
+  };
+}
+
 function deal(overrides: Partial<DealCardDto> = {}): DealCardDto {
   return {
     id: "deal_1",
     system_id: "sys_1",
+    flight_no: "CA1835",
     platform: "飞猪",
     origin_city: "北京",
     origin_code: "BJS",
@@ -41,7 +57,10 @@ function deal(overrides: Partial<DealCardDto> = {}): DealCardDto {
     airline: "CA",
     depart_time: "08:00",
     arrive_time: "10:00",
+    duration_minutes: 120,
+    stops: 0,
     price: 580,
+    lowest_price: 580,
     tax: null,
     baggage_fee: null,
     has_baggage: null,
@@ -49,8 +68,8 @@ function deal(overrides: Partial<DealCardDto> = {}): DealCardDto {
     currency: "CNY",
     recommend_score: "9.5",
     prices: [
-      { name: "飞猪", price: 580, status: "success", lowest: true },
-      { name: "携程", price: null, status: "loading", data_provider: "ctrip_snapshot" },
+      priceRow({ name: "飞猪", price: 580, price_status: "priced", lowest: true, data_provider: "flyai" }),
+      priceRow({ name: "携程", provider_status: "loading", data_provider: "ctrip_snapshot" }),
     ],
     signals: [],
     ...overrides,
@@ -126,8 +145,8 @@ test("chat page updates its card when results arrive before the stream completes
   await act(async () => {
     calls[0].onEvent(complete(3, response("飞猪当前价格更优", deal({
       prices: [
-        { name: "飞猪", price: 580, status: "success", lowest: true },
-        { name: "携程", price: null, status: "queued", data_provider: "ctrip_snapshot" },
+        priceRow({ name: "飞猪", price: 580, price_status: "priced", lowest: true, data_provider: "flyai" }),
+        priceRow({ name: "携程", provider_status: "queued", data_provider: "ctrip_snapshot" }),
       ],
     }))));
     calls[0].resolve(response("不应覆盖 canonical complete"));
@@ -136,6 +155,32 @@ test("chat page updates its card when results arrive before the stream completes
   expect(await screen.findByText("飞猪当前价格更优")).toBeInTheDocument();
   expect(screen.getByText("等待下次刷新")).toBeInTheDocument();
   expect(screen.queryByText("不应覆盖 canonical complete")).not.toBeInTheDocument();
+});
+
+test("uses the deal currency in fallback assistant copy", async () => {
+  render(<ChatPage />);
+  await send("上海到新加坡");
+  const usdDeal = deal({
+    price: 80,
+    total_price: 80,
+    currency: "USD",
+    recommend_score: null,
+    prices: [priceRow({ name: "Global Seller", price: 80, currency: "USD", price_status: "priced", lowest: true })],
+  });
+
+  await act(async () => {
+    calls[0].onEvent(
+      complete(1, {
+        session_id: "s_usd",
+        deals: [usdDeal],
+      })
+    );
+  });
+
+  expect(
+    await screen.findByText("为您找到 1 个航班，最低价 US$80")
+  ).toBeInTheDocument();
+  expect(screen.queryByText("为您找到 1 个航班，最低价 ¥80")).not.toBeInTheDocument();
 });
 
 test("aborts and settles the old assistant while ignoring its late events", async () => {
@@ -149,8 +194,8 @@ test("aborts and settles the old assistant while ignoring its late events", asyn
   expect(screen.getAllByText("正在为您深度扫描全网特价资源...")).toHaveLength(1);
 
   await act(async () => {
-    calls[0].onEvent(results(2, deal({ prices: [{ name: "旧平台", price: 580, status: "success" }] })));
-    calls[1].onEvent(results(2, deal({ prices: [{ name: "新平台", price: 580, status: "success" }] })));
+    calls[0].onEvent(results(2, deal({ prices: [priceRow({ name: "旧平台", price: 580, price_status: "priced" })] })));
+    calls[1].onEvent(results(2, deal({ prices: [priceRow({ name: "新平台", price: 580, price_status: "priced" })] })));
   });
 
   expect(screen.queryByText("旧平台")).not.toBeInTheDocument();
@@ -331,9 +376,9 @@ test("finalizes partial provider rows before replacing an active search", async 
   await act(async () => {
     calls[0].onEvent(results(2, deal({
       prices: [
-        { name: "飞猪", price: 580, status: "success", lowest: true },
-        { name: "携程", price: null, status: "loading", data_provider: "ctrip_snapshot" },
-        { name: "国际卖家", price: null, status: "loading" },
+        priceRow({ name: "飞猪", price: 580, price_status: "priced", lowest: true, data_provider: "flyai" }),
+        priceRow({ name: "携程", provider_status: "loading", data_provider: "ctrip_snapshot" }),
+        priceRow({ name: "国际卖家", provider_status: "loading", data_provider: "serpapi_google_flights" }),
       ],
     })));
   });
@@ -368,9 +413,9 @@ test("does not apply a stale complete returned after an out-of-order event", asy
   await send("乱序搜索");
 
   await act(async () => {
-    calls[0].onEvent(results(2, deal({ prices: [{ name: "最新结果", price: 580, status: "success" }] })));
-    calls[0].onEvent(complete(1, response("过期 complete", deal({ prices: [{ name: "过期结果", price: 580, status: "success" }] }))));
-    calls[0].resolve(response("返回值不应绕过 sequence", deal({ prices: [{ name: "返回值旧结果", price: 580, status: "success" }] })));
+    calls[0].onEvent(results(2, deal({ prices: [priceRow({ name: "最新结果", price: 580, price_status: "priced" })] })));
+    calls[0].onEvent(complete(1, response("过期 complete", deal({ prices: [priceRow({ name: "过期结果", price: 580, price_status: "priced" })] }))));
+    calls[0].resolve(response("返回值不应绕过 sequence", deal({ prices: [priceRow({ name: "返回值旧结果", price: 580, price_status: "priced" })] })));
   });
 
   expect(await screen.findByText("最新结果")).toBeInTheDocument();

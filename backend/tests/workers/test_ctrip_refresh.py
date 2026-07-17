@@ -53,8 +53,8 @@ async def test_refresh_persists_real_ctrip_rows(monkeypatch):
         async def search_flights(self, *args):
             return [{"flight_no": "CA123", "prices": [{"platform": "携程", "price": 500}]}]
 
-    async def record_upsert(provider, rows, ttl_minutes):
-        calls.append((provider, rows, ttl_minutes))
+    async def record_upsert(provider, rows, ttl_minutes, **scope):
+        calls.append((provider, rows, ttl_minutes, scope))
 
     monkeypatch.setattr(
         "backend.workers.ctrip_refresh.claim_due_demands",
@@ -81,7 +81,59 @@ async def test_refresh_persists_real_ctrip_rows(monkeypatch):
     assert summary.succeeded == 1
     assert calls[0][0] == "ctrip_snapshot"
     assert calls[0][2] == 75
-    assert source_kwargs == [{"enable_mock_fallback": False, "headless": True}]
+    assert source_kwargs == [
+        {
+            "enable_mock_fallback": False,
+            "headless": True,
+            "collection_timeout_seconds": 90.0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_successful_empty_refresh_replaces_the_route_inventory(monkeypatch):
+    calls = []
+
+    class EmptySource:
+        async def search_flights(self, *args):
+            return []
+
+    async def record_upsert(provider, rows, ttl_minutes, **scope):
+        calls.append((provider, rows, ttl_minutes, scope))
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _acquired_lease
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.seed_ctrip_demands", _async_none
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.claim_due_demands",
+        lambda limit: _async_value([_demand()]),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.CtripSource", lambda **kwargs: EmptySource()
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.upsert_provider_flights", record_upsert
+    )
+    monkeypatch.setattr("backend.workers.ctrip_refresh.asyncio.sleep", _async_none)
+
+    summary = await refresh_ctrip_once()
+
+    assert summary.succeeded == 1
+    assert calls == [
+        (
+            "ctrip_snapshot",
+            [],
+            75,
+            {
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": "2099-08-01",
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -165,6 +217,10 @@ async def test_refresh_wraps_each_demand_in_safe_child_span(monkeypatch):
         fake_trace_demand,
         raising=False,
     )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.upsert_provider_flights",
+        _async_none,
+    )
     monkeypatch.setattr("backend.workers.ctrip_refresh.asyncio.sleep", _async_none)
 
     summary = await refresh_ctrip_once()
@@ -233,8 +289,8 @@ async def test_refresh_counts_collection_error_and_continues_with_later_demand(
     async def fake_sleep(delay):
         sleeps.append(delay)
 
-    async def fake_upsert(provider, rows, ttl_minutes):
-        persisted.append((provider, rows, ttl_minutes))
+    async def fake_upsert(provider, rows, ttl_minutes, **scope):
+        persisted.append((provider, rows, ttl_minutes, scope))
 
     monkeypatch.setattr(
         "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _acquired_lease

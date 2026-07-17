@@ -1,24 +1,28 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import statistics
 import uuid
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from backend.application.contracts.recommendations import RecCard, RecommendationsResponseDto
+from backend.application.contracts.flight_provider import is_complete_https_url
 from backend.application.services._routes import CITY_NAMES, HOT_ROUTES, ROUTE_TAGS
 from backend.config import settings
 from backend.infrastructure.db.base import get_session
-from backend.infrastructure.db.flight_snapshot_repo import read_deals, read_deals_latest
+from backend.infrastructure.db.flight_snapshot_repo import read_deals
 from backend.infrastructure.redis.session_store import _redis
 from backend.memory.long_term import LongTermMemory
 from backend.services.booking_url_builder import Platform, build_booking_url
+from backend.schemas.common import DealCardDto
 
 # ── 缓存分层 ──────────────────────────────────────────────────────────────────
 # L1:全局未排序卡片池,全用户共享,key=rec:pool:v1,TTL 600s。
 # L2:请求时在内存里做个性化排序(读 frequent_cities),不进 L1 缓存。
-POOL_CACHE_KEY = "rec:pool:v1"
+POOL_CACHE_KEY = "rec:pool:v2"
 POOL_CACHE_TTL = 600  # 10 分钟
 
 DEFAULT_LIMIT = 6
@@ -47,7 +51,13 @@ async def build_recommendations(
     按 limit/offset 切片 → 计算 has_more/next_offset。
     """
     pool = await _get_card_pool()
-    ordered, personalized = await _personalize(user_id, pool)
+    renderable = [
+        card
+        for card in pool
+        if card.preview_deal is not None
+        and _is_future_departure(card.preview_deal.get("depart_date"))
+    ]
+    ordered, personalized = await _personalize(user_id, renderable)
 
     total = len(ordered)
     page = ordered[offset : offset + limit]
@@ -83,8 +93,10 @@ async def _get_card_pool() -> list[RecCard]:
 
 async def _build_card_pool() -> list[RecCard]:
     """遍历全部热门路线,生成未排序、未个性化的卡片池。"""
-    # 近 3 天日期(优先取未来,查不到再兜底到该路线最新一批)
-    dates = [(date.today() + timedelta(days=i + 1)).strftime("%Y-%m-%d") for i in range(3)]
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    dates = [
+        (today + timedelta(days=i + 1)).isoformat() for i in range(3)
+    ]
 
     cards: list[RecCard] = []
     seen_destinations: set[str] = set()
@@ -101,19 +113,35 @@ async def _build_card_pool() -> list[RecCard]:
                 batch = deals
                 chosen_date = d
                 break
-        if not batch:
-            batch = await read_deals_latest(origin_code=origin, destination_code=dest)
-            chosen_date = batch[0]["depart_date"] if batch else None
-
         best_deal: dict[str, Any] | None = None
         market_avg: int | None = None
         sample_n = 0
         if batch:
-            best_deal = dict(batch[0])
-            best_deal["depart_date"] = chosen_date
+            selected_currency = _preferred_batch_currency(batch)
+            comparable_batch = [
+                deal
+                for deal in batch
+                if _deal_currency(deal) == selected_currency
+                and _positive_price(deal.get("lowest_price")) is not None
+            ]
+            if comparable_batch:
+                best_deal = dict(
+                    min(
+                        comparable_batch,
+                        key=lambda deal: _positive_price(
+                            deal.get("lowest_price")
+                        ),
+                    )
+                )
+                best_deal["depart_date"] = chosen_date
             # 当批中位数作为折扣基准的最后一层兜底——同一天的高价商务/全价舱
             # 会把均值拉高导致折扣虚高,中位数对离群价更稳健。
-            prices = [d["lowest_price"] for d in batch if d.get("lowest_price", 0) > 0]
+            prices = [
+                price
+                for deal in comparable_batch
+                if (price := _positive_price(deal.get("lowest_price")))
+                is not None
+            ]
             sample_n = len(prices)
             if prices:
                 market_avg = round(statistics.median(prices))
@@ -171,8 +199,19 @@ def _build_card(
     preview_deal: dict[str, Any] | None = None
     is_history_low = False
 
+    if deal and not _is_future_departure(deal.get("depart_date")):
+        deal = None
+
     if deal:
         price = deal.get("lowest_price", 0)
+        currency = _deal_currency(deal)
+        if not currency:
+            return RecCard(
+                id=str(uuid.uuid4())[:8],
+                title=f"{origin_name}→{dest_name}",
+                reason=_build_reason(dest_name, None, None, False),
+                tags=tags,
+            )
         discount_pct = _compute_discount(deal, market_avg, sample_n)
 
         # "历史低价"信号改用 history_low_90d 判定:价格触及 90 天历史低点
@@ -182,9 +221,15 @@ def _build_card(
         platform_name, booking_url = _build_booking(deal, origin, dest)
 
         prices = deal.get("prices") or []
+        selected_prices = [
+            row
+            for row in prices
+            if str(row.get("currency") or "").upper() == currency
+        ]
         preview_deal = {
             "id": f"rec-{origin}-{dest}-{deal.get('depart_date', '')}",
             "system_id": f"{deal.get('flight_no', '')}-{deal.get('depart_date', '')}",
+            "flight_no": deal.get("flight_no", ""),
             "platform": platform_name,
             "origin_city": origin_name,
             "origin_code": origin,
@@ -194,19 +239,41 @@ def _build_card(
             "airline": deal.get("airline", ""),
             "depart_time": deal.get("dep_time", ""),
             "arrive_time": deal.get("arr_time", ""),
+            "duration_minutes": None,
+            "stops": int(deal.get("stops", 0)),
             "price": price,
-            "tax": 50,
-            "baggage_fee": 0,
-            "has_baggage": True,
-            "recommend_score": str(round(8.5 + (discount_pct or 0) / 20, 1)) if discount_pct else "8.5",
+            "lowest_price": price,
+            "tax": None,
+            "baggage_fee": None,
+            "has_baggage": None,
+            "total_price": price,
+            "currency": currency,
+            "recommend_score": None,
             "prices": [
-                {"name": p.get("platform", ""), "price": p.get("price", 0), "lowest": p.get("lowest", False)}
-                for p in prices
+                {
+                    "id": _recommendation_price_id(p, currency),
+                    "name": p.get("platform", ""),
+                    "price": p.get("price"),
+                    "currency": currency,
+                    "lowest": p.get("lowest", False),
+                    "price_status": p.get("price_status", "priced"),
+                    "provider_status": "success",
+                    "url": (
+                        p.get("url")
+                        if is_complete_https_url(p.get("url"))
+                        else None
+                    ),
+                    "data_provider": p.get("data_provider", "legacy"),
+                }
+                for p in selected_prices
             ],
             "signals": (["历史低价"] if is_history_low else []),
             "booking_url": booking_url,
             "data_freshness": deal.get("data_freshness", "fresh"),
         }
+        preview_deal = DealCardDto.model_validate(preview_deal).model_dump(
+            mode="json"
+        )
 
     reason = _build_reason(dest_name, discount_pct, deal, is_history_low)
 
@@ -242,14 +309,88 @@ def _compute_discount(deal: dict[str, Any], market_avg: int | None, sample_n: in
     return None
 
 
+def _is_future_departure(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        departure = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError:
+        return False
+    return departure > datetime.now(ZoneInfo("Asia/Shanghai")).date()
+
+
+def _deal_currency(deal: dict[str, Any]) -> str | None:
+    direct = deal.get("currency")
+    if isinstance(direct, str) and len(direct.strip()) == 3:
+        return direct.strip().upper()
+    currencies = sorted(
+        {
+            str(price.get("currency")).strip().upper()
+            for price in deal.get("prices") or []
+            if isinstance(price.get("currency"), str)
+            and len(str(price.get("currency")).strip()) == 3
+        }
+    )
+    if not currencies:
+        return None
+    return "CNY" if "CNY" in currencies else currencies[0]
+
+
+def _preferred_batch_currency(batch: list[dict[str, Any]]) -> str | None:
+    currencies = sorted(
+        {
+            currency
+            for deal in batch
+            if (currency := _deal_currency(deal)) is not None
+        }
+    )
+    if not currencies:
+        return None
+    return "CNY" if "CNY" in currencies else currencies[0]
+
+
+def _positive_price(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
+def _recommendation_price_id(price: dict[str, Any], currency: str) -> str:
+    existing = price.get("id")
+    if isinstance(existing, str) and existing:
+        return existing
+    raw = "|".join(
+        (
+            str(price.get("data_provider", "legacy")),
+            str(price.get("platform", "")),
+            currency,
+        )
+    )
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
+
 def _build_booking(deal: dict[str, Any], origin: str, dest: str) -> tuple[str, str | None]:
     """为最低价平台生成预订深链。返回 (展示用平台名, booking_url)。"""
+    if not _is_future_departure(deal.get("depart_date")):
+        return "", None
     prices = deal.get("prices") or []
-    if not prices:
+    currency = _deal_currency(deal)
+    comparable_prices = [
+        price
+        for price in prices
+        if currency
+        and str(price.get("currency") or "").strip().upper() == currency
+    ]
+    if not comparable_prices:
         return "", None
 
-    cheapest = min(prices, key=lambda p: p.get("price", 999999))
+    cheapest = min(
+        comparable_prices, key=lambda p: p.get("price", 999999)
+    )
     platform_name = cheapest.get("platform", "")
+    direct_url = cheapest.get("url")
+    if is_complete_https_url(direct_url):
+        return platform_name, direct_url
 
     platform = _PLATFORM_ALIASES.get(str(platform_name).lower()) or _PLATFORM_ALIASES.get(platform_name)
     if not platform:
@@ -267,7 +408,7 @@ def _build_booking(deal: dict[str, Any], origin: str, dest: str) -> tuple[str, s
         )
     except Exception:
         return platform_name, None
-    return platform_name, url
+    return platform_name, url if is_complete_https_url(url) else None
 
 
 def _build_reason(

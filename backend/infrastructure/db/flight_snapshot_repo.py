@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     Column,
@@ -81,9 +82,9 @@ def _advisory_lock_key(snapshot_id: str) -> int:
 
 
 def _provider_price_id(
-    snapshot_id: str, provider: str, platform: str
+    snapshot_id: str, provider: str, platform: str, currency: str
 ) -> str:
-    raw = f"{snapshot_id}|{provider}|{platform}"
+    raw = f"{snapshot_id}|{provider}|{platform}|{currency}"
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
 
 
@@ -91,7 +92,79 @@ def _lowest_price(flight: dict[str, Any]) -> int:
     if flight.get("lowest_price") is not None:
         return int(flight["lowest_price"])
     prices = flight.get("prices", [])
-    return min((int(price["price"]) for price in prices), default=0)
+    currency = str(flight.get("currency") or "CNY")
+    matching = [
+        price
+        for price in prices
+        if str(price.get("currency") or currency) == currency
+    ]
+    return min((int(price["price"]) for price in matching), default=0)
+
+
+def _provider_refresh_scope(
+    flights: list[dict[str, Any]],
+    *,
+    origin_code: str | None,
+    destination_code: str | None,
+    depart_date: str | None,
+) -> tuple[str, str, str]:
+    explicit = (origin_code, destination_code, depart_date)
+    inferred = {
+        (
+            str(flight["origin_code"]),
+            str(flight["destination_code"]),
+            str(flight["depart_date"]),
+        )
+        for flight in flights
+    }
+    if len(inferred) > 1:
+        raise ValueError("provider refresh must cover one route and date")
+    if inferred:
+        inferred_scope = next(iter(inferred))
+        resolved = tuple(
+            supplied if supplied is not None else inferred_value
+            for supplied, inferred_value in zip(explicit, inferred_scope)
+        )
+        if resolved != inferred_scope:
+            raise ValueError("provider refresh rows do not match scope")
+    else:
+        resolved = explicit
+    if not all(isinstance(value, str) and value for value in resolved):
+        raise ValueError("provider refresh scope is required")
+    return resolved  # type: ignore[return-value]
+
+
+def _deduplicate_provider_prices(
+    flight: dict[str, Any], default_currency: str
+) -> list[dict[str, Any]]:
+    by_seller_currency: dict[tuple[str, str], dict[str, Any]] = {}
+    for price in flight.get("prices", []):
+        currency = str(price.get("currency") or default_currency).upper()
+        key = (str(price["platform"]), currency)
+        existing = by_seller_currency.get(key)
+        if existing is None or int(price["price"]) < int(existing["price"]):
+            by_seller_currency[key] = {**price, "currency": currency}
+    return list(by_seller_currency.values())
+
+
+def _display_currency(prices: list[PlatformPriceSnapshot]) -> str | None:
+    currencies = sorted({price.currency for price in prices if price.currency})
+    if not currencies:
+        return None
+    return "CNY" if "CNY" in currencies else currencies[0]
+
+
+def _deal_sort_key(deal: dict[str, Any]) -> tuple[int, str, int, str]:
+    currency = str(deal.get("currency") or "").upper()
+    currency_group = 0 if currency == "CNY" else 1 if currency else 2
+    price = deal.get("lowest_price")
+    numeric_price = int(price) if isinstance(price, int) else 0
+    return (
+        currency_group,
+        currency,
+        numeric_price,
+        str(deal.get("flight_no") or ""),
+    )
 
 
 async def upsert_flights(flights: list[dict[str, Any]]) -> None:
@@ -159,15 +232,37 @@ async def upsert_provider_flights(
     provider: str,
     flights: list[dict[str, Any]],
     ttl_minutes: int,
+    *,
+    origin_code: str | None = None,
+    destination_code: str | None = None,
+    depart_date: str | None = None,
 ) -> None:
+    scope = _provider_refresh_scope(
+        flights,
+        origin_code=origin_code,
+        destination_code=destination_code,
+        depart_date=depart_date,
+    )
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=ttl_minutes)
     async with get_session() as s:
+        route_lock = _advisory_lock_key("|".join((provider, *scope)))
+        await s.execute(select(func.pg_advisory_xact_lock(route_lock)))
+        scoped_snapshot_ids = select(FlightSnapshot.id).where(
+            FlightSnapshot.origin_code == scope[0],
+            FlightSnapshot.destination_code == scope[1],
+            FlightSnapshot.depart_date == scope[2],
+        )
+        await s.execute(
+            delete(PlatformPriceSnapshot).where(
+                PlatformPriceSnapshot.data_provider == provider,
+                PlatformPriceSnapshot.flight_snapshot_id.in_(
+                    scoped_snapshot_ids
+                ),
+            )
+        )
         for f in flights:
             sid = _snapshot_id(f)
-            await s.execute(
-                select(func.pg_advisory_xact_lock(_advisory_lock_key(sid)))
-            )
             values = {
                 "id": sid,
                 "origin_code": f["origin_code"],
@@ -197,15 +292,15 @@ async def upsert_provider_flights(
                     },
                 )
             )
-            await s.execute(
-                delete(PlatformPriceSnapshot).where(
-                    PlatformPriceSnapshot.flight_snapshot_id == sid,
-                    PlatformPriceSnapshot.data_provider == provider,
-                )
+            default_currency = str(f.get("currency") or "CNY").upper()
+            provider_prices = _deduplicate_provider_prices(
+                f, default_currency
             )
             price_rows = [
                 {
-                    "id": _provider_price_id(sid, provider, p["platform"]),
+                    "id": _provider_price_id(
+                        sid, provider, p["platform"], p["currency"]
+                    ),
                     "flight_snapshot_id": sid,
                     "platform": p["platform"],
                     "price": int(p["price"]),
@@ -213,13 +308,11 @@ async def upsert_provider_flights(
                     "raw_payload": p.get("raw_payload"),
                     "crawled_at": now,
                     "data_provider": provider,
-                    "currency": p.get(
-                        "currency", f.get("currency", "CNY")
-                    ),
+                    "currency": p["currency"],
                     "price_status": p.get("price_status", "priced"),
                     "expires_at": expires_at,
                 }
-                for p in f.get("prices", [])
+                for p in provider_prices
             ]
             if price_rows:
                 await s.execute(
@@ -230,12 +323,14 @@ async def upsert_provider_flights(
         await s.commit()
 
 
-async def read_deals_latest(*, origin_code: str, destination_code: str) -> list[dict[str, Any]]:
-    """兜底:返回该路线库里最新 ``depart_date`` 的全部 deals。
-
-    用于推荐瀑布流——当未来 N 天没有任何快照时,退回到该路线已抓到的
-    最新一批数据,确保卡片不至于因日期错位而整体落空。
-    """
+async def read_deals_latest(
+    *,
+    origin_code: str,
+    destination_code: str,
+    today: date | None = None,
+) -> list[dict[str, Any]]:
+    """Return only the latest future legacy inventory for a route."""
+    cutoff = today or datetime.now(ZoneInfo("Asia/Shanghai")).date()
     async with get_session() as s:
         latest = (await s.execute(
             select(func.max(FlightSnapshot.depart_date))
@@ -246,6 +341,7 @@ async def read_deals_latest(*, origin_code: str, destination_code: str) -> list[
             .where(
                 FlightSnapshot.origin_code == origin_code,
                 FlightSnapshot.destination_code == destination_code,
+                FlightSnapshot.depart_date > cutoff.isoformat(),
                 PlatformPriceSnapshot.data_provider == "legacy",
             )
         )).scalar_one_or_none()
@@ -270,7 +366,6 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
                 FlightSnapshot.depart_date == depart_date,
                 PlatformPriceSnapshot.data_provider == "legacy",
             )
-            .order_by(FlightSnapshot.lowest_price.asc())
             .distinct()
         )).scalars().all()
         if not snaps:
@@ -285,19 +380,38 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
                 )
                 .order_by(PlatformPriceSnapshot.price.asc())
             )).scalars().all()
+            currency = _display_currency(prices)
+            display_prices = [
+                price for price in prices if price.currency == currency
+            ]
+            display_lowest = min(
+                (price.price for price in display_prices), default=0
+            )
             price_items = [
-                {"platform": p.platform, "price": p.price, "url": p.url, "lowest": p.price == snap.lowest_price}
+                {
+                    "platform": p.platform,
+                    "price": p.price,
+                    "currency": p.currency,
+                    "url": p.url,
+                    "lowest": (
+                        p.currency == currency and p.price == display_lowest
+                    ),
+                    "price_status": p.price_status,
+                    "data_provider": p.data_provider,
+                }
                 for p in prices
             ]
             deals.append({
                 "flight_no": snap.flight_no, "airline": snap.airline,
                 "origin_code": snap.origin_code, "destination_code": snap.destination_code,
                 "depart_date": snap.depart_date, "dep_time": snap.dep_time, "arr_time": snap.arr_time,
-                "duration": snap.duration, "stops": snap.stops, "lowest_price": snap.lowest_price,
+                "duration": snap.duration, "stops": snap.stops, "lowest_price": display_lowest,
+                "currency": currency,
                 "history_avg_90d": snap.history_avg_90d, "history_low_90d": snap.history_low_90d,
                 "prices": price_items,
                 "data_freshness": "stale" if (snap.expires_at and snap.expires_at < datetime.now(timezone.utc)) else "fresh",
             })
+        deals.sort(key=_deal_sort_key)
         return deals
 
 
@@ -344,6 +458,10 @@ async def read_provider_deals(
                 )
             ).scalars().all()
             provider_rows.extend(prices)
+            currency = _display_currency(prices)
+            display_prices = [
+                price for price in prices if price.currency == currency
+            ]
             price_items = [
                 {
                     "id": price.id,
@@ -373,8 +491,9 @@ async def read_provider_deals(
                     "duration": snap.duration,
                     "stops": snap.stops,
                     "lowest_price": min(
-                        (price.price for price in prices), default=0
+                        (price.price for price in display_prices), default=0
                     ),
+                    "currency": currency,
                     "history_avg_90d": snap.history_avg_90d,
                     "history_low_90d": snap.history_low_90d,
                     "prices": price_items,
@@ -387,5 +506,5 @@ async def read_provider_deals(
         row.expires_at is not None and row.expires_at <= now
         for row in provider_rows
     )
-    deals.sort(key=lambda deal: deal["lowest_price"])
+    deals.sort(key=_deal_sort_key)
     return deals, age, all_stale

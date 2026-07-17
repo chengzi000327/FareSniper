@@ -18,6 +18,7 @@ from backend.infrastructure.observability.provider_tracing import (
     trace_provider_call,
     trace_stage,
 )
+from backend.schemas.common import DealCardDto
 from backend.resilience.circuit_breaker import CircuitBreaker, CircuitOpenError
 
 
@@ -55,10 +56,14 @@ def _snapshot(
     ranked = trace_stage(
         "rank_results",
         {"result_count": len(normalized)},
-        lambda: rank_deals(normalized),
+        lambda: rank_deals(normalized, preferred_currency=query.currency),
     )
+    wire_deals = [
+        DealCardDto.model_validate(deal).model_dump(mode="json")
+        for deal in ranked
+    ]
     return {
-        "deals": ranked,
+        "deals": wire_deals,
         "source": "multi_provider",
         "provider_statuses": {
             name: result.status.value for name, result in results.items()

@@ -28,6 +28,8 @@ def _offer(
     status: PriceStatus = PriceStatus.priced,
     realtime: bool = True,
     currency: str = "CNY",
+    fetched_at: str | None = None,
+    booking_url: str | None = None,
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=provider,
@@ -49,11 +51,13 @@ def _offer(
         baggage_fee=None,
         has_baggage=None,
         price_status=status,
-        booking_url=(
+        booking_url=booking_url
+        or (
             "https://book.example.test/flight?utm_source=test"
             if price is None
             else "https://book.example.test/flight"
         ),
+        fetched_at=fetched_at,
         is_realtime=realtime,
     )
 
@@ -144,11 +148,15 @@ def test_status_rows_cover_provider_without_offers():
 
     deal = offers_to_deals(_query(), results)[0]
 
-    assert deal["prices"][0] == {
+    status_row = deal["prices"][0]
+    assert status_row == {
+        "id": status_row["id"],
         "name": "携程",
         "price": None,
+        "currency": "CNY",
         "lowest": False,
-        "status": "timeout",
+        "price_status": None,
+        "provider_status": "timeout",
         "url": None,
         "data_provider": "ctrip_snapshot",
     }
@@ -202,6 +210,111 @@ def test_dedup_identity_does_not_include_currency():
 
     assert len(deals) == 1
     assert len(deals[0]["prices"]) == 2
+
+
+def test_price_rows_keep_currency_and_separate_provider_from_price_status():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[_offer(provider="flyai", seller="飞猪", price=550)],
+        )
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+
+    assert deal["recommend_score"] is None
+    assert deal["currency"] == "CNY"
+    assert deal["prices"][0]["currency"] == "CNY"
+    assert deal["prices"][0]["price_status"] == "priced"
+    assert deal["prices"][0]["provider_status"] == "success"
+    assert deal["prices"][0]["id"]
+    assert "status" not in deal["prices"][0]
+
+
+def test_unlike_currencies_are_not_compared_as_raw_amounts():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="flyai",
+                    seller="飞猪",
+                    price=550,
+                    currency="CNY",
+                )
+            ],
+        ),
+        "serpapi": ProviderResult(
+            provider="serpapi",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="serpapi_google_flights",
+                    seller="Global Air",
+                    price=80,
+                    currency="USD",
+                )
+            ],
+        ),
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+    rows = {row["currency"]: row for row in deal["prices"]}
+
+    assert deal["currency"] == "CNY"
+    assert deal["price"] == 550
+    assert rows["CNY"]["lowest"] is True
+    assert rows["USD"]["lowest"] is False
+
+
+def test_duplicate_provider_seller_currency_rows_collapse_deterministically():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(provider="flyai", seller="飞猪", price=600),
+                _offer(provider="flyai", seller="飞猪", price=550),
+            ],
+        )
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+
+    assert len(deal["prices"]) == 1
+    assert deal["prices"][0]["price"] == 550
+
+
+def test_duplicate_equal_prices_keep_the_freshest_offer():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="flyai",
+                    seller="飞猪",
+                    price=550,
+                    fetched_at="2099-08-01T00:00:00+00:00",
+                    booking_url="https://book.example.test/flight?offer=old",
+                ),
+                _offer(
+                    provider="flyai",
+                    seller="飞猪",
+                    price=550,
+                    fetched_at="2099-08-01T00:05:00+00:00",
+                    booking_url="https://book.example.test/flight?offer=new",
+                ),
+            ],
+        )
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+
+    assert len(deal["prices"]) == 1
+    assert deal["prices"][0]["url"].endswith("?offer=new")
 
 
 def test_zero_is_a_numeric_price_and_can_win():

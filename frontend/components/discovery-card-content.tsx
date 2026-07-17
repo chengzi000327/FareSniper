@@ -1,15 +1,7 @@
 import React from 'react'
 import { ArrowRight, Bell, Briefcase, Equal, ExternalLink, Plane, Plus, ShieldCheck } from 'lucide-react'
-import type { ProviderDisplayStatus } from '@/lib/api'
-
-export type PriceItem = {
-  name: string
-  price: number | null
-  lowest?: boolean
-  status?: ProviderDisplayStatus
-  url?: string | null
-  data_provider?: string | null
-}
+import { formatCurrency } from '@/lib/currency'
+import type { PriceItem, ProviderStatus } from '@/lib/api'
 
 export type DiscoveryCardContentProps = {
   from: string
@@ -20,6 +12,7 @@ export type DiscoveryCardContentProps = {
   tax: number | null
   baggageFee: number | null
   hasBaggage: boolean | null
+  currency: string
   originalPrice?: number
   platform: string
   recommendScore?: string
@@ -39,6 +32,7 @@ export function DiscoveryCardContent({
   tax,
   baggageFee,
   hasBaggage,
+  currency,
   platform,
   recommendScore,
   prices,
@@ -52,8 +46,8 @@ export function DiscoveryCardContent({
     (basePrice !== null && tax !== null && baggageFee !== null
       ? basePrice + tax + baggageFee
       : null)
-  const money = (value: number | null) => (value === null ? '待确认' : '¥' + value)
-  const statusText: Partial<Record<ProviderDisplayStatus, string>> = {
+  const money = (value: number | null) => formatCurrency(value, currency)
+  const statusText: Partial<Record<ProviderStatus, string>> = {
     loading: '正在获取数据',
     queued: '等待下次刷新',
     stale: '价格可能已更新',
@@ -64,7 +58,11 @@ export function DiscoveryCardContent({
   }
   const hasFreeBaggage = hasBaggage === true && baggageFee === 0
   const isRealtimeLowest = (price: PriceItem) =>
-    price.lowest === true && price.status === 'success' && price.price !== null && computedTotal !== null
+    price.lowest === true &&
+    price.provider_status === 'success' &&
+    price.price_status === 'priced' &&
+    price.price !== null &&
+    computedTotal !== null
   const hasVerifiedLowestPrice = prices.some(isRealtimeLowest)
   const safeBookingUrl = isHttpsUrl(bookingUrl) ? bookingUrl : null
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
@@ -90,14 +88,16 @@ export function DiscoveryCardContent({
             </p>
           </div>
         </div>
-        <div className="flex flex-col items-start sm:items-end">
-          <div className="mb-2 rounded-md bg-green-500 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20">
-            发现指数
+        {recommendScore ? (
+          <div className="flex flex-col items-start sm:items-end">
+            <div className="mb-2 rounded-md bg-green-500 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20">
+              发现指数
+            </div>
+            <span className={`font-black leading-none tracking-tight text-green-500 ${compact ? 'text-2xl' : 'text-3xl'}`}>
+              {recommendScore}
+            </span>
           </div>
-          <span className={`font-black leading-none tracking-tight text-green-500 ${compact ? 'text-2xl' : 'text-3xl'}`}>
-            {recommendScore || '9.5'}
-          </span>
-        </div>
+        ) : null}
       </div>
 
       <div
@@ -114,7 +114,7 @@ export function DiscoveryCardContent({
           label="行李额"
           value={
             baggageFee !== null && baggageFee > 0
-              ? '+¥' + baggageFee
+              ? '+' + money(baggageFee)
               : hasFreeBaggage
                 ? '免费'
                 : hasBaggage === false
@@ -139,17 +139,17 @@ export function DiscoveryCardContent({
           <span className={`text-sm leading-6 font-medium ${hasFreeBaggage ? 'text-green-600' : 'text-brand-orange'}`}>
             {hasBaggage === null
               ? baggageFee !== null && baggageFee > 0
-                ? '行李加购费 ¥' + baggageFee + '，已计入总价，行李额以预订页为准'
+                ? '行李加购费 ' + money(baggageFee) + '，已计入总价，行李额以预订页为准'
                 : '行李额以预订页为准'
               : hasBaggage === false
                 ? baggageFee !== null && baggageFee > 0
-                  ? '不含免费托运行李额度，需加购 ¥' + baggageFee + '，已计入总价'
+                  ? '不含免费托运行李额度，需加购 ' + money(baggageFee) + '，已计入总价'
                   : '不含免费托运行李额度，行李额以预订页为准'
                 : hasFreeBaggage
                 ? '含免费托运行李额度'
                 : baggageFee === null
                   ? '行李额以预订页为准'
-                  : '含托运行李额度，行李费用 ¥' + baggageFee + '，以预订页为准'}
+                  : '含托运行李额度，行李费用 ' + money(baggageFee) + '，以预订页为准'}
           </span>
         </div>
 
@@ -185,13 +185,15 @@ export function DiscoveryCardContent({
         <div className="grid gap-2 sm:grid-cols-2">
           {prices.map((price) => {
             const lowest = isRealtimeLowest(price)
+            const providerMessage = statusText[price.provider_status]
+            const rowPrice = formatCurrency(price.price, price.currency)
 
             return (
-            <div key={price.name} className={`flex items-center justify-between ${lowest ? 'opacity-100' : 'opacity-45'}`}>
+            <div key={price.id} className={`flex items-center justify-between ${lowest ? 'opacity-100' : 'opacity-45'}`}>
               <span className="text-sm font-medium text-brand-text">{price.name}</span>
               <div className="flex items-center gap-2">
                 {lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
-                {price.status === 'view_live_price' && isHttpsUrl(price.url) ? (
+                {price.provider_status === 'success' && price.price_status === 'view_live_price' && isHttpsUrl(price.url) ? (
                   <a
                     href={price.url}
                     target="_blank"
@@ -202,7 +204,7 @@ export function DiscoveryCardContent({
                   </a>
                 ) : (
                   <span className={`text-sm font-black sm:text-base ${lowest ? 'text-brand-orange' : 'text-brand-text'}`}>
-                    {price.status ? statusText[price.status] ?? money(price.price) : money(price.price)}
+                    {providerMessage ?? (price.price_status === 'stale' ? '价格可能已更新' : rowPrice)}
                   </span>
                 )}
               </div>
@@ -250,7 +252,8 @@ function isHttpsUrl(value: string | null | undefined): value is string {
   if (!value) return false
 
   try {
-    return new URL(value).protocol === 'https:'
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && Boolean(parsed.hostname)
   } catch {
     return false
   }

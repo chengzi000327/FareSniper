@@ -84,3 +84,22 @@ def test_disabled_and_empty_are_distinct():
     assert ProviderResult(
         provider="flyai", status=ProviderStatus.disabled
     ).status != ProviderResult(provider="flyai", status=ProviderStatus.empty).status
+
+
+def test_numeric_offer_drops_non_https_booking_url():
+    offer = FlightOffer(
+        data_provider="serpapi",
+        seller_name="Google Flights",
+        flight_no="CA1835",
+        origin_city="北京",
+        origin_code="BJS",
+        destination_city="上海",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+        total_price=550,
+        currency="CNY",
+        price_status=PriceStatus.priced,
+        booking_url="http://example.test/book?token=dummy",
+    )
+
+    assert offer.booking_url is None

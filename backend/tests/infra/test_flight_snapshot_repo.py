@@ -1,17 +1,25 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 from sqlalchemy import select, update
 
 from backend.infrastructure.db.flight_snapshot_repo import (
     FlightSnapshot,
+    _deal_sort_key,
     read_deals,
     read_deals_latest,
     read_provider_deals,
     upsert_flights,
     upsert_provider_flights,
 )
+
+
+def test_deal_sort_key_groups_currency_before_numeric_amount():
+    cny = {"currency": "CNY", "lowest_price": 550, "flight_no": "CNY550"}
+    usd = {"currency": "USD", "lowest_price": 80, "flight_no": "USD80"}
+
+    assert sorted([usd, cny], key=_deal_sort_key) == [cny, usd]
 
 
 @pytest.mark.asyncio
@@ -293,12 +301,16 @@ async def test_mixed_provider_rows_keep_legacy_price_and_freshness(seeded_pg):
 
     assert len(rows) == 1
     assert rows[0]["lowest_price"] == 600
+    assert rows[0]["currency"] == "CNY"
     assert rows[0]["prices"] == [
         {
             "platform": "legacy",
             "price": 600,
+            "currency": "CNY",
             "url": "https://legacy.test",
             "lowest": True,
+            "price_status": "priced",
+            "data_provider": "legacy",
         }
     ]
     assert rows[0]["data_freshness"] == "fresh"
@@ -441,3 +453,129 @@ async def test_provider_upsert_preserves_legacy_parent_history_and_crawl_state(
     assert parent.crawled_at == legacy_crawled_at
     assert parent.expires_at == legacy_expires_at
     assert parent.lowest_price == 600
+
+
+@pytest.mark.asyncio
+async def test_provider_refresh_atomically_replaces_partial_route_inventory(
+    seeded_pg,
+):
+    scope = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    base = {
+        **scope,
+        "airline": "东方航空",
+        "dep_time": "08:00",
+        "arr_time": "10:00",
+        "duration": "120分钟",
+        "stops": 0,
+    }
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **base,
+                "flight_no": "MU5106",
+                "prices": [{"platform": "携程", "price": 580}],
+            },
+            {
+                **base,
+                "flight_no": "MU5108",
+                "dep_time": "09:00",
+                "prices": [{"platform": "携程", "price": 620}],
+            },
+        ],
+        ttl_minutes=75,
+        **scope,
+    )
+
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **base,
+                "flight_no": "MU5108",
+                "dep_time": "09:00",
+                "prices": [{"platform": "携程", "price": 600}],
+            }
+        ],
+        ttl_minutes=75,
+        **scope,
+    )
+    rows, _, _ = await read_provider_deals(provider="ctrip_snapshot", **scope)
+
+    assert [row["flight_no"] for row in rows] == ["MU5108"]
+    assert rows[0]["lowest_price"] == 600
+
+
+@pytest.mark.asyncio
+async def test_provider_refresh_with_empty_success_clears_route_inventory(
+    seeded_pg,
+):
+    scope = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **scope,
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [{"platform": "携程", "price": 580}],
+            }
+        ],
+        ttl_minutes=75,
+        **scope,
+    )
+
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [],
+        ttl_minutes=75,
+        **scope,
+    )
+    rows, age, stale = await read_provider_deals(
+        provider="ctrip_snapshot", **scope
+    )
+
+    assert rows == []
+    assert age is None
+    assert stale is False
+
+
+@pytest.mark.asyncio
+async def test_read_deals_latest_excludes_historical_departures(seeded_pg):
+    await upsert_flights(
+        [
+            {
+                "flight_no": "PAST1",
+                "airline": "东方航空",
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": "2020-01-01",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "2h",
+                "stops": 0,
+                "lowest_price": 280,
+                "prices": [{"platform": "携程", "price": 280}],
+            }
+        ]
+    )
+
+    rows = await read_deals_latest(
+        origin_code="BJS",
+        destination_code="SHA",
+        today=date(2026, 7, 18),
+    )
+
+    assert rows == []

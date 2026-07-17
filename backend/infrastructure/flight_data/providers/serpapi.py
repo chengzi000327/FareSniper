@@ -57,16 +57,35 @@ def _time_part(value: object) -> str:
     return text.split(" ", 1)[-1][:5]
 
 
-def _booking_details(payload: Mapping[str, object]) -> tuple[str | None, int | None, str | None]:
+def _parse_currency(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    currency = value.strip().upper()
+    return currency if len(currency) == 3 and currency.isalpha() else None
+
+
+def _payload_currency(payload: Mapping[str, object]) -> str | None:
+    direct = _parse_currency(payload.get("currency"))
+    if direct:
+        return direct
+    search_parameters = payload.get("search_parameters")
+    if isinstance(search_parameters, Mapping):
+        return _parse_currency(search_parameters.get("currency"))
+    return None
+
+
+def _booking_details(
+    payload: Mapping[str, object],
+) -> tuple[str | None, int | None, str | None, str | None]:
     options = payload.get("booking_options")
     if not isinstance(options, list) or not options:
-        return None, None, None
+        return None, None, None, _payload_currency(payload)
     first_option = options[0]
     if not isinstance(first_option, Mapping):
-        return None, None, None
+        return None, None, None, _payload_currency(payload)
     together = first_option.get("together")
     if not isinstance(together, Mapping):
-        return None, None, None
+        return None, None, None, _payload_currency(payload)
 
     booking_request = together.get("booking_request")
     booking_url = None
@@ -74,9 +93,13 @@ def _booking_details(payload: Mapping[str, object]) -> tuple[str | None, int | N
         url = booking_request.get("url")
         booking_url = url if _is_https_url(url) else None
     seller = together.get("book_with")
-    return seller if isinstance(seller, str) and seller else None, _parse_price(
-        together.get("price")
-    ), booking_url
+    return (
+        seller if isinstance(seller, str) and seller else None,
+        _parse_price(together.get("price")),
+        booking_url,
+        _parse_currency(together.get("currency"))
+        or _payload_currency(payload),
+    )
 
 
 class SerpApiProvider:
@@ -183,6 +206,7 @@ class SerpApiProvider:
             return self._error_result("upstream_response")
         if not isinstance(payload, Mapping):
             return self._error_result("upstream_response")
+        response_currency = _payload_currency(payload) or query.currency
 
         metadata = payload.get("search_metadata")
         google_flights_url = (
@@ -222,10 +246,10 @@ class SerpApiProvider:
                 continue
             first_leg = legs[0]
             last_leg = legs[-1]
-            seller, booking_price, booking_url = (
+            seller, booking_price, booking_url, booking_currency = (
                 _booking_details(bookings[index])
                 if isinstance(bookings.get(index), Mapping)
-                else (None, None, None)
+                else (None, None, None, None)
             )
             ticket_sellers = first_leg.get("ticket_also_sold_by")
             ticket_seller = (
@@ -238,6 +262,11 @@ class SerpApiProvider:
             airline = first_leg.get("airline")
             airline_name = airline if isinstance(airline, str) else ""
             price = booking_price if booking_price is not None else _parse_price(itinerary.get("price"))
+            currency = (
+                booking_currency
+                if booking_price is not None and booking_currency
+                else _payload_currency(itinerary) or response_currency
+            )
             url = booking_url or fallback_url
             if price is None and url is None:
                 continue
@@ -280,6 +309,7 @@ class SerpApiProvider:
                         if isinstance(first_leg.get("travel_class"), str)
                         else None
                     ),
+                    currency=currency,
                     total_price=price,
                     tax=None,
                     baggage_fee=None,

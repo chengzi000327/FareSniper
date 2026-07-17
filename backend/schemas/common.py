@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from backend.application.contracts.flight_provider import (
+    PriceStatus,
+    ProviderStatus,
+    is_complete_https_url,
+    normalize_currency_code,
+)
 
 
 ApiConfidence = Literal["high", "medium", "low"]
@@ -18,17 +25,31 @@ class ApiMeta(BaseModel):
 
 
 class PriceItemDto(BaseModel):
+    id: str
     name: str
     price: Optional[int]
+    currency: str
     lowest: Optional[bool] = None
-    status: str = "priced"
+    price_status: Optional[PriceStatus] = None
+    provider_status: ProviderStatus
     url: Optional[str] = None
     data_provider: str = ""
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, value: object) -> object:
+        return normalize_currency_code(value)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def keep_only_complete_https_url(cls, value: object) -> str | None:
+        return value if is_complete_https_url(value) else None
 
 
 class DealCardDto(BaseModel):
     id: str
     system_id: str
+    flight_no: str
     platform: str
     origin_city: str
     origin_code: str
@@ -38,13 +59,16 @@ class DealCardDto(BaseModel):
     airline: str
     depart_time: str
     arrive_time: str
+    duration_minutes: Optional[int] = None
+    stops: int = 0
     price: Optional[int]
+    lowest_price: Optional[int] = None
     tax: Optional[int] = None
     baggage_fee: Optional[int] = None
     has_baggage: Optional[bool] = None
     total_price: Optional[int] = None
-    currency: str = "CNY"
-    recommend_score: str = ""
+    currency: str
+    recommend_score: Optional[str] = None
     prices: list[PriceItemDto] = Field(default_factory=list)
     original_price: Optional[int] = None
     discount_rate: Optional[float] = None
@@ -54,6 +78,17 @@ class DealCardDto(BaseModel):
     verdict: str = ""
     booking_url: Optional[str] = None
     h5_fallback_url: Optional[str] = None
+    data_freshness: Optional[str] = None
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, value: object) -> object:
+        return normalize_currency_code(value)
+
+    @field_validator("booking_url", "h5_fallback_url", mode="before")
+    @classmethod
+    def keep_only_complete_https_url(cls, value: object) -> str | None:
+        return value if is_complete_https_url(value) else None
 
 
 class RecommendationCardDto(BaseModel):

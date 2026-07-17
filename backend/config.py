@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     flight_provider_timeout_seconds: float = Field(default=10.0)
     ctrip_snapshot_ttl_minutes: int = Field(default=75)
     ctrip_refresh_batch_size: int = Field(default=20)
+    ctrip_collection_timeout_seconds: float = Field(default=90.0, gt=0)
     ctrip_request_delay_min_seconds: float = Field(default=2.0)
     ctrip_request_delay_max_seconds: float = Field(default=5.0)
     run_scheduler_in_api: bool = Field(default=False)
