@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import pytest
 import pytest_asyncio
@@ -105,17 +106,18 @@ async def test_stream_emits_ordered_ndjson_with_complete_response(
 
 @pytest.mark.asyncio
 async def test_stream_graph_error_emits_one_sanitized_complete_event(
-    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch
+    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch, caplog
 ):
     import backend.api.search as search_mod
 
+    secret = "stream-secret-token?query=private&api_key=also-secret"
+
     class _FailingGraph:
         async def ainvoke(self, state, config=None):
-            raise RuntimeError(
-                "token=super-secret api_key=also-secret ?query=private"
-            )
+            raise RuntimeError(secret)
 
     monkeypatch.setattr(search_mod, "get_graph", lambda: _FailingGraph())
+    caplog.set_level(logging.ERROR, logger="faresniper.search")
 
     response = await search_client.post(
         "/api/search/stream",
@@ -130,9 +132,46 @@ async def test_stream_graph_error_emits_one_sanitized_complete_event(
         "error": "search_failed",
         "message": "搜索暂时不可用，请稍后重试",
     }
-    assert "super-secret" not in response.text
-    assert "also-secret" not in response.text
-    assert "private" not in response.text
+    assert secret not in response.text
+    assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_stream_suppresses_events_after_graph_emits_complete(
+    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch
+):
+    import backend.api.search as search_mod
+
+    class _GraphWithTerminalEvent:
+        async def ainvoke(self, state, config=None):
+            emit_search_event("started", {"providers": ["flyai"]})
+            emit_search_event("complete", {"source": "graph"})
+            emit_search_event("results", {"deals": [{"price": 580}]})
+            return {
+                **state,
+                "request_session_id": "s_terminal",
+                "response": FrontendResponse(
+                    user_id=state["request_user_id"],
+                    deals=[{"price": 580}],
+                    analysis={},
+                    recommendation={},
+                    meta={},
+                ),
+            }
+
+    monkeypatch.setattr(search_mod, "get_graph", lambda: _GraphWithTerminalEvent())
+
+    response = await search_client.post(
+        "/api/search/stream",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        json={"session_id": None, "message": "北京到上海"},
+    )
+    events = [json.loads(line) for line in response.text.splitlines()]
+
+    assert [event["type"] for event in events] == ["started", "complete"]
+    assert [event["sequence"] for event in events] == [1, 2]
+    assert len([event for event in events if event["type"] == "complete"]) == 1
+    assert events[-1]["payload"] == {"source": "graph"}
 
 
 @pytest.mark.asyncio
@@ -171,3 +210,76 @@ async def test_stream_disconnect_cancels_and_awaits_graph_task(monkeypatch):
     await response.body_iterator.aclose()
 
     await asyncio.wait_for(cancelled.wait(), timeout=0.5)
+
+
+@pytest.mark.asyncio
+async def test_stream_asgi_disconnect_cancels_and_awaits_graph_task(
+    valid_jwt_for_u1, monkeypatch
+):
+    import backend.api.search as search_mod
+
+    cancelled = asyncio.Event()
+    finished = asyncio.Event()
+
+    class _BlockingGraph:
+        async def ainvoke(self, state, config=None):
+            emit_search_event("started", {"providers": ["flyai"]})
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            finally:
+                finished.set()
+
+    monkeypatch.setattr(search_mod, "get_graph", lambda: _BlockingGraph())
+    app = FastAPI()
+    app.include_router(search_router, prefix="/api")
+    first_chunk_sent = asyncio.Event()
+    request_received = False
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        nonlocal request_received
+        if not request_received:
+            request_received = True
+            return {
+                "type": "http.request",
+                "body": json.dumps(
+                    {"session_id": None, "message": "北京到上海"}
+                ).encode(),
+                "more_body": False,
+            }
+        await first_chunk_sent.wait()
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:
+        sent.append(message)
+        if message["type"] == "http.response.body" and message.get("body"):
+            first_chunk_sent.set()
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/api/search/stream",
+            "raw_path": b"/api/search/stream",
+            "query_string": b"",
+            "headers": [
+                (b"authorization", f"Bearer {valid_jwt_for_u1}".encode()),
+                (b"content-type", b"application/json"),
+            ],
+            "client": ("127.0.0.1", 123),
+            "server": ("testserver", 80),
+        },
+        receive,
+        send,
+    )
+
+    assert first_chunk_sent.is_set()
+    assert cancelled.is_set()
+    assert finished.is_set()
+    assert any(message["type"] == "http.response.start" for message in sent)

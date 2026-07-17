@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
 import json
 import logging
 import time
@@ -74,7 +73,7 @@ async def search(
     try:
         rsp = await _invoke_graph(req, request, uid, request_id)
     except Exception:
-        logger.exception(
+        logger.error(
             "search_graph_failed request_id=%s user_id=%s session_id=%s duration_ms=%s",
             request_id,
             uid,
@@ -104,6 +103,8 @@ async def search_stream(
 
     def enqueue(event: dict) -> None:
         nonlocal complete_emitted
+        if complete_emitted:
+            return
         if event["type"] == "complete":
             complete_emitted = True
         queue.put_nowait(event)
@@ -117,7 +118,7 @@ async def search_stream(
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("search_stream_failed request_id=%s", request_id)
+            logger.error("search_stream_failed request_id=%s", request_id)
             if not complete_emitted:
                 emitter.emit(
                     "complete",
@@ -130,18 +131,16 @@ async def search_stream(
             queue.put_nowait(None)
 
     async def body():
-        task = asyncio.create_task(run_graph())
         try:
-            while True:
-                event = await queue.get()
-                if event is None:
-                    break
-                yield json.dumps(event, ensure_ascii=False) + "\n"
-        finally:
-            if not task.done():
-                task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+            async with asyncio.TaskGroup() as task_group:
+                task_group.create_task(run_graph())
+                while True:
+                    event = await queue.get()
+                    if event is None:
+                        break
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+        except* GeneratorExit:
+            pass
 
     return StreamingResponse(
         body(),

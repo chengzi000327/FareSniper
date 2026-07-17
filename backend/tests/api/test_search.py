@@ -1,6 +1,8 @@
 """POST /api/search invokes the graph and preserves its JSON contract."""
 from __future__ import annotations
 
+import logging
+
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
@@ -117,3 +119,30 @@ async def test_search_preserves_graph_input_and_response_contract(
     assert state["request_message"] == "北京到上海"
     assert state["messages"][0].content == "北京到上海"
     assert calls[0]["config"] == {"recursion_limit": 15}
+
+
+@pytest.mark.asyncio
+async def test_search_error_logs_safe_context_without_exception_text(
+    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch, caplog
+):
+    import backend.api.search as search_mod
+
+    secret = "legacy-secret-token?query=private&api_key=also-secret"
+
+    class _FailingGraph:
+        async def ainvoke(self, state, config=None):
+            raise RuntimeError(secret)
+
+    monkeypatch.setattr(search_mod, "get_graph", lambda: _FailingGraph())
+    caplog.set_level(logging.ERROR, logger="faresniper.search")
+
+    with pytest.raises(RuntimeError) as error:
+        await search_client.post(
+            "/api/search",
+            headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+            json={"session_id": None, "message": "北京到上海"},
+        )
+
+    assert str(error.value) == secret
+    assert secret not in caplog.text
+    assert "search_graph_failed request_id=" in caplog.text
