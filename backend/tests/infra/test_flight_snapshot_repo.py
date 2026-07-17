@@ -1,8 +1,11 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import select, update
 
 from backend.infrastructure.db.flight_snapshot_repo import (
+    FlightSnapshot,
     read_deals,
     read_deals_latest,
     read_provider_deals,
@@ -341,3 +344,100 @@ async def test_read_deals_latest_ignores_newer_provider_only_snapshot(seeded_pg)
     assert len(rows) == 1
     assert rows[0]["depart_date"] == "2099-08-01"
     assert rows[0]["prices"][0]["platform"] == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_provider_upsert_preserves_legacy_parent_history_and_crawl_state(
+    seeded_pg,
+):
+    base = {
+        "flight_no": "MU5106",
+        "airline": "东方航空",
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+        "dep_time": "08:00",
+        "arr_time": "10:00",
+        "duration": "120分钟",
+        "stops": 0,
+    }
+    await upsert_flights(
+        [
+            {
+                **base,
+                "lowest_price": 600,
+                "history_avg_90d": 720,
+                "history_low_90d": 520,
+                "prices": [
+                    {
+                        "platform": "legacy",
+                        "price": 600,
+                        "url": "https://legacy.test",
+                    }
+                ],
+            }
+        ]
+    )
+    legacy_crawled_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    legacy_expires_at = datetime(2099, 8, 1, tzinfo=timezone.utc)
+    async with seeded_pg.begin() as connection:
+        snapshot_id = (
+            await connection.execute(
+                select(FlightSnapshot.id).where(
+                    FlightSnapshot.flight_no == "MU5106"
+                )
+            )
+        ).scalar_one()
+        await connection.execute(
+            update(FlightSnapshot)
+            .where(FlightSnapshot.id == snapshot_id)
+            .values(
+                crawled_at=legacy_crawled_at,
+                expires_at=legacy_expires_at,
+            )
+        )
+
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **base,
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 580,
+                        "url": "https://ctrip.test",
+                    }
+                ],
+            }
+        ],
+        ttl_minutes=75,
+    )
+
+    deals = await read_deals(
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+    async with seeded_pg.connect() as connection:
+        parent = (
+            await connection.execute(
+                select(
+                    FlightSnapshot.history_avg_90d,
+                    FlightSnapshot.history_low_90d,
+                    FlightSnapshot.crawled_at,
+                    FlightSnapshot.expires_at,
+                    FlightSnapshot.lowest_price,
+                ).where(FlightSnapshot.id == snapshot_id)
+            )
+        ).one()
+
+    assert deals[0]["history_avg_90d"] == 720
+    assert deals[0]["history_low_90d"] == 520
+    assert deals[0]["lowest_price"] == 600
+    assert deals[0]["data_freshness"] == "fresh"
+    assert parent.history_avg_90d == 720
+    assert parent.history_low_90d == 520
+    assert parent.crawled_at == legacy_crawled_at
+    assert parent.expires_at == legacy_expires_at
+    assert parent.lowest_price == 600

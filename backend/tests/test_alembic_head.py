@@ -13,6 +13,7 @@ from pathlib import Path
 
 from backend.config import settings
 from backend.infrastructure.db.flight_demand_repo import FlightSearchDemandRow
+from backend.infrastructure.db.flight_snapshot_repo import PlatformPriceSnapshot
 
 
 def _test_database_env() -> dict[str, str]:
@@ -98,4 +99,17 @@ def test_demand_metadata_matches_migration_keys():
         "active",
         "next_run_at",
         "priority",
+    ]
+
+
+def test_platform_price_metadata_matches_provider_index():
+    index = next(
+        item
+        for item in PlatformPriceSnapshot.__table__.indexes
+        if item.name == "ix_platform_price_provider_flight"
+    )
+
+    assert [column.name for column in index.columns] == [
+        "data_provider",
+        "flight_snapshot_id",
     ]

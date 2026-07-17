@@ -8,6 +8,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -45,7 +46,14 @@ class FlightSnapshot(Base):
 
 class PlatformPriceSnapshot(Base):
     __tablename__ = "platform_price_snapshots"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        Index(
+            "ix_platform_price_provider_flight",
+            "data_provider",
+            "flight_snapshot_id",
+        ),
+        {"extend_existing": True},
+    )
 
     id = Column(String, primary_key=True)
     flight_snapshot_id = Column(String, ForeignKey("flight_snapshots.id", ondelete="CASCADE"), nullable=False)
@@ -182,9 +190,10 @@ async def upsert_provider_flights(
                 stmt.on_conflict_do_update(
                     index_elements=[FlightSnapshot.id],
                     set_={
-                        k: v
-                        for k, v in values.items()
-                        if k not in {"id", "lowest_price", "expires_at"}
+                        "airline": values["airline"],
+                        "arr_time": values["arr_time"],
+                        "duration": values["duration"],
+                        "stops": values["stops"],
                     },
                 )
             )
