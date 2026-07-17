@@ -118,7 +118,8 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
             )
             await s.execute(
                 delete(PlatformPriceSnapshot).where(
-                    PlatformPriceSnapshot.flight_snapshot_id == sid
+                    PlatformPriceSnapshot.flight_snapshot_id == sid,
+                    PlatformPriceSnapshot.data_provider == "legacy",
                 )
             )
             price_rows = [
@@ -130,6 +131,12 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
                     "url": p.get("url", ""),
                     "raw_payload": p.get("raw_payload"),
                     "crawled_at": now,
+                    "data_provider": "legacy",
+                    "currency": p.get(
+                        "currency", f.get("currency", "CNY")
+                    ),
+                    "price_status": p.get("price_status", "priced"),
+                    "expires_at": now + CACHE_TTL,
                 }
                 for idx, p in enumerate(f.get("prices", []))
             ]
@@ -174,7 +181,11 @@ async def upsert_provider_flights(
             await s.execute(
                 stmt.on_conflict_do_update(
                     index_elements=[FlightSnapshot.id],
-                    set_={k: v for k, v in values.items() if k != "id"},
+                    set_={
+                        k: v
+                        for k, v in values.items()
+                        if k not in {"id", "lowest_price", "expires_at"}
+                    },
                 )
             )
             await s.execute(
@@ -218,9 +229,15 @@ async def read_deals_latest(*, origin_code: str, destination_code: str) -> list[
     """
     async with get_session() as s:
         latest = (await s.execute(
-            select(func.max(FlightSnapshot.depart_date)).where(
+            select(func.max(FlightSnapshot.depart_date))
+            .join(
+                PlatformPriceSnapshot,
+                PlatformPriceSnapshot.flight_snapshot_id == FlightSnapshot.id,
+            )
+            .where(
                 FlightSnapshot.origin_code == origin_code,
                 FlightSnapshot.destination_code == destination_code,
+                PlatformPriceSnapshot.data_provider == "legacy",
             )
         )).scalar_one_or_none()
     if not latest:
@@ -233,11 +250,19 @@ async def read_deals_latest(*, origin_code: str, destination_code: str) -> list[
 async def read_deals(*, origin_code: str, destination_code: str, depart_date: str) -> list[dict[str, Any]]:
     async with get_session() as s:
         snaps = (await s.execute(
-            select(FlightSnapshot).where(
+            select(FlightSnapshot)
+            .join(
+                PlatformPriceSnapshot,
+                PlatformPriceSnapshot.flight_snapshot_id == FlightSnapshot.id,
+            )
+            .where(
                 FlightSnapshot.origin_code == origin_code,
                 FlightSnapshot.destination_code == destination_code,
                 FlightSnapshot.depart_date == depart_date,
-            ).order_by(FlightSnapshot.lowest_price.asc())
+                PlatformPriceSnapshot.data_provider == "legacy",
+            )
+            .order_by(FlightSnapshot.lowest_price.asc())
+            .distinct()
         )).scalars().all()
         if not snaps:
             return []
@@ -245,7 +270,10 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
         for snap in snaps:
             prices = (await s.execute(
                 select(PlatformPriceSnapshot)
-                .where(PlatformPriceSnapshot.flight_snapshot_id == snap.id)
+                .where(
+                    PlatformPriceSnapshot.flight_snapshot_id == snap.id,
+                    PlatformPriceSnapshot.data_provider == "legacy",
+                )
                 .order_by(PlatformPriceSnapshot.price.asc())
             )).scalars().all()
             price_items = [

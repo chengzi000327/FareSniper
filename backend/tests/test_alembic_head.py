@@ -5,11 +5,14 @@ which matches how the CI / Railway image actually invokes Alembic.
 """
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from backend.config import settings
+from backend.infrastructure.db.flight_demand_repo import FlightSearchDemandRow
 
 
 def _test_database_env() -> dict[str, str]:
@@ -53,3 +56,46 @@ def test_alembic_has_exactly_one_head():
     )
     heads = [line for line in proc.stdout.splitlines() if "(head)" in line]
     assert heads == ["20260716_provider_snapshots (head)"]
+
+
+def test_alembic_registers_task4_repositories():
+    env_path = Path("backend/db/migrations/env.py")
+    module = ast.parse(env_path.read_text())
+    assignment = next(
+        node
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_REPO_MODULES"
+            for target in node.targets
+        )
+    )
+    repositories = ast.literal_eval(assignment.value)
+
+    assert "backend.infrastructure.db.flight_snapshot_repo" in repositories
+    assert "backend.infrastructure.db.flight_demand_repo" in repositories
+
+
+def test_demand_metadata_matches_migration_keys():
+    table = FlightSearchDemandRow.__table__
+    constraint = next(
+        item
+        for item in table.constraints
+        if item.name == "uq_flight_search_demand_route_date"
+    )
+    index = next(
+        item
+        for item in table.indexes
+        if item.name == "ix_flight_search_demands_due"
+    )
+
+    assert [column.name for column in constraint.columns] == [
+        "origin_code",
+        "destination_code",
+        "depart_date",
+    ]
+    assert [column.name for column in index.columns] == [
+        "active",
+        "next_run_at",
+        "priority",
+    ]

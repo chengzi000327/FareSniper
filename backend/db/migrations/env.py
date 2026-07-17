@@ -29,6 +29,8 @@ _REPO_MODULES = [
     "backend.infrastructure.db.feature_flag_repo",
     "backend.infrastructure.db.cps_settlement_repo",
     "backend.infrastructure.db.flight_cache",
+    "backend.infrastructure.db.flight_snapshot_repo",
+    "backend.infrastructure.db.flight_demand_repo",
     "backend.infrastructure.db.memory_repo",
     "backend.infrastructure.db.query_history_repo",
     "backend.infrastructure.db.user_repo",

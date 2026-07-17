@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 
 from backend.application.contracts.flight_provider import (
     FlightOffer,
@@ -29,6 +30,22 @@ def _duration_minutes(value: object) -> int | None:
         )
     match = re.search(r"\d+", text)
     return int(match.group()) if match else None
+
+
+def _price_status(expires_at: object) -> PriceStatus:
+    if not isinstance(expires_at, str) or not expires_at:
+        return PriceStatus.priced
+    try:
+        expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+    except ValueError:
+        return PriceStatus.priced
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return (
+        PriceStatus.stale
+        if expiry <= datetime.now(timezone.utc)
+        else PriceStatus.priced
+    )
 
 
 def ctrip_rows_to_offers(
@@ -61,9 +78,7 @@ def ctrip_rows_to_offers(
                 baggage_fee=None,
                 total_price=int(price["price"]),
                 has_baggage=None,
-                price_status=(
-                    PriceStatus.stale if stale else PriceStatus.priced
-                ),
+                price_status=_price_status(price.get("expires_at")),
                 booking_url=price.get("url") or None,
                 fetched_at=price.get("crawled_at"),
                 expires_at=price.get("expires_at"),

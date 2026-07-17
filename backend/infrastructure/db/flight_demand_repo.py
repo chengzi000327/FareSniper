@@ -4,7 +4,18 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, func, select, update
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+    select,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from backend.infrastructure.db.base import Base, get_session
@@ -12,7 +23,21 @@ from backend.infrastructure.db.base import Base, get_session
 
 class FlightSearchDemandRow(Base):
     __tablename__ = "flight_search_demands"
-    __table_args__ = {"extend_existing": True}
+    __table_args__ = (
+        UniqueConstraint(
+            "origin_code",
+            "destination_code",
+            "depart_date",
+            name="uq_flight_search_demand_route_date",
+        ),
+        Index(
+            "ix_flight_search_demands_due",
+            "active",
+            "next_run_at",
+            "priority",
+        ),
+        {"extend_existing": True},
+    )
 
     id = Column(String, primary_key=True)
     origin_code = Column(String, nullable=False)

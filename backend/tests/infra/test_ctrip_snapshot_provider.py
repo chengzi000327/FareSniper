@@ -76,7 +76,11 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
                         "currency": "CNY",
                         "price_status": "priced",
                         "crawled_at": "2099-07-31T23:50:00+00:00",
-                        "expires_at": "2099-08-01T01:05:00+00:00",
+                        "expires_at": (
+                            "2000-01-01T00:00:00+00:00"
+                            if stale
+                            else "2099-08-01T01:05:00+00:00"
+                        ),
                     }
                 ],
             }
@@ -103,3 +107,67 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
     assert offer.has_baggage is None
     assert offer.is_realtime is False
     assert offer.price_status is expected_price_status
+
+
+@pytest.mark.asyncio
+async def test_mixed_freshness_sets_price_status_per_offer(monkeypatch):
+    async def read_rows(**kwargs):
+        return [
+            {
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": "2099-08-01",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 580,
+                        "url": "https://ctrip.test/expired",
+                        "currency": "CNY",
+                        "crawled_at": "2000-01-01T00:00:00+00:00",
+                        "expires_at": "2000-01-01T01:15:00+00:00",
+                    }
+                ],
+            },
+            {
+                "flight_no": "MU5108",
+                "airline": "东方航空",
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": "2099-08-01",
+                "dep_time": "09:00",
+                "arr_time": "11:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 600,
+                        "url": "https://ctrip.test/fresh",
+                        "currency": "CNY",
+                        "crawled_at": "2099-07-31T23:50:00+00:00",
+                        "expires_at": "2099-08-01T01:05:00+00:00",
+                    }
+                ],
+            },
+        ], 600, False
+
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.read_provider_deals",
+        read_rows,
+    )
+    query = build_flight_query("北京", "上海", "2099-08-01")
+
+    result = await CtripSnapshotProvider().search(query)
+
+    statuses = {offer.flight_no: offer.price_status for offer in result.offers}
+    assert result.status is ProviderStatus.success
+    assert statuses == {
+        "MU5106": PriceStatus.stale,
+        "MU5108": PriceStatus.priced,
+    }
