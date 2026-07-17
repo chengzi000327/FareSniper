@@ -301,6 +301,153 @@ async def test_real_sdk_disables_automatic_graph_span_but_restores_provider_chil
 
 
 @pytest.mark.asyncio
+async def test_real_sdk_keeps_concurrent_search_roots_and_children_isolated(
+    monkeypatch, sdk_runs
+):
+    client, creates, _updates = sdk_runs
+    monkeypatch.setattr(tracing, "langsmith_tracing_enabled", lambda: True)
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    arrived = 0
+    release = asyncio.Event()
+
+    async def rendezvous() -> None:
+        nonlocal arrived
+        arrived += 1
+        if arrived == 2:
+            release.set()
+        await asyncio.wait_for(release.wait(), timeout=1)
+
+    async def run_search(label: str) -> FrontendResponse:
+        async def operation() -> FrontendResponse:
+            await rendezvous()
+            result = ProviderResult(
+                provider=label,
+                status=ProviderStatus.empty,
+            )
+            await tracing.trace_provider_call(
+                label, query, lambda: _async_value(result)
+            )
+            return FrontendResponse(
+                user_id="u1",
+                session_id=f"session-{label}",
+                deals=[],
+                analysis={},
+                recommendation={},
+                meta={},
+            )
+
+        return await tracing.trace_flight_search(
+            f"request-{label}", len(label), operation
+        )
+
+    with tracing_context(
+        enabled=True, client=client, project_name="task-10-concurrency-test"
+    ):
+        left, right = await asyncio.gather(
+            run_search("left"), run_search("right")
+        )
+
+    assert {left.session_id, right.session_id} == {
+        "session-left",
+        "session-right",
+    }
+    roots = {
+        run["inputs"]["request_id"]: run
+        for run in creates
+        if run["name"] == "flight_search"
+    }
+    assert set(roots) == {"request-left", "request-right"}
+    assert roots["request-left"]["id"] != roots["request-right"]["id"]
+    assert roots["request-left"]["trace_id"] != roots["request-right"]["trace_id"]
+
+    for label in ("left", "right"):
+        root = roots[f"request-{label}"]
+        provider = next(
+            run for run in creates if run["name"] == f"provider.{label}"
+        )
+        stream = next(
+            run
+            for run in creates
+            if run["name"] == "stream_results"
+            and run["inputs"]["request_id"] == f"request-{label}"
+        )
+        assert provider["parent_run_id"] == root["id"]
+        assert stream["parent_run_id"] == root["id"]
+        assert provider["trace_id"] == stream["trace_id"] == root["trace_id"]
+
+
+@pytest.mark.asyncio
+async def test_real_sdk_isolates_concurrent_search_and_worker_trace_parents(
+    monkeypatch, sdk_runs
+):
+    client, creates, _updates = sdk_runs
+    monkeypatch.setattr(tracing, "langsmith_tracing_enabled", lambda: True)
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    arrived = 0
+    release = asyncio.Event()
+
+    async def rendezvous() -> None:
+        nonlocal arrived
+        arrived += 1
+        if arrived == 2:
+            release.set()
+        await asyncio.wait_for(release.wait(), timeout=1)
+
+    async def search_operation() -> FrontendResponse:
+        await rendezvous()
+        result = ProviderResult(
+            provider="search",
+            status=ProviderStatus.empty,
+        )
+        await tracing.trace_provider_call(
+            "search", query, lambda: _async_value(result)
+        )
+        return FrontendResponse(
+            user_id="u1",
+            session_id="search-session",
+            deals=[],
+            analysis={},
+            recommendation={},
+            meta={},
+        )
+
+    async def worker_operation() -> CtripRefreshSummary:
+        await rendezvous()
+        await tracing.trace_ctrip_demand(
+            origin_code="CAN",
+            destination_code="SHA",
+            depart_date="2099-08-02",
+            operation=lambda: _async_value([]),
+        )
+        return CtripRefreshSummary(processed=1, succeeded=1)
+
+    with tracing_context(
+        enabled=True, client=client, project_name="task-10-concurrency-test"
+    ):
+        search_result, worker_result = await asyncio.gather(
+            tracing.trace_flight_search("request-search", 6, search_operation),
+            tracing.trace_ctrip_refresh(worker_operation),
+        )
+
+    assert search_result.session_id == "search-session"
+    assert worker_result.processed == 1
+    search_root = next(run for run in creates if run["name"] == "flight_search")
+    worker_root = next(
+        run for run in creates if run["name"] == "ctrip_hourly_refresh"
+    )
+    provider = next(run for run in creates if run["name"] == "provider.search")
+    stream = next(run for run in creates if run["name"] == "stream_results")
+    demand = next(run for run in creates if run["name"] == "ctrip_demand")
+
+    assert search_root["id"] != worker_root["id"]
+    assert search_root["trace_id"] != worker_root["trace_id"]
+    assert provider["parent_run_id"] == stream["parent_run_id"] == search_root["id"]
+    assert provider["trace_id"] == stream["trace_id"] == search_root["trace_id"]
+    assert demand["parent_run_id"] == worker_root["id"]
+    assert demand["trace_id"] == worker_root["trace_id"]
+
+
+@pytest.mark.asyncio
 async def test_disabled_tracing_uses_no_sdk_runs_or_network(
     monkeypatch, sdk_runs
 ):
@@ -456,6 +603,31 @@ def test_validate_and_normalize_span_records_no_raw_input_and_ends_once(
     }
     assert trace_records[0].outputs == {"status": "success"}
     assert trace_records[0].end_calls == 1
+
+
+@pytest.mark.parametrize(
+    "untrusted_depart_date",
+    [
+        "2099-02-30",
+        "2099-8-01 DATE_SECRET_SENTINEL",
+        "please fly tomorrow with DATE_SECRET_SENTINEL in this full sentence",
+    ],
+)
+def test_invalid_depart_date_is_excluded_from_every_trace_repr(
+    trace_records, untrusted_depart_date
+):
+    result = tracing.trace_validate_and_normalize_input(
+        depart_date=untrusted_depart_date,
+        operation=lambda: "rejected",
+    )
+
+    assert result == "rejected"
+    assert trace_records[0].inputs == {
+        "field_count": 3,
+        "depart_date_present": True,
+    }
+    assert untrusted_depart_date not in repr(trace_records)
+    assert "DATE_SECRET_SENTINEL" not in repr(trace_records)
 
 
 def test_validate_and_normalize_exception_is_safely_reraised(trace_records):

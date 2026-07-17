@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import date
 from typing import Any, Protocol, TypeVar
 
 from langsmith import trace, tracing_context
@@ -40,6 +42,7 @@ _SAFE_STAGE_INPUT_KEYS = {
     "provider_count",
     "result_count",
 }
+_VALID_DEPART_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
 
 def safe_provider_inputs(
@@ -79,6 +82,21 @@ def _safe_stage_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
         if key in _SAFE_STAGE_INPUT_KEYS
         and isinstance(value, (str, int, float, bool, type(None)))
     }
+
+
+def _safe_validation_inputs(depart_date: str) -> dict[str, str | int | bool]:
+    inputs: dict[str, str | int | bool] = {"field_count": 3}
+    if _VALID_DEPART_DATE.fullmatch(depart_date):
+        try:
+            date.fromisoformat(depart_date)
+        except ValueError:
+            pass
+        else:
+            inputs["depart_date"] = depart_date
+            return inputs
+
+    inputs["depart_date_present"] = bool(depart_date)
+    return inputs
 
 
 def _exception_status(error: BaseException) -> str:
@@ -206,7 +224,7 @@ def trace_validate_and_normalize_input(
         with trace(
             name="validate_and_normalize_input",
             run_type="chain",
-            inputs={"depart_date": depart_date, "field_count": 3},
+            inputs=_safe_validation_inputs(depart_date),
         ) as run:
             try:
                 result = operation()
