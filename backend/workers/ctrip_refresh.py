@@ -19,6 +19,7 @@ from backend.infrastructure.db.base import get_session
 from backend.infrastructure.db.flight_demand_repo import (
     claim_due_demands,
     enqueue_demand,
+    is_canonical_depart_date,
 )
 from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
 from backend.infrastructure.observability.provider_tracing import (
@@ -101,17 +102,22 @@ async def _refresh_ctrip_once() -> CtripRefreshSummary:
         failed = 0
 
         for demand in demands:
+            valid_depart_date = is_canonical_depart_date(demand.depart_date)
+            if valid_depart_date:
+                operation = lambda: source.search_flights(
+                    demand.origin_code,
+                    demand.destination_code,
+                    demand.depart_date,
+                    demand.depart_date,
+                )
+            else:
+                operation = _reject_invalid_depart_date
             try:
                 rows = await trace_ctrip_demand(
                     origin_code=demand.origin_code,
                     destination_code=demand.destination_code,
                     depart_date=demand.depart_date,
-                    operation=lambda: source.search_flights(
-                        demand.origin_code,
-                        demand.destination_code,
-                        demand.depart_date,
-                        demand.depart_date,
-                    ),
+                    operation=operation,
                 )
                 if rows:
                     await upsert_provider_flights(
@@ -127,7 +133,7 @@ async def _refresh_ctrip_once() -> CtripRefreshSummary:
                     "depart_date=%s",
                     demand.origin_code,
                     demand.destination_code,
-                    demand.depart_date,
+                    demand.depart_date if valid_depart_date else "<invalid>",
                 )
             await asyncio.sleep(
                 random.uniform(
@@ -143,6 +149,10 @@ async def _refresh_ctrip_once() -> CtripRefreshSummary:
         )
         _log_summary(summary)
         return summary
+
+
+async def _reject_invalid_depart_date():
+    raise ValueError("demand depart_date is invalid")
 
 
 def _log_summary(summary: CtripRefreshSummary) -> None:

@@ -745,6 +745,35 @@ async def test_ctrip_refresh_has_independent_safe_root_trace(trace_records):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "untrusted_depart_date",
+    [
+        "2099-02-30",
+        "2099-8-01 DATE_SECRET_SENTINEL",
+        "complete departure sentence with DATE_SECRET_SENTINEL",
+    ],
+)
+async def test_ctrip_demand_excludes_invalid_date_from_every_trace_repr(
+    trace_records, untrusted_depart_date
+):
+    rows = await tracing.trace_ctrip_demand(
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date=untrusted_depart_date,
+        operation=lambda: _async_value([]),
+    )
+
+    assert rows == []
+    assert trace_records[0].inputs == {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date_present": True,
+    }
+    assert untrusted_depart_date not in repr(trace_records)
+    assert "DATE_SECRET_SENTINEL" not in repr(trace_records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("error", "expected_status"),
     [
         (RuntimeError("raw worker response must not leak"), "error"),

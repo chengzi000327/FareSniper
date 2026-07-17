@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+from langsmith import Client, tracing_context
 
+import backend.infrastructure.observability.provider_tracing as tracing
 from backend.data_sources.ctrip_source import CtripCollectionError
 from backend.infrastructure.db.flight_demand_repo import (
     claim_due_demands,
@@ -20,11 +22,15 @@ from backend.workers.ctrip_refresh import (
 )
 
 
-def _demand(origin: str = "BJS", destination: str = "SHA") -> SimpleNamespace:
+def _demand(
+    origin: str = "BJS",
+    destination: str = "SHA",
+    depart_date: str = "2099-08-01",
+) -> SimpleNamespace:
     return SimpleNamespace(
         origin_code=origin,
         destination_code=destination,
-        depart_date="2099-08-01",
+        depart_date=depart_date,
     )
 
 
@@ -262,6 +268,73 @@ async def test_refresh_counts_collection_error_and_continues_with_later_demand(
         "depart_date=2099-08-01" in caplog.text
     )
     assert "ctrip_refresh_complete processed=2 succeeded=1 failed=1 skipped=0" in caplog.text
+    assert sentinel not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_malicious_claimed_date_is_safely_failed_without_upstream_call(
+    monkeypatch, caplog
+):
+    caplog.set_level("INFO", logger="backend.workers.ctrip_refresh")
+    sentinel = "DATE_SECRET_SENTINEL in a complete malicious sentence"
+    creates = []
+    updates = []
+    upstream_calls = []
+
+    def capture_create(self, **kwargs):
+        creates.append(kwargs)
+
+    def capture_update(self, **kwargs):
+        updates.append(kwargs)
+
+    class FailIfCalledSource:
+        async def search_flights(self, *args):
+            upstream_calls.append(args)
+            pytest.fail("invalid demand date reached the upstream source")
+
+    monkeypatch.setattr(Client, "create_run", capture_create)
+    monkeypatch.setattr(Client, "update_run", capture_update)
+    monkeypatch.setattr(tracing, "langsmith_tracing_enabled", lambda: True)
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _acquired_lease
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.seed_ctrip_demands", _async_none
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.claim_due_demands",
+        lambda limit: _async_value([_demand(depart_date=sentinel)]),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.CtripSource",
+        lambda **kwargs: FailIfCalledSource(),
+    )
+    monkeypatch.setattr("backend.workers.ctrip_refresh.asyncio.sleep", _async_none)
+    client = Client(
+        api_url="https://langsmith.invalid",
+        api_key="ls-test-key",
+        auto_batch_tracing=False,
+    )
+
+    with tracing_context(
+        enabled=True, client=client, project_name="task-10-worker-date-test"
+    ):
+        summary = await refresh_ctrip_once()
+
+    assert summary.processed == 1
+    assert summary.succeeded == 0
+    assert summary.failed == 1
+    assert upstream_calls == []
+    demand_run = next(run for run in creates if run["name"] == "ctrip_demand")
+    assert demand_run["inputs"] == {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date_present": True,
+    }
+    trace_payload = repr((creates, updates))
+    assert sentinel not in trace_payload
+    assert "DATE_SECRET_SENTINEL" not in trace_payload
+    assert "depart_date=<invalid>" in caplog.text
     assert sentinel not in caplog.text
 
 

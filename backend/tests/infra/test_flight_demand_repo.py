@@ -47,3 +47,28 @@ async def test_claim_schedules_next_collection_one_hour_later(seeded_pg):
 
     assert len(first_claim) == 1
     assert second_claim == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "depart_date",
+    [
+        "2099-02-30",
+        "2099-8-01",
+        "DATE_SECRET_SENTINEL hidden in a complete sentence",
+    ],
+)
+async def test_enqueue_rejects_noncanonical_or_invalid_date(
+    seeded_pg, depart_date
+):
+    with pytest.raises(ValueError, match="valid YYYY-MM-DD") as exc_info:
+        await enqueue_demand(
+            origin_code="BJS",
+            destination_code="SHA",
+            depart_date=depart_date,
+            priority=10,
+            source="recent_search",
+        )
+
+    assert depart_date not in str(exc_info.value)
+    assert await claim_due_demands(limit=10) == []

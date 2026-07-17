@@ -84,19 +84,20 @@ def _safe_stage_inputs(inputs: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _safe_validation_inputs(depart_date: str) -> dict[str, str | int | bool]:
-    inputs: dict[str, str | int | bool] = {"field_count": 3}
+def _safe_depart_date_inputs(depart_date: str) -> dict[str, str | bool]:
     if _VALID_DEPART_DATE.fullmatch(depart_date):
         try:
             date.fromisoformat(depart_date)
         except ValueError:
             pass
         else:
-            inputs["depart_date"] = depart_date
-            return inputs
+            return {"depart_date": depart_date}
 
-    inputs["depart_date_present"] = bool(depart_date)
-    return inputs
+    return {"depart_date_present": bool(depart_date)}
+
+
+def _safe_validation_inputs(depart_date: str) -> dict[str, str | int | bool]:
+    return {"field_count": 3, **_safe_depart_date_inputs(depart_date)}
 
 
 def _exception_status(error: BaseException) -> str:
@@ -347,7 +348,7 @@ async def trace_ctrip_demand(
             inputs={
                 "origin_code": origin_code,
                 "destination_code": destination_code,
-                "depart_date": depart_date,
+                **_safe_depart_date_inputs(depart_date),
             },
         ) as run:
             try:

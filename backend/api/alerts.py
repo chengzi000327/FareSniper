@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from backend.api._deps import current_user_id
 from backend.infrastructure.db.alert_repo import create_alert, list_alerts
@@ -14,6 +16,19 @@ class CreateAlertReq(BaseModel):
     destination: str
     depart_date: str
     target_price: int
+
+    @field_validator("depart_date")
+    @classmethod
+    def validate_depart_date(cls, value: str) -> str:
+        try:
+            parsed = date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(
+                "depart_date must be a valid YYYY-MM-DD date"
+            ) from exc
+        if parsed.isoformat() != value:
+            raise ValueError("depart_date must be a valid YYYY-MM-DD date")
+        return value
 
 
 @router.post("", status_code=201)
