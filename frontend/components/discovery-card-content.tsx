@@ -109,18 +109,16 @@ export function DiscoveryCardContent({
         <PriceBlock
           label="行李额"
           value={
-            hasFreeBaggage
-              ? '免费'
-              : hasBaggage === false
-                ? '不含'
-                : baggageFee === null
-                  ? '待确认'
-                  : baggageFee > 0
-                    ? '+¥' + baggageFee
-                    : '待确认'
+            baggageFee !== null && baggageFee > 0
+              ? '+¥' + baggageFee
+              : hasFreeBaggage
+                ? '免费'
+                : hasBaggage === false
+                  ? '不含'
+                  : '待确认'
           }
           compact={compact}
-          highlight={hasBaggage === true && baggageFee !== null && baggageFee > 0}
+          highlight={baggageFee !== null && baggageFee > 0}
         />
         <Equal className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <div className="col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0">
@@ -136,9 +134,13 @@ export function DiscoveryCardContent({
           </div>
           <span className={`text-sm leading-6 font-medium ${hasFreeBaggage ? 'text-green-600' : 'text-brand-orange'}`}>
             {hasBaggage === null
-              ? '行李额以预订页为准'
+              ? baggageFee !== null && baggageFee > 0
+                ? '行李加购费 ¥' + baggageFee + '，已计入总价，行李额以预订页为准'
+                : '行李额以预订页为准'
               : hasBaggage === false
-                ? '不含免费托运行李额度，行李额以预订页为准'
+                ? baggageFee !== null && baggageFee > 0
+                  ? '不含免费托运行李额度，需加购 ¥' + baggageFee + '，已计入总价'
+                  : '不含免费托运行李额度，行李额以预订页为准'
                 : hasFreeBaggage
                 ? '含免费托运行李额度'
                 : baggageFee === null

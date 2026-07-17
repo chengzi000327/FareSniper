@@ -126,11 +126,18 @@ export function ChatPage() {
       activeSearchRef.current = null
       previousSearch.controller.abort()
       setMessages((prev) =>
-        prev.map((message) =>
-          message.role === 'assistant' && message.id === previousSearch.assistantMessageId
-            ? { ...message, content: '已取消本次搜索。', isSpecial: false }
-            : message
-        )
+        prev.map((message) => {
+          if (message.role !== 'assistant' || message.id !== previousSearch.assistantMessageId) return message
+
+          const cardData = message.cardData ? finalizeCard(message.cardData) : undefined
+          return {
+            ...message,
+            content: cardData ? '已保留当前报价，其余来源已停止更新。' : '已取消本次搜索。',
+            isSpecial: false,
+            hasCard: !!cardData,
+            cardData,
+          }
+        })
       )
     }
     const clientSearchId = `search-${++nextMessageIdRef.current}`
@@ -167,7 +174,8 @@ export function ChatPage() {
     }
 
     let latestSequence = 0
-    let terminalEventReceived = false
+    let completeEventReceived = false
+    let validationErrorShown = false
     const isActiveSearch = () => activeSearchRef.current?.id === clientSearchId
     const settleIncompleteSearch = () => {
       updateAssistant((message) => {
@@ -182,8 +190,10 @@ export function ChatPage() {
       })
     }
     const handleEvent = (event: SearchStreamEvent) => {
-      if (!isActiveSearch() || terminalEventReceived || event.sequence <= latestSequence) return
+      if (!isActiveSearch() || completeEventReceived || event.sequence <= latestSequence) return
       latestSequence = event.sequence
+
+      if (validationErrorShown && event.type !== 'complete') return
 
       if (event.type === 'provider_status') {
         updateAssistant((message) =>
@@ -205,7 +215,7 @@ export function ChatPage() {
       }
 
       if (event.type === 'validation_error') {
-        terminalEventReceived = true
+        validationErrorShown = true
         updateAssistant((message) => ({
           ...message,
           content: event.payload.message ?? '请输入完整的航班信息。',
@@ -217,18 +227,23 @@ export function ChatPage() {
       }
 
       if (event.type === 'complete') {
-        terminalEventReceived = true
+        completeEventReceived = true
         if (event.payload.response) {
-          completeSearch(event.payload.response)
+          setSessionId(event.payload.response.session_id ?? null)
+          if (!validationErrorShown) completeSearch(event.payload.response)
+          if (isActiveSearch()) activeSearchRef.current = null
           return
         }
-        updateAssistant((message) => ({
-          ...message,
-          content: event.payload.message ?? event.payload.error ?? '搜索失败，请检查网络后重试。',
-          isSpecial: false,
-          hasCard: false,
-          cardData: undefined,
-        }))
+        if (!validationErrorShown) {
+          updateAssistant((message) => ({
+            ...message,
+            content: event.payload.message ?? event.payload.error ?? '搜索失败，请检查网络后重试。',
+            isSpecial: false,
+            hasCard: false,
+            cardData: undefined,
+          }))
+        }
+        if (isActiveSearch()) activeSearchRef.current = null
       }
     }
 
@@ -238,9 +253,9 @@ export function ChatPage() {
         handleEvent,
         controller.signal
       )
-      if (isActiveSearch() && !terminalEventReceived) settleIncompleteSearch()
+      if (isActiveSearch() && !completeEventReceived && !validationErrorShown) settleIncompleteSearch()
     } catch {
-      if (isActiveSearch() && !terminalEventReceived) settleIncompleteSearch()
+      if (isActiveSearch() && !completeEventReceived && !validationErrorShown) settleIncompleteSearch()
     } finally {
       if (isActiveSearch()) activeSearchRef.current = null
     }

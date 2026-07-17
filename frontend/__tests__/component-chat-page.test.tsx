@@ -180,6 +180,75 @@ test("renders validation errors as a terminal assistant message", async () => {
   expect(screen.queryByText("正在为您深度扫描全网特价资源...")).not.toBeInTheDocument();
 });
 
+test("keeps validation feedback while accepting its canonical session for the next turn", async () => {
+  render(<ChatPage />);
+  await send("过去日期");
+
+  await act(async () => {
+    calls[0].onEvent({
+      type: "validation_error",
+      search_id: "server_search",
+      sequence: 1,
+      payload: { message: "出发日期必须晚于今天" },
+    });
+    calls[0].onEvent(complete(2, {
+      session_id: "s_validation",
+      deals: [],
+      recommendation: { text: "无意义的空结果" },
+    }));
+  });
+
+  expect(await screen.findByText("出发日期必须晚于今天")).toBeInTheDocument();
+  expect(screen.queryByText("无意义的空结果")).not.toBeInTheDocument();
+
+  await send("改成下周出发");
+
+  expect(searchApi.stream).toHaveBeenLastCalledWith(
+    { message: "改成下周出发", session_id: "s_validation" },
+    expect.any(Function),
+    expect.any(AbortSignal)
+  );
+});
+
+test("finalizes partial provider rows before replacing an active search", async () => {
+  render(<ChatPage />);
+  await send("先查北京上海");
+
+  await act(async () => {
+    calls[0].onEvent(results(2, deal({
+      prices: [
+        { name: "飞猪", price: 580, status: "success", lowest: true },
+        { name: "携程", price: null, status: "loading", data_provider: "ctrip_snapshot" },
+        { name: "国际卖家", price: null, status: "loading" },
+      ],
+    })));
+  });
+
+  await send("再查北京广州");
+
+  expect(calls[0].signal?.aborted).toBe(true);
+  expect(screen.getByText("已保留当前报价，其余来源已停止更新。")).toBeInTheDocument();
+  expect(screen.getByText("等待下次刷新")).toBeInTheDocument();
+  expect(screen.getByText("暂时超时")).toBeInTheDocument();
+  expect((await screen.findAllByText("飞猪")).length).toBeGreaterThan(0);
+});
+
+test("does not cancel a completed assistant while its stream promise is still settling", async () => {
+  render(<ChatPage />);
+  await send("已完成的搜索");
+
+  await act(async () => {
+    calls[0].onEvent(complete(2, response("已完成推荐")));
+  });
+
+  await send("新的搜索");
+
+  expect(calls[0].signal?.aborted).toBe(false);
+  expect(screen.getByText("已完成推荐")).toBeInTheDocument();
+  expect(screen.queryByText("已取消本次搜索。")).not.toBeInTheDocument();
+  expect(screen.getAllByText("正在为您深度扫描全网特价资源...")).toHaveLength(1);
+});
+
 test("does not apply a stale complete returned after an out-of-order event", async () => {
   render(<ChatPage />);
   await send("乱序搜索");

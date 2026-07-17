@@ -113,6 +113,26 @@ test("does not describe unknown or excluded baggage as free", () => {
   expect(screen.getByText("不含")).toBeInTheDocument();
 });
 
+test("keeps a known baggage surcharge visible when free baggage is excluded", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      tax={20}
+      baggageFee={50}
+      hasBaggage={false}
+      platform="飞猪"
+      prices={[]}
+    />
+  );
+
+  expect(screen.getByText("+¥50")).toBeInTheDocument();
+  expect(screen.getByText(/需加购 ¥50，已计入总价/)).toBeInTheDocument();
+  expect(screen.getByText("¥650")).toBeInTheDocument();
+  expect(screen.queryByText("免费")).not.toBeInTheDocument();
+});
+
 test("limits lowest-price claims to a known realtime lowest offer", () => {
   const { rerender } = render(
     <DiscoveryCardContent
