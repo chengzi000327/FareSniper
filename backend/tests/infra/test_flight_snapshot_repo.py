@@ -2,7 +2,12 @@ import asyncio
 
 import pytest
 
-from backend.infrastructure.db.flight_snapshot_repo import upsert_flights, read_deals
+from backend.infrastructure.db.flight_snapshot_repo import (
+    read_deals,
+    read_provider_deals,
+    upsert_flights,
+    upsert_provider_flights,
+)
 
 
 @pytest.mark.asyncio
@@ -88,3 +93,109 @@ async def test_concurrent_upserts_same_dedup_key_do_not_collide(seeded_pg):
     assert len(deals) == 1
     assert deals[0]["lowest_price"] in {250, 280}
     assert len(deals[0]["prices"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_upsert_preserves_other_provider_rows(seeded_pg):
+    base = {
+        "flight_no": "MU5106",
+        "airline": "东方航空",
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+        "dep_time": "08:00",
+        "arr_time": "10:00",
+        "duration": "120分钟",
+        "stops": 0,
+    }
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **base,
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 580,
+                        "url": "https://ctrip.test",
+                    }
+                ],
+            }
+        ],
+        ttl_minutes=75,
+    )
+    await upsert_provider_flights(
+        "legacy",
+        [
+            {
+                **base,
+                "prices": [
+                    {
+                        "platform": "legacy",
+                        "price": 600,
+                        "url": "https://legacy.test",
+                    }
+                ],
+            }
+        ],
+        ttl_minutes=60,
+    )
+
+    rows, age, stale = await read_provider_deals(
+        provider="ctrip_snapshot",
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+    legacy_rows, _, _ = await read_provider_deals(
+        provider="legacy",
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["prices"][0]["platform"] == "携程"
+    assert len(legacy_rows) == 1
+    assert legacy_rows[0]["prices"][0]["platform"] == "legacy"
+    assert age is not None
+    assert stale is False
+
+
+@pytest.mark.asyncio
+async def test_read_provider_deals_marks_expired_rows_stale(seeded_pg):
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": "2099-08-01",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 580,
+                        "url": "https://ctrip.test",
+                    }
+                ],
+            }
+        ],
+        ttl_minutes=-1,
+    )
+
+    rows, age, stale = await read_provider_deals(
+        provider="ctrip_snapshot",
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+
+    assert len(rows) == 1
+    assert age is not None
+    assert stale is True

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import importlib
-import os
 import sys
 from logging.config import fileConfig
 from pathlib import Path
@@ -54,7 +53,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
-database_url = os.environ.get("DATABASE_URL") or settings.database_url
+database_url = settings.database_url
 
 
 def run_migrations_offline() -> None:

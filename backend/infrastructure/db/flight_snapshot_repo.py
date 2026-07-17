@@ -54,6 +54,10 @@ class PlatformPriceSnapshot(Base):
     url = Column(Text, nullable=False, default="")
     raw_payload = Column(JSONB, nullable=True)
     crawled_at = Column(DateTime(timezone=True), nullable=False)
+    data_provider = Column(String, nullable=False, default="legacy")
+    currency = Column(String, nullable=False, default="CNY")
+    price_status = Column(String, nullable=False, default="priced")
+    expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
 def _snapshot_id(f: dict[str, Any]) -> str:
@@ -66,6 +70,20 @@ def _snapshot_id(f: dict[str, Any]) -> str:
 
 def _advisory_lock_key(snapshot_id: str) -> int:
     return int(hashlib.sha1(snapshot_id.encode("utf-8")).hexdigest()[:15], 16)
+
+
+def _provider_price_id(
+    snapshot_id: str, provider: str, platform: str
+) -> str:
+    raw = f"{snapshot_id}|{provider}|{platform}"
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
+
+
+def _lowest_price(flight: dict[str, Any]) -> int:
+    if flight.get("lowest_price") is not None:
+        return int(flight["lowest_price"])
+    prices = flight.get("prices", [])
+    return min((int(price["price"]) for price in prices), default=0)
 
 
 async def upsert_flights(flights: list[dict[str, Any]]) -> None:
@@ -122,6 +140,76 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
         await s.commit()
 
 
+async def upsert_provider_flights(
+    provider: str,
+    flights: list[dict[str, Any]],
+    ttl_minutes: int,
+) -> None:
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=ttl_minutes)
+    async with get_session() as s:
+        for f in flights:
+            sid = _snapshot_id(f)
+            await s.execute(
+                select(func.pg_advisory_xact_lock(_advisory_lock_key(sid)))
+            )
+            values = {
+                "id": sid,
+                "origin_code": f["origin_code"],
+                "destination_code": f["destination_code"],
+                "depart_date": f["depart_date"],
+                "flight_no": f["flight_no"],
+                "airline": f.get("airline", ""),
+                "dep_time": f.get("dep_time", ""),
+                "arr_time": f.get("arr_time", ""),
+                "duration": f.get("duration", ""),
+                "stops": int(f.get("stops", 0)),
+                "lowest_price": _lowest_price(f),
+                "history_avg_90d": f.get("history_avg_90d"),
+                "history_low_90d": f.get("history_low_90d"),
+                "crawled_at": now,
+                "expires_at": expires_at,
+            }
+            stmt = pg_insert(FlightSnapshot.__table__).values(**values)
+            await s.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=[FlightSnapshot.id],
+                    set_={k: v for k, v in values.items() if k != "id"},
+                )
+            )
+            await s.execute(
+                delete(PlatformPriceSnapshot).where(
+                    PlatformPriceSnapshot.flight_snapshot_id == sid,
+                    PlatformPriceSnapshot.data_provider == provider,
+                )
+            )
+            price_rows = [
+                {
+                    "id": _provider_price_id(sid, provider, p["platform"]),
+                    "flight_snapshot_id": sid,
+                    "platform": p["platform"],
+                    "price": int(p["price"]),
+                    "url": p.get("url", ""),
+                    "raw_payload": p.get("raw_payload"),
+                    "crawled_at": now,
+                    "data_provider": provider,
+                    "currency": p.get(
+                        "currency", f.get("currency", "CNY")
+                    ),
+                    "price_status": p.get("price_status", "priced"),
+                    "expires_at": expires_at,
+                }
+                for p in f.get("prices", [])
+            ]
+            if price_rows:
+                await s.execute(
+                    pg_insert(PlatformPriceSnapshot.__table__).values(
+                        price_rows
+                    )
+                )
+        await s.commit()
+
+
 async def read_deals_latest(*, origin_code: str, destination_code: str) -> list[dict[str, Any]]:
     """兜底:返回该路线库里最新 ``depart_date`` 的全部 deals。
 
@@ -174,3 +262,93 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
                 "data_freshness": "stale" if (snap.expires_at and snap.expires_at < datetime.now(timezone.utc)) else "fresh",
             })
         return deals
+
+
+async def read_provider_deals(
+    *,
+    provider: str,
+    origin_code: str,
+    destination_code: str,
+    depart_date: str,
+) -> tuple[list[dict[str, Any]], int | None, bool]:
+    now = datetime.now(timezone.utc)
+    async with get_session() as s:
+        snaps = (
+            await s.execute(
+                select(FlightSnapshot)
+                .join(
+                    PlatformPriceSnapshot,
+                    PlatformPriceSnapshot.flight_snapshot_id
+                    == FlightSnapshot.id,
+                )
+                .where(
+                    FlightSnapshot.origin_code == origin_code,
+                    FlightSnapshot.destination_code == destination_code,
+                    FlightSnapshot.depart_date == depart_date,
+                    PlatformPriceSnapshot.data_provider == provider,
+                )
+                .distinct()
+            )
+        ).scalars().all()
+        if not snaps:
+            return [], None, False
+
+        deals: list[dict[str, Any]] = []
+        provider_rows: list[PlatformPriceSnapshot] = []
+        for snap in snaps:
+            prices = (
+                await s.execute(
+                    select(PlatformPriceSnapshot)
+                    .where(
+                        PlatformPriceSnapshot.flight_snapshot_id == snap.id,
+                        PlatformPriceSnapshot.data_provider == provider,
+                    )
+                    .order_by(PlatformPriceSnapshot.price.asc())
+                )
+            ).scalars().all()
+            provider_rows.extend(prices)
+            price_items = [
+                {
+                    "id": price.id,
+                    "platform": price.platform,
+                    "price": price.price,
+                    "url": price.url,
+                    "currency": price.currency,
+                    "price_status": price.price_status,
+                    "crawled_at": price.crawled_at.isoformat(),
+                    "expires_at": (
+                        price.expires_at.isoformat()
+                        if price.expires_at is not None
+                        else None
+                    ),
+                }
+                for price in prices
+            ]
+            deals.append(
+                {
+                    "flight_no": snap.flight_no,
+                    "airline": snap.airline,
+                    "origin_code": snap.origin_code,
+                    "destination_code": snap.destination_code,
+                    "depart_date": snap.depart_date,
+                    "dep_time": snap.dep_time,
+                    "arr_time": snap.arr_time,
+                    "duration": snap.duration,
+                    "stops": snap.stops,
+                    "lowest_price": min(
+                        (price.price for price in prices), default=0
+                    ),
+                    "history_avg_90d": snap.history_avg_90d,
+                    "history_low_90d": snap.history_low_90d,
+                    "prices": price_items,
+                }
+            )
+
+    newest_crawl = max(row.crawled_at for row in provider_rows)
+    age = max(0, int((now - newest_crawl).total_seconds()))
+    all_stale = all(
+        row.expires_at is not None and row.expires_at <= now
+        for row in provider_rows
+    )
+    deals.sort(key=lambda deal: deal["lowest_price"])
+    return deals, age, all_stale

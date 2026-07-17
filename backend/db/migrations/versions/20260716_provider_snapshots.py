@@ -1,0 +1,111 @@
+"""Add provider-scoped flight snapshots and search demand queue.
+
+Revision ID: 20260716_provider_snapshots
+Revises: 20260601_flight_snapshots
+Create Date: 2026-07-16 00:00:00.000000
+"""
+from __future__ import annotations
+
+from typing import Sequence, Union
+
+import sqlalchemy as sa
+from alembic import op
+
+revision: str = "20260716_provider_snapshots"
+down_revision: Union[str, Sequence[str], None] = "20260601_flight_snapshots"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+
+def upgrade() -> None:
+    op.add_column(
+        "platform_price_snapshots",
+        sa.Column(
+            "data_provider",
+            sa.String(),
+            nullable=False,
+            server_default="legacy",
+        ),
+    )
+    op.add_column(
+        "platform_price_snapshots",
+        sa.Column(
+            "currency",
+            sa.String(),
+            nullable=False,
+            server_default="CNY",
+        ),
+    )
+    op.add_column(
+        "platform_price_snapshots",
+        sa.Column(
+            "price_status",
+            sa.String(),
+            nullable=False,
+            server_default="priced",
+        ),
+    )
+    op.add_column(
+        "platform_price_snapshots",
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
+    )
+    op.create_index(
+        "ix_platform_price_provider_flight",
+        "platform_price_snapshots",
+        ["data_provider", "flight_snapshot_id"],
+    )
+    op.create_table(
+        "flight_search_demands",
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("origin_code", sa.String(), nullable=False),
+        sa.Column("destination_code", sa.String(), nullable=False),
+        sa.Column("depart_date", sa.String(), nullable=False),
+        sa.Column(
+            "priority", sa.Integer(), nullable=False, server_default="10"
+        ),
+        sa.Column("source", sa.String(), nullable=False),
+        sa.Column(
+            "last_requested_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "next_run_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "expires_at", sa.DateTime(timezone=True), nullable=False
+        ),
+        sa.Column(
+            "active", sa.Boolean(), nullable=False, server_default=sa.true()
+        ),
+        sa.UniqueConstraint(
+            "origin_code",
+            "destination_code",
+            "depart_date",
+            name="uq_flight_search_demand_route_date",
+        ),
+    )
+    op.create_index(
+        "ix_flight_search_demands_due",
+        "flight_search_demands",
+        ["active", "next_run_at", "priority"],
+    )
+
+
+def downgrade() -> None:
+    op.drop_index(
+        "ix_flight_search_demands_due", table_name="flight_search_demands"
+    )
+    op.drop_table("flight_search_demands")
+    op.drop_index(
+        "ix_platform_price_provider_flight",
+        table_name="platform_price_snapshots",
+    )
+    op.drop_column("platform_price_snapshots", "expires_at")
+    op.drop_column("platform_price_snapshots", "price_status")
+    op.drop_column("platform_price_snapshots", "currency")
+    op.drop_column("platform_price_snapshots", "data_provider")
