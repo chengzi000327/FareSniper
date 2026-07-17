@@ -24,7 +24,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
     pref_result = state.get("pref_result")
 
     deals = []
-    result_source = "mock"
+    result_source = "none"
     if search_result:
         # New ReAct graph: search_result is a dict from tool_router
         if isinstance(search_result, dict):
@@ -53,12 +53,26 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 deals.append(deal)
 
     if deals:
-        from backend.services.recommend_scorer import sort_deals
+        from backend.services.recommend_scorer import (
+            calc_recommend_score,
+            sort_deals,
+        )
 
         pref_results = []
         if isinstance(pref_result, dict):
             pref_results = pref_result.get("filtered", []) + pref_result.get("boosted", [])
-        deals = sort_deals(deals, pref_results)
+        if result_source == "multi_provider":
+            pref_map = {
+                item.get("flight_no", ""): item
+                for item in pref_results
+                if item.get("flight_no")
+            }
+            for deal in deals:
+                deal["recommend_score"] = calc_recommend_score(
+                    deal, pref_map.get(deal.get("flight_no", ""))
+                )
+        else:
+            deals = sort_deals(deals, pref_results)
 
     prices = _extract_prices(search_result, deals)
     pref_reasons: list[str] = []
@@ -107,8 +121,20 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "budget": intent.budget_cny,
         }
 
+    empty_search_text = (
+        _empty_search_text(search_result)
+        if isinstance(search_result, dict) and not deals
+        else None
+    )
     recommendation = {}
-    if decision:
+    if empty_search_text is not None:
+        recommendation = {
+            "action": "watch",
+            "text": empty_search_text,
+            "confidence": "low",
+            "signals": ["no_deals"],
+        }
+    elif decision:
         recommendation = {
             "action": decision.action.value,
             "text": decision.text,
@@ -131,7 +157,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         }
 
     final_text = _last_ai_text(state)
-    if final_text:
+    if final_text and empty_search_text is None:
         if recommendation:
             recommendation["text"] = final_text
         else:
@@ -207,6 +233,22 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         )
 
     return {**state, "response": resp}
+
+
+def _empty_search_text(search_result: dict) -> str:
+    validation = search_result.get("validation_error")
+    if validation:
+        return validation
+    statuses = list((search_result.get("provider_statuses") or {}).values())
+    if statuses and all(status == "disabled" for status in statuses):
+        return "机票数据源尚未配置，请联系管理员完成配置。"
+    if statuses and all(status == "empty" for status in statuses):
+        return "当前日期和航线暂无可售结果，可以换个日期再试。"
+    if statuses and all(
+        status in {"error", "timeout", "disabled"} for status in statuses
+    ):
+        return "机票数据暂时不可用，请稍后重试。"
+    return "暂时没有找到符合条件的航班，可以换个日期或路线再试。"
 
 
 def _match_score(pref_result, deal_count: int) -> float:

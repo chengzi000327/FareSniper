@@ -7,7 +7,11 @@ import asyncio
 
 import pytest
 
-from backend.resilience.circuit_breaker import CircuitBreaker, CircuitState
+from backend.resilience.circuit_breaker import (
+    CircuitBreaker,
+    CircuitOpenError,
+    CircuitState,
+)
 from backend.resilience.retry import retry_with_backoff
 
 
@@ -90,6 +94,57 @@ async def test_circuit_breaker_success_resets_failures():
     # 1 success → failure counter resets
     result = await cb.call(succeed)
     assert result == "ok"
+    assert cb.state == CircuitState.CLOSED
+    assert cb.failure_count == 0
+
+
+async def test_circuit_breaker_closed_calls_can_overlap():
+    cb = CircuitBreaker(failure_threshold=3, recovery_timeout=1)
+    both_started = asyncio.Event()
+    started = 0
+
+    async def rendezvous(value):
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=0.1)
+        return value
+
+    left, right = await asyncio.gather(
+        cb.call(rendezvous, "left"),
+        cb.call(rendezvous, "right"),
+    )
+
+    assert (left, right) == ("left", "right")
+
+
+async def test_circuit_breaker_allows_only_one_half_open_probe():
+    cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.01)
+
+    async def fail():
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError):
+        await cb.call(fail)
+    await asyncio.sleep(0.02)
+
+    probe_started = asyncio.Event()
+    release_probe = asyncio.Event()
+
+    async def probe():
+        probe_started.set()
+        await release_probe.wait()
+        return "recovered"
+
+    first = asyncio.create_task(cb.call(probe))
+    await probe_started.wait()
+
+    with pytest.raises(CircuitOpenError):
+        await asyncio.wait_for(cb.call(probe), timeout=0.05)
+
+    release_probe.set()
+    assert await first == "recovered"
     assert cb.state == CircuitState.CLOSED
     assert cb.failure_count == 0
 

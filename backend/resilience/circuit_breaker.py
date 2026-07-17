@@ -37,6 +37,7 @@ class CircuitBreaker:
         self.last_failure_time: float = 0.0
         self._state: CircuitState = CircuitState.CLOSED
         self._lock = asyncio.Lock()
+        self._half_open_in_flight = False
 
     @property
     def state(self) -> CircuitState:
@@ -45,7 +46,13 @@ class CircuitBreaker:
                 return CircuitState.HALF_OPEN
         return self._state
 
-    async def call(self, fn: Callable[..., Awaitable[T]], *args: Any, **kwargs: Any) -> T:
+    async def call(
+        self,
+        fn: Callable[..., Awaitable[T]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> T:
+        is_half_open_probe = False
         async with self._lock:
             current = self.state
 
@@ -53,30 +60,43 @@ class CircuitBreaker:
                 raise CircuitOpenError("Circuit is OPEN — request rejected")
 
             if current == CircuitState.HALF_OPEN:
-                # 试探：成功则关闭，失败则重置计时重新 OPEN
-                try:
-                    result = await fn(*args, **kwargs)
-                    self._reset()
-                    return result
-                except Exception as exc:
-                    self.last_failure_time = time.monotonic()
-                    self._state = CircuitState.OPEN
-                    raise exc
+                if self._half_open_in_flight:
+                    raise CircuitOpenError("Circuit is HALF_OPEN — probe in flight")
+                self._state = CircuitState.HALF_OPEN
+                self._half_open_in_flight = True
+                is_half_open_probe = True
 
-            # CLOSED
-            try:
-                result = await fn(*args, **kwargs)
-                # 成功时重置失败计数
-                self.failure_count = 0
-                return result
-            except Exception as exc:
-                self.failure_count += 1
-                if self.failure_count >= self.failure_threshold:
+        try:
+            result = await fn(*args, **kwargs)
+        except asyncio.CancelledError:
+            if is_half_open_probe:
+                async with self._lock:
                     self._state = CircuitState.OPEN
                     self.last_failure_time = time.monotonic()
-                raise exc
+                    self._half_open_in_flight = False
+            raise
+        except Exception:
+            async with self._lock:
+                if is_half_open_probe:
+                    self._state = CircuitState.OPEN
+                    self.last_failure_time = time.monotonic()
+                    self._half_open_in_flight = False
+                elif self._state == CircuitState.CLOSED:
+                    self.failure_count += 1
+                    if self.failure_count >= self.failure_threshold:
+                        self._state = CircuitState.OPEN
+                        self.last_failure_time = time.monotonic()
+            raise
+        else:
+            async with self._lock:
+                if is_half_open_probe:
+                    self._reset()
+                elif self._state == CircuitState.CLOSED:
+                    self.failure_count = 0
+            return result
 
     def _reset(self) -> None:
         self._state = CircuitState.CLOSED
         self.failure_count = 0
         self.last_failure_time = 0.0
+        self._half_open_in_flight = False

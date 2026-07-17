@@ -1,56 +1,40 @@
 from __future__ import annotations
 
-import logging
-
 from langchain_core.tools import tool
 
+from backend.application.services.flight_query import (
+    FlightQueryValidationError,
+    build_flight_query,
+)
+from backend.application.services.flight_search_aggregator import (
+    FlightSearchAggregator,
+)
+from backend.application.services.search_events import emit_search_event
 from backend.config import settings
-from backend.data_sources.mock_flights import get_mock_flights
-from backend.infrastructure.db.flight_snapshot_repo import read_deals
-from backend.infrastructure.flight_data.variflight_client import search_flights as variflight_search
-
-logger = logging.getLogger("faresniper.graph.tools.search_flights")
+from backend.infrastructure.flight_data.providers.factory import (
+    build_flight_providers,
+)
 
 
 @tool
-async def search_flights(origin: str, destination: str, depart_date: str) -> dict:
-    """查询航班价格：优先读快照缓存，缓存空时调飞常准实时数据，最后 mock 兜底。"""
-    # 1. 快照缓存
+async def search_flights(
+    origin: str, destination: str, depart_date: str
+) -> dict:
+    """查询指定出发地、目的地和日期的真实航班报价。"""
     try:
-        deals = await read_deals(
-            origin_code=origin, destination_code=destination, depart_date=depart_date
-        )
-    except Exception:
-        logger.exception(
-            "flight_cache_read_failed origin=%s destination=%s depart_date=%s",
-            origin,
-            destination,
-            depart_date,
-        )
-        deals = []
-    if deals:
-        return {"deals": deals, "source": "cache"}
-
-    # 2. 飞常准实时数据
-    try:
-        deals = await variflight_search(
-            origin=origin, destination=destination, depart_date=depart_date
-        )
-    except Exception:
-        logger.exception(
-            "variflight_search_failed origin=%s destination=%s depart_date=%s",
-            origin,
-            destination,
-            depart_date,
-        )
-        deals = []
-    if deals:
-        return {"deals": deals, "source": "variflight"}
-
-    # 3. Mock 兜底（feature flag 控制）
-    if settings.enable_mock_fallback:
+        query = build_flight_query(origin, destination, depart_date)
+    except FlightQueryValidationError as exc:
+        message = str(exc)
+        emit_search_event("validation_error", {"message": message})
         return {
-            "deals": get_mock_flights(origin, destination, depart_date),
-            "source": "mock_fallback",
+            "deals": [],
+            "source": "validation_error",
+            "provider_statuses": {},
+            "validation_error": message,
         }
-    return {"deals": [], "source": "empty"}
+
+    aggregator = FlightSearchAggregator(
+        build_flight_providers(),
+        timeout_seconds=settings.flight_provider_timeout_seconds,
+    )
+    return await aggregator.collect(query)

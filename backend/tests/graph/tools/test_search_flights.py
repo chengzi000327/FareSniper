@@ -1,61 +1,119 @@
 from __future__ import annotations
 
+import importlib
+
 import pytest
 
 from backend.application.graph.tools.search_flights import search_flights
+from backend.application.services.flight_query import build_flight_query
+from backend.application.services.search_events import (
+    SearchEventEmitter,
+    bind_search_event_emitter,
+)
+from backend.infrastructure.flight_data.providers.factory import (
+    build_flight_providers,
+)
+
+
+def test_tool_preserves_name_and_exact_three_arguments():
+    schema = search_flights.args_schema.model_json_schema()
+
+    assert search_flights.name == "search_flights"
+    assert list(schema["properties"]) == [
+        "origin",
+        "destination",
+        "depart_date",
+    ]
+    assert schema["required"] == ["origin", "destination", "depart_date"]
+
+
+def test_factory_order_and_serpapi_domestic_exclusion():
+    providers = build_flight_providers()
+
+    assert [provider.name for provider in providers] == [
+        "flyai",
+        "ctrip",
+        "serpapi",
+    ]
+    domestic = build_flight_query("北京", "上海", "2099-08-01")
+    international = build_flight_query("上海", "新加坡", "2099-08-01")
+    assert providers[-1].supports(domestic) is False
+    assert providers[-1].supports(international) is True
 
 
 @pytest.mark.asyncio
-async def test_returns_snapshot_cache_when_available(seeded_pg):
-    from backend.infrastructure.db.flight_snapshot_repo import upsert_flights
+async def test_validation_error_returns_deterministic_result_and_event(monkeypatch):
+    module = importlib.import_module(
+        "backend.application.graph.tools.search_flights"
+    )
+    events: list[dict] = []
 
-    await upsert_flights(
-        [
+    def unexpected_factory():
+        raise AssertionError("providers must not be built for invalid input")
+
+    monkeypatch.setattr(module, "build_flight_providers", unexpected_factory)
+
+    with bind_search_event_emitter(SearchEventEmitter("validation", events.append)):
+        result = await search_flights.ainvoke(
             {
-                "flight_no": "MU5137",
-                "airline": "东方航空",
-                "origin_code": "BJS",
-                "destination_code": "SHA",
-                "depart_date": "2026-05-08",
-                "dep_time": "08:30",
-                "arr_time": "11:00",
-                "duration": "2h30m",
-                "stops": 0,
-                "lowest_price": 480,
-                "history_avg_90d": None,
-                "history_low_90d": None,
-                "prices": [{"platform": "ctrip", "price": 480, "lowest": True, "url": ""}],
+                "origin": "北京",
+                "destination": "上海",
+                "depart_date": "not-a-date",
             }
-        ]
-    )
+        )
 
-    out = await search_flights.ainvoke(
-        {"origin": "BJS", "destination": "SHA", "depart_date": "2026-05-08"}
-    )
-    assert len(out["deals"]) >= 1
-    assert out["source"] == "cache"
-    assert out["deals"][0]["prices"][0]["platform"] == "ctrip"
-
-
-@pytest.mark.asyncio
-async def test_variflight_fallback_when_cache_miss(seeded_pg_empty, stub_realtime):
-    out = await search_flights.ainvoke(
-        {"origin": "XIY", "destination": "URC", "depart_date": "2026-05-08"}
-    )
-    assert out["source"] == "variflight"
+    assert result == {
+        "deals": [],
+        "source": "validation_error",
+        "provider_statuses": {},
+        "validation_error": "出发日期必须使用 YYYY-MM-DD",
+    }
+    assert [event["type"] for event in events] == ["validation_error"]
+    assert events[0]["payload"] == {
+        "message": "出发日期必须使用 YYYY-MM-DD"
+    }
 
 
 @pytest.mark.asyncio
-async def test_mock_fallback_when_variflight_fails(seeded_pg_empty, monkeypatch):
-    import backend.application.graph.tools.search_flights as sf
-
-    async def _boom(origin, destination, depart_date):
-        raise RuntimeError("variflight unavailable")
-
-    monkeypatch.setattr(sf, "variflight_search", _boom)
-
-    out = await search_flights.ainvoke(
-        {"origin": "BJS", "destination": "SHA", "depart_date": "2026-05-08"}
+async def test_tool_delegates_to_real_aggregator_with_settings_timeout(monkeypatch):
+    module = importlib.import_module(
+        "backend.application.graph.tools.search_flights"
     )
-    assert out["source"] == "mock_fallback"
-    assert len(out["deals"]) >= 1
+    providers = [object()]
+    captured: dict = {}
+    expected = {
+        "deals": [],
+        "source": "multi_provider",
+        "provider_statuses": {},
+        "errors": {},
+    }
+
+    class FakeAggregator:
+        def __init__(self, actual_providers, *, timeout_seconds):
+            captured["providers"] = actual_providers
+            captured["timeout_seconds"] = timeout_seconds
+
+        async def collect(self, query):
+            captured["query"] = query
+            return expected
+
+    monkeypatch.setattr(module, "build_flight_providers", lambda: providers)
+    monkeypatch.setattr(module, "FlightSearchAggregator", FakeAggregator)
+
+    result = await search_flights.ainvoke(
+        {
+            "origin": "北京",
+            "destination": "上海",
+            "depart_date": "2099-08-01",
+        }
+    )
+
+    assert result == expected
+    assert captured["providers"] is providers
+    assert (
+        captured["timeout_seconds"]
+        == module.settings.flight_provider_timeout_seconds
+        == 10.0
+    )
+    assert captured["query"].origin_code == "BJS"
+    assert captured["query"].destination_code == "SHA"

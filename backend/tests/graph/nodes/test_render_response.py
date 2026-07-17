@@ -43,6 +43,7 @@ async def test_render_empty_when_no_search_result():
     }
     out = await render_response(state)
     assert out["response"].deals == []
+    assert out["response"].meta["source"] == "none"
 
 
 @pytest.mark.asyncio
@@ -133,3 +134,126 @@ async def test_deals_get_recommend_score_and_sorted_by_total():
     deals = out["response"].deals
     assert deals[0]["flight_no"] == "B"
     assert deals[0]["recommend_score"]
+
+
+@pytest.mark.asyncio
+async def test_validation_empty_text_is_not_overwritten_by_ai_message():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "deals": [],
+            "source": "validation_error",
+            "provider_statuses": {},
+            "validation_error": "出发日期必须是未来日期",
+        },
+        "messages": [AIMessage(content="这段模型文本不能覆盖校验错误")],
+    }
+
+    out = await render_response(state)
+
+    assert out["response"].recommendation["text"] == "出发日期必须是未来日期"
+
+
+@pytest.mark.asyncio
+async def test_all_disabled_renders_configuration_copy():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "deals": [],
+            "source": "multi_provider",
+            "provider_statuses": {"flyai": "disabled", "serpapi": "disabled"},
+        },
+        "messages": [AIMessage(content="模型兜底文本")],
+    }
+
+    out = await render_response(state)
+
+    assert out["response"].recommendation["text"] == (
+        "机票数据源尚未配置，请联系管理员完成配置。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_empty_renders_no_inventory_copy():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "deals": [],
+            "source": "multi_provider",
+            "provider_statuses": {"flyai": "empty", "ctrip": "empty"},
+        },
+    }
+
+    out = await render_response(state)
+
+    assert out["response"].recommendation["text"] == (
+        "当前日期和航线暂无可售结果，可以换个日期再试。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_all_failed_renders_temporary_failure_copy():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "deals": [],
+            "source": "multi_provider",
+            "provider_statuses": {
+                "flyai": "error",
+                "ctrip": "timeout",
+                "serpapi": "disabled",
+            },
+        },
+        "messages": [AIMessage(content="模型兜底文本")],
+    }
+
+    out = await render_response(state)
+
+    assert out["response"].recommendation["text"] == (
+        "机票数据暂时不可用，请稍后重试。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mixed_empty_statuses_render_generic_copy():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "deals": [],
+            "source": "multi_provider",
+            "provider_statuses": {"flyai": "empty", "ctrip": "queued"},
+        },
+    }
+
+    out = await render_response(state)
+
+    assert out["response"].recommendation["text"] == (
+        "暂时没有找到符合条件的航班，可以换个日期或路线再试。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_multi_provider_deal_order_is_preserved_when_price_is_missing():
+    state = {
+        "request_user_id": "u1",
+        "search_result": {
+            "source": "multi_provider",
+            "deals": [
+                {"flight_no": "REALTIME", "price": 500, "stops": 0},
+                {
+                    "flight_no": "SNAPSHOT_ONLY",
+                    "price": None,
+                    "stops": 0,
+                    "prices": [{"name": "携程", "price": 100}],
+                },
+            ],
+        },
+    }
+
+    out = await render_response(state)
+
+    assert [deal["flight_no"] for deal in out["response"].deals] == [
+        "REALTIME",
+        "SNAPSHOT_ONLY",
+    ]
+    assert all(deal["recommend_score"] for deal in out["response"].deals)
