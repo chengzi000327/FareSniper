@@ -6,6 +6,7 @@ import json
 import time
 import random
 import logging
+from collections.abc import Mapping
 from typing import List, Dict
 
 from selenium.webdriver.support.ui import WebDriverWait
@@ -19,6 +20,29 @@ from browser import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SUCCESS_PROVIDER_CODES = {0, "0", 200, "200"}
+
+
+def _is_recognized_success_envelope(response) -> bool:
+    """Accept the inventory shape used here plus repository success codes.
+
+    Existing Ctrip parsing treats a mapping with ``data.flightItineraryList``
+    as the success shape. When the provider includes ``code`` or ``status``,
+    only the repository's established success conventions (0 or 200, numeric
+    or string) are accepted.
+    """
+    if not isinstance(response, Mapping):
+        return False
+    payload = response.get("data")
+    if not isinstance(payload, Mapping):
+        return False
+    if not isinstance(payload.get("flightItineraryList"), list):
+        return False
+    for field in ("code", "status"):
+        if field in response and response[field] not in _SUCCESS_PROVIDER_CODES:
+            return False
+    return True
 
 
 class CtripFlightClient:
@@ -181,7 +205,6 @@ class CtripFlightClient:
                     intercepted,
                 )
             else:
-                got_response = True
                 logger.debug(
                     "ctrip_search_responses origin=%s destination=%s "
                     "depart_date=%s count=%d",
@@ -194,6 +217,15 @@ class CtripFlightClient:
             for body_str in responses:
                 try:
                     data = json.loads(body_str)
+                    if not _is_recognized_success_envelope(data):
+                        logger.warning(
+                            "ctrip_response_rejected origin=%s destination=%s "
+                            "depart_date=%s",
+                            dcity,
+                            acity,
+                            date_str,
+                        )
+                        continue
                     fl_list = data.get("data", {}).get("flightItineraryList", [])
 
                     if not fl_list:
@@ -207,6 +239,7 @@ class CtripFlightClient:
 
                     parsed = self._parse_response(data, dcity_name, acity_name, date_str)
                     flights.extend(parsed)
+                    got_response = True
                 except (json.JSONDecodeError, KeyError, TypeError):
                     logger.warning(
                         "ctrip_response_parse_failed origin=%s destination=%s "
@@ -216,7 +249,16 @@ class CtripFlightClient:
                         date_str,
                     )
 
-            if not flights and responses:
+            if not got_response and responses:
+                logger.warning(
+                    "ctrip_search_no_valid_response origin=%s destination=%s "
+                    "depart_date=%s response_count=%d",
+                    dcity,
+                    acity,
+                    date_str,
+                    len(responses),
+                )
+            elif not flights:
                 logger.warning(
                     "ctrip_search_zero_flights origin=%s destination=%s "
                     "depart_date=%s response_count=%d",
@@ -227,6 +269,8 @@ class CtripFlightClient:
                 )
 
         except Exception:
+            flights = []
+            got_response = False
             logger.warning(
                 "ctrip_search_failed origin=%s destination=%s depart_date=%s",
                 dcity,

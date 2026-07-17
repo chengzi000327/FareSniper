@@ -229,7 +229,7 @@ async def test_browser_failure_is_sanitized_and_propagated(monkeypatch):
     assert SENSITIVE_SENTINEL not in str(exc_info.value)
 
 
-def test_client_response_payload_is_not_logged_or_written(
+def test_client_error_response_payload_is_not_logged_or_written(
     monkeypatch, tmp_path, caplog
 ):
     ctrip_api = _load_ctrip_api(monkeypatch)
@@ -254,9 +254,69 @@ def test_client_response_payload_is_not_logged_or_written(
     )
 
     assert flights == []
-    assert got_response is True
+    assert got_response is False
     assert SENSITIVE_SENTINEL not in caplog.text
     assert not (tmp_path / ".debug_response.json").exists()
+
+
+def test_client_all_malformed_responses_are_not_valid(monkeypatch, caplog):
+    ctrip_api, client = _real_client_with_responses(
+        monkeypatch,
+        [f"{{{SENSITIVE_SENTINEL}"],
+    )
+    caplog.set_level("DEBUG", logger=ctrip_api.__name__)
+
+    flights, got_response = client.search_oneway(
+        "PEK", "NRT", "北京", "东京", "2099-08-01"
+    )
+
+    assert flights == []
+    assert got_response is False
+    assert SENSITIVE_SENTINEL not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_client_accepts_code_zero_empty_inventory_through_source(
+    monkeypatch
+):
+    ctrip_api = _load_ctrip_api(monkeypatch)
+    payload = json.dumps(
+        {"code": 0, "data": {"flightItineraryList": []}}
+    )
+    driver = _FakeDriver(json.dumps([payload]))
+    monkeypatch.setattr(
+        ctrip_api, "init_browser", lambda **kwargs: (driver, None)
+    )
+    monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
+
+    source = CtripSource(enable_mock_fallback=False, headless=True)
+    results = await source.search_flights(
+        "PEK", "NRT", "2099-08-01", "2099-08-01"
+    )
+
+    assert results == []
+
+
+def test_client_late_parse_exception_invalidates_response(monkeypatch, caplog):
+    payload = json.dumps(
+        {"code": 0, "data": {"flightItineraryList": []}}
+    )
+    ctrip_api, client = _real_client_with_responses(monkeypatch, [payload])
+
+    def fail_after_recognition(*args, **kwargs):
+        raise RuntimeError(SENSITIVE_SENTINEL)
+
+    monkeypatch.setattr(client, "_parse_response", fail_after_recognition)
+    caplog.set_level("DEBUG", logger=ctrip_api.__name__)
+
+    flights, got_response = client.search_oneway(
+        "PEK", "NRT", "北京", "东京", "2099-08-01"
+    )
+
+    assert flights == []
+    assert got_response is False
+    assert SENSITIVE_SENTINEL not in caplog.text
 
 
 def test_client_exception_text_is_not_logged(monkeypatch, caplog):
@@ -352,6 +412,16 @@ class _FailingDriver:
         raise RuntimeError(SENSITIVE_SENTINEL)
 
 
+def _real_client_with_responses(monkeypatch, responses):
+    ctrip_api = _load_ctrip_api(monkeypatch)
+    client = ctrip_api.CtripFlightClient(headless=True)
+    client.driver = _FakeDriver(json.dumps(responses))
+    monkeypatch.setattr(ctrip_api, "WebDriverWait", _ImmediateWait)
+    monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
+    return ctrip_api, client
+
+
 def _load_ctrip_api(monkeypatch):
     class FakeTimeoutException(Exception):
         pass
@@ -372,7 +442,10 @@ def _load_ctrip_api(monkeypatch):
             WebDriverException=FakeWebDriverException,
         ),
         "config": SimpleNamespace(REQUEST_DELAY=0),
-        "shared": SimpleNamespace(parse_datetime=lambda value: None),
+        "shared": SimpleNamespace(
+            parse_datetime=lambda value: None,
+            resolve_city=lambda code: code,
+        ),
         "browser": SimpleNamespace(
             init_browser=lambda **kwargs: (None, None),
             close_browser=lambda driver, profile: None,
