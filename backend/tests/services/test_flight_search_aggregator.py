@@ -461,3 +461,58 @@ async def test_returned_non_failure_statuses_do_not_open_breaker(
         assert result["provider_statuses"] == {provider_name: status.value}
 
     assert provider.calls == 4
+
+
+@pytest.mark.asyncio
+async def test_provider_calls_and_snapshot_stages_use_safe_trace_wrappers(monkeypatch):
+    provider = FakeProvider(
+        "flyai_traced",
+        ProviderResult(
+            provider="flyai_traced",
+            status=ProviderStatus.success,
+            offers=[_offer(provider="flyai", seller="飞猪")],
+        ),
+    )
+    provider_calls: list[tuple[str, object]] = []
+    stage_calls: list[tuple[str, dict]] = []
+
+    async def fake_trace_provider_call(provider_name, query, operation):
+        provider_calls.append((provider_name, query))
+        return await operation()
+
+    def fake_trace_stage(name, inputs, operation):
+        stage_calls.append((name, inputs))
+        return operation()
+
+    monkeypatch.setattr(
+        "backend.application.services.flight_search_aggregator.trace_provider_call",
+        fake_trace_provider_call,
+    )
+    monkeypatch.setattr(
+        "backend.application.services.flight_search_aggregator.trace_stage",
+        fake_trace_stage,
+    )
+
+    result = await FlightSearchAggregator([provider], timeout_seconds=0.2).collect(
+        _query()
+    )
+
+    assert result["deals"][0]["price"] == 580
+    assert [call[0] for call in provider_calls] == ["flyai_traced"]
+    assert [name for name, _ in stage_calls] == [
+        "normalize_and_deduplicate",
+        "rank_results",
+        "normalize_and_deduplicate",
+        "rank_results",
+    ]
+    assert all(
+        set(inputs)
+        <= {
+            "origin_code",
+            "destination_code",
+            "depart_date",
+            "provider_count",
+            "result_count",
+        }
+        for _, inputs in stage_calls
+    )

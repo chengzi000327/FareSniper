@@ -100,6 +100,30 @@ async def test_overlap_skips_browser_and_seeding(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_refresh_runs_batch_inside_ctrip_root_trace(monkeypatch):
+    traced_operations = []
+
+    async def fake_trace_ctrip_refresh(operation):
+        traced_operations.append(operation)
+        return await operation()
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.trace_ctrip_refresh",
+        fake_trace_ctrip_refresh,
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _rejected_lease
+    )
+
+    summary = await refresh_ctrip_once()
+
+    assert summary.skipped_overlap is True
+    assert [operation.__name__ for operation in traced_operations] == [
+        "_refresh_ctrip_once"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_refresh_counts_collection_error_and_continues_with_later_demand(
     monkeypatch, caplog
 ):

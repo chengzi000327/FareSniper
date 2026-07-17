@@ -18,6 +18,7 @@ from backend.application.services.search_events import (
     SearchEventEmitter,
     bind_search_event_emitter,
 )
+from backend.infrastructure.observability.provider_tracing import trace_flight_search
 
 router = APIRouter(prefix="/search", tags=["search"])
 logger = logging.getLogger("faresniper.search")
@@ -44,10 +45,12 @@ async def _invoke_graph(
     request: Request,
     uid: str,
     request_id: str,
+    graph_event_emitter: _GraphEventEmitter | None = None,
 ) -> FrontendResponse:
     graph = get_graph()
-    out = await graph.ainvoke(
-        {
+
+    async def operation() -> FrontendResponse:
+        state = {
             "request_id": request_id,
             "request_user_id": uid,
             "request_session_id": req.session_id,
@@ -58,12 +61,17 @@ async def _invoke_graph(
             "errors": [],
             "_session_factory": getattr(request.app.state, "session_factory", None),
             "_redis_client": getattr(request.app.state, "redis_client", None),
-        },
-        config={"recursion_limit": 15},
-    )
-    response: FrontendResponse = out["response"]
-    response.session_id = out.get("request_session_id")
-    return response
+        }
+        if graph_event_emitter is None:
+            out = await graph.ainvoke(state, config={"recursion_limit": 15})
+        else:
+            with bind_search_event_emitter(graph_event_emitter):
+                out = await graph.ainvoke(state, config={"recursion_limit": 15})
+        response: FrontendResponse = out["response"]
+        response.session_id = out.get("request_session_id")
+        return response
+
+    return await trace_flight_search(request_id, len(req.message), operation)
 
 
 @router.post("", response_model=FrontendResponse)
@@ -123,11 +131,14 @@ async def search_stream(
 
     async def run_graph() -> None:
         try:
-            with bind_search_event_emitter(graph_emitter):
-                response = await _invoke_graph(req, request, uid, request_id)
-            emitter.emit(
-                "complete", {"response": response.model_dump(mode="json")}
-            )
+            with bind_search_event_emitter(emitter):
+                await _invoke_graph(
+                    req,
+                    request,
+                    uid,
+                    request_id,
+                    graph_event_emitter=graph_emitter,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:

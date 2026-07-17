@@ -105,6 +105,50 @@ async def test_stream_emits_ordered_ndjson_with_complete_response(
 
 
 @pytest.mark.asyncio
+async def test_stream_complete_is_owned_by_flight_search_trace(
+    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch
+):
+    import backend.api.search as search_mod
+
+    graph = _EventGraph()
+    trace_calls: list[tuple[str, int]] = []
+    complete_emit_calls = 0
+    original_emit = search_mod.SearchEventEmitter.emit
+
+    async def fake_trace_flight_search(request_id, message_length, operation):
+        trace_calls.append((request_id, message_length))
+        response = await operation()
+        emit_search_event(
+            "complete", {"response": response.model_dump(mode="json")}
+        )
+        return response
+
+    def counting_emit(self, event_type, payload):
+        nonlocal complete_emit_calls
+        if event_type == "complete":
+            complete_emit_calls += 1
+        return original_emit(self, event_type, payload)
+
+    monkeypatch.setattr(search_mod, "get_graph", lambda: graph)
+    monkeypatch.setattr(
+        search_mod, "trace_flight_search", fake_trace_flight_search, raising=False
+    )
+    monkeypatch.setattr(search_mod.SearchEventEmitter, "emit", counting_emit)
+
+    response = await search_client.post(
+        "/api/search/stream",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        json={"session_id": None, "message": "北京到上海"},
+    )
+    events = [json.loads(line) for line in response.text.splitlines()]
+
+    assert len(trace_calls) == 1
+    assert trace_calls[0][1] == len("北京到上海")
+    assert complete_emit_calls == 1
+    assert [event["type"] for event in events].count("complete") == 1
+
+
+@pytest.mark.asyncio
 async def test_stream_graph_error_emits_one_sanitized_complete_event(
     search_client: AsyncClient, valid_jwt_for_u1, monkeypatch, caplog
 ):

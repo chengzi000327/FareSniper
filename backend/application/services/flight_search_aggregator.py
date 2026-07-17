@@ -14,6 +14,10 @@ from backend.application.services.flight_offer_normalizer import (
     rank_deals,
 )
 from backend.application.services.search_events import emit_search_event
+from backend.infrastructure.observability.provider_tracing import (
+    trace_provider_call,
+    trace_stage,
+)
 from backend.resilience.circuit_breaker import CircuitBreaker, CircuitOpenError
 
 
@@ -38,8 +42,23 @@ def _breaker_for(provider_name: str) -> CircuitBreaker:
 def _snapshot(
     query: FlightQuery, results: dict[str, ProviderResult]
 ) -> dict:
+    normalized = trace_stage(
+        "normalize_and_deduplicate",
+        {
+            "origin_code": query.origin_code,
+            "destination_code": query.destination_code,
+            "depart_date": query.depart_date,
+            "provider_count": len(results),
+        },
+        lambda: offers_to_deals(query, results),
+    )
+    ranked = trace_stage(
+        "rank_results",
+        {"result_count": len(normalized)},
+        lambda: rank_deals(normalized),
+    )
     return {
-        "deals": rank_deals(offers_to_deals(query, results)),
+        "deals": ranked,
         "source": "multi_provider",
         "provider_statuses": {
             name: result.status.value for name, result in results.items()
@@ -67,7 +86,12 @@ class FlightSearchAggregator:
     ) -> tuple[str, ProviderResult]:
         async def search_with_timeout() -> ProviderResult:
             result = await asyncio.wait_for(
-                provider.search(query), timeout=self._timeout_seconds
+                trace_provider_call(
+                    provider.name,
+                    query,
+                    lambda: provider.search(query),
+                ),
+                timeout=self._timeout_seconds,
             )
             if result.status in _BREAKER_FAILURE_STATUSES:
                 raise _ReturnedProviderFailure(result)

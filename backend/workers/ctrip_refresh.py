@@ -21,6 +21,7 @@ from backend.infrastructure.db.flight_demand_repo import (
     enqueue_demand,
 )
 from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
+from backend.infrastructure.observability.provider_tracing import trace_ctrip_refresh
 from backend.utils.airport_codes import resolve_airport
 
 
@@ -80,6 +81,10 @@ async def seed_ctrip_demands() -> None:
 
 
 async def refresh_ctrip_once() -> CtripRefreshSummary:
+    return await trace_ctrip_refresh(_refresh_ctrip_once)
+
+
+async def _refresh_ctrip_once() -> CtripRefreshSummary:
     async with try_ctrip_worker_lease() as acquired:
         if not acquired:
             summary = CtripRefreshSummary(skipped_overlap=True)
