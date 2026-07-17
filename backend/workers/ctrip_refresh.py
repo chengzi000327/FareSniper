@@ -1,0 +1,119 @@
+from __future__ import annotations
+
+import asyncio
+import random
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import AsyncIterator
+from zoneinfo import ZoneInfo
+
+from sqlalchemy import func, select
+
+from backend.application.services._routes import HOT_ROUTES
+from backend.config import settings
+from backend.data_sources.ctrip_source import CtripSource
+from backend.infrastructure.db.alert_repo import list_active_alert_routes
+from backend.infrastructure.db.base import get_session
+from backend.infrastructure.db.flight_demand_repo import (
+    claim_due_demands,
+    enqueue_demand,
+)
+from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
+from backend.utils.airport_codes import resolve_airport
+
+
+CTRIP_WORKER_LEASE_KEY = 731_640_175
+
+
+@dataclass(frozen=True)
+class CtripRefreshSummary:
+    processed: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped_overlap: bool = False
+
+
+@asynccontextmanager
+async def try_ctrip_worker_lease() -> AsyncIterator[bool]:
+    async with get_session() as session:
+        acquired = bool(
+            await session.scalar(
+                select(func.pg_try_advisory_lock(CTRIP_WORKER_LEASE_KEY))
+            )
+        )
+        try:
+            yield acquired
+        finally:
+            if acquired:
+                await session.execute(
+                    select(func.pg_advisory_unlock(CTRIP_WORKER_LEASE_KEY))
+                )
+
+
+async def seed_ctrip_demands() -> None:
+    for origin, destination, depart_date in await list_active_alert_routes():
+        origin_ref = resolve_airport(origin)
+        destination_ref = resolve_airport(destination)
+        if origin_ref is None or destination_ref is None:
+            continue
+        await enqueue_demand(
+            origin_code=origin_ref.code,
+            destination_code=destination_ref.code,
+            depart_date=depart_date,
+            priority=100,
+            source="price_alert",
+        )
+
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    for origin, destination in HOT_ROUTES:
+        for offset in range(1, 4):
+            await enqueue_demand(
+                origin_code=origin,
+                destination_code=destination,
+                depart_date=(today + timedelta(days=offset)).isoformat(),
+                priority=5,
+                source="hot_route",
+            )
+
+
+async def refresh_ctrip_once() -> CtripRefreshSummary:
+    async with try_ctrip_worker_lease() as acquired:
+        if not acquired:
+            return CtripRefreshSummary(skipped_overlap=True)
+
+        await seed_ctrip_demands()
+        demands = await claim_due_demands(settings.ctrip_refresh_batch_size)
+        source = CtripSource(enable_mock_fallback=False, headless=True)
+        succeeded = 0
+        failed = 0
+
+        for demand in demands:
+            try:
+                rows = await source.search_flights(
+                    demand.origin_code,
+                    demand.destination_code,
+                    demand.depart_date,
+                    demand.depart_date,
+                )
+                if rows:
+                    await upsert_provider_flights(
+                        "ctrip_snapshot",
+                        rows,
+                        ttl_minutes=settings.ctrip_snapshot_ttl_minutes,
+                    )
+                succeeded += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(
+                random.uniform(
+                    settings.ctrip_request_delay_min_seconds,
+                    settings.ctrip_request_delay_max_seconds,
+                )
+            )
+
+        return CtripRefreshSummary(
+            processed=len(demands),
+            succeeded=succeeded,
+            failed=failed,
+        )

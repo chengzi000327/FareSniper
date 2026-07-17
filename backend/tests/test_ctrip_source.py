@@ -4,6 +4,9 @@ Step 7 CtripSource 测试
 """
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 
 from backend.data_sources.ctrip_source import CtripSource
@@ -38,11 +41,37 @@ def test_normalize_basic_fields():
     source = CtripSource(enable_mock_fallback=False)
     result = source._normalize(_raw_flight(), origin="PEK", destination="NRT")
 
-    assert result["platform"] == "ctrip"
+    assert result["platform"] == "携程"
     assert result["origin_code"] == "PEK"
     assert result["destination_code"] == "NRT"
     assert result["price"] == 2580
     assert result["airline"] == "中国国航"
+
+
+def test_normalize_real_result_has_only_ctrip_seller_and_unknown_fees():
+    source = CtripSource(enable_mock_fallback=False)
+    result = source._normalize(
+        _raw_flight(url="https://flights.ctrip.com/booking/CA901"),
+        origin="PEK",
+        destination="NRT",
+    )
+
+    assert result["tax"] is None
+    assert result["baggage_fee"] is None
+    assert result["has_baggage"] is None
+    assert result["flight_no"] == "CA901"
+    assert result["dep_time"] == "08:00"
+    assert result["arr_time"] == "13:30"
+    assert result["duration"] == "210"
+    assert result["stops"] == 0
+    assert result["prices"] == [
+        {
+            "platform": "携程",
+            "price": 2580,
+            "url": "https://flights.ctrip.com/booking/CA901",
+        }
+    ]
+    assert result["booking_url"] == "https://flights.ctrip.com/booking/CA901"
 
 
 def test_normalize_system_id():
@@ -114,6 +143,48 @@ def test_third_party_import_failure_returns_empty():
     result = asyncio.run(source._try_third_party_search("PEK", "NRT", "2026-05-01", "2026-05-01"))
     # 没有真实浏览器，应返回空列表
     assert isinstance(result, list)
+
+
+@pytest.mark.asyncio
+async def test_browser_failure_is_sanitized_and_propagated(monkeypatch):
+    class FailingClient:
+        def __init__(self, *, headless):
+            assert headless is True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def search_oneway(self, **kwargs):
+            raise RuntimeError("cookie=super-secret payload=private")
+
+    async def no_retry_delay(fn, *args, **kwargs):
+        return await fn(*args)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ctrip_api",
+        SimpleNamespace(CtripFlightClient=FailingClient),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "shared",
+        SimpleNamespace(resolve_city=lambda code: code),
+    )
+    monkeypatch.setattr(
+        "backend.data_sources.ctrip_source.retry_with_backoff", no_retry_delay
+    )
+
+    source = CtripSource(enable_mock_fallback=False, headless=True)
+    with pytest.raises(RuntimeError) as exc_info:
+        await source._try_third_party_search(
+            "PEK", "NRT", "2099-08-01", "2099-08-01"
+        )
+
+    assert str(exc_info.value) == "Ctrip browser collection failed"
+    assert "super-secret" not in str(exc_info.value)
 
 
 def test_mock_fallback_returns_deals():

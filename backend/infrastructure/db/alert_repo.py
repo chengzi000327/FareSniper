@@ -57,6 +57,23 @@ async def list_alerts(user_id: str) -> list[PriceAlert]:
         )
 
 
+async def list_active_alert_routes() -> list[tuple[str, str, str]]:
+    async with get_session() as session:
+        rows = (
+            await session.execute(
+                select(
+                    PriceAlert.origin,
+                    PriceAlert.destination,
+                    PriceAlert.depart_date,
+                ).where(PriceAlert.status == "active")
+            )
+        ).all()
+        return [
+            (row.origin, row.destination, row.depart_date)
+            for row in rows
+        ]
+
+
 async def mark_triggered(alert_id: str) -> None:
     async with get_session() as s:
         await s.execute(

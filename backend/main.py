@@ -89,14 +89,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         redis_client=redis_client,
     )
 
-    scheduler = build_scheduler()
-    scheduler.start()
+    scheduler = None
+    if settings.run_scheduler_in_api:
+        scheduler = build_scheduler()
+        scheduler.start()
     logger.info(
         "app_startup graph_compiled=%s redis_ok=%s postgres_configured=%s scheduler_running=%s",
         app.state.graph_compiled,
         redis_ok,
         bool(engine),
-        scheduler.running,
+        bool(scheduler and scheduler.running),
     )
 
     app.state.engine = engine
@@ -108,7 +110,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    scheduler.shutdown(wait=False)
+    if scheduler is not None:
+        scheduler.shutdown(wait=False)
 
     if redis_client:
         try:

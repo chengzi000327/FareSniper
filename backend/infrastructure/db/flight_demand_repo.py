@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     Boolean,
@@ -127,11 +128,12 @@ async def enqueue_demand(
 
 async def claim_due_demands(limit: int) -> list[FlightSearchDemand]:
     now = datetime.now(timezone.utc)
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     async with get_session() as session:
         await session.execute(
             update(FlightSearchDemandRow)
             .where(
-                FlightSearchDemandRow.depart_date <= now.date().isoformat()
+                FlightSearchDemandRow.depart_date < today
             )
             .values(active=False)
         )

@@ -115,7 +115,7 @@ class CtripSource(DataSource):
                 max_delay=10.0,
             )
         except Exception:
-            return []
+            raise RuntimeError("Ctrip browser collection failed") from None
 
     def _normalize(
         self,
@@ -148,28 +148,36 @@ class CtripSource(DataSource):
         arr_time = _fmt_time(str(item.get("arr_time") or ""))
         flight_no = str(item.get("flight_number") or item.get("flight_no") or "")
         unique_key = f"{flight_no}-{depart_date}-{price}"
+        booking_url = str(item.get("url") or item.get("jump_url") or "")
 
         return {
             "id": hashlib.md5(unique_key.encode()).hexdigest()[:12],
             "system_id": _next_system_id(),
-            "platform": self.name,
+            "platform": "携程",
             "origin_city": str(item.get("dep_city") or origin),
             "origin_code": origin,
             "destination_city": str(item.get("arr_city") or destination),
             "destination_code": destination,
             "depart_date": depart_date,
             "airline": str(item.get("airline") or "未知航司"),
+            "flight_no": flight_no,
+            "dep_time": dep_time,
+            "arr_time": arr_time,
+            "duration": str(item.get("duration") or ""),
+            "stops": int(item.get("transfer_count") or 0),
             "depart_time": dep_time,
             "arrive_time": arr_time,
             "price": price,
-            "tax": 120,
-            "baggage_fee": 0,
-            "has_baggage": True,
+            "tax": None,
+            "baggage_fee": None,
+            "has_baggage": None,
             "recommend_score": "9.0" if confidence == "high" else "8.0",
             "prices": [
-                {"name": "携程旅行", "price": price, "lowest": True},
-                {"name": "去哪儿网", "price": price + 30},
-                {"name": "飞猪旅行", "price": price + 45},
+                {
+                    "platform": "携程",
+                    "price": price,
+                    "url": booking_url,
+                },
             ],
             "original_price": original_price,
             "discount_rate": discount_rate if discount_rate > 0 else None,
@@ -177,7 +185,7 @@ class CtripSource(DataSource):
             "signals": [item["discount_display"]] if item.get("discount_display") else [],
             "confidence": confidence,
             "verdict": verdict,
-            "booking_url": None,
+            "booking_url": booking_url or None,
         }
 
     def _build_mock_results(
