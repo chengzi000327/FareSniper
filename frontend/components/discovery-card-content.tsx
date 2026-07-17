@@ -1,19 +1,25 @@
+import React from 'react'
 import { ArrowRight, Bell, Briefcase, Equal, ExternalLink, Plane, Plus, ShieldCheck } from 'lucide-react'
+import type { ProviderDisplayStatus } from '@/lib/api'
 
 export type PriceItem = {
   name: string
-  price: number
+  price: number | null
   lowest?: boolean
+  status?: ProviderDisplayStatus
+  url?: string | null
+  data_provider?: string | null
 }
 
 export type DiscoveryCardContentProps = {
   from: string
   to: string
   date?: string
-  basePrice: number
-  tax: number
-  baggageFee: number
-  hasBaggage: boolean
+  basePrice: number | null
+  totalPrice?: number | null
+  tax: number | null
+  baggageFee: number | null
+  hasBaggage: boolean | null
   originalPrice?: number
   platform: string
   recommendScore?: string
@@ -28,6 +34,7 @@ export function DiscoveryCardContent({
   to,
   date,
   basePrice,
+  totalPrice,
   tax,
   baggageFee,
   hasBaggage,
@@ -38,7 +45,21 @@ export function DiscoveryCardContent({
   onMonitorPrice,
   bookingUrl,
 }: DiscoveryCardContentProps) {
-  const totalPrice = basePrice + tax + baggageFee
+  const computedTotal =
+    totalPrice ??
+    (basePrice !== null && tax !== null && baggageFee !== null
+      ? basePrice + tax + baggageFee
+      : null)
+  const money = (value: number | null) => (value === null ? '待确认' : '¥' + value)
+  const statusText: Partial<Record<ProviderDisplayStatus, string>> = {
+    loading: '正在获取数据',
+    queued: '等待下次刷新',
+    stale: '价格可能已更新',
+    timeout: '暂时超时',
+    disabled: '尚未配置',
+    error: '暂时不可用',
+    empty: '暂无结果',
+  }
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
   const sectionGap = compact ? 'mb-3.5' : 'mb-5'
 
@@ -76,25 +97,34 @@ export function DiscoveryCardContent({
         }`}
       >
         <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-transparent via-brand-orange/20 to-transparent" />
-        <PriceBlock label="票价" value={`¥${basePrice}`} compact={compact} />
+        <PriceBlock label="票价" value={money(basePrice)} compact={compact} />
         <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
-        <PriceBlock label="机建燃油" value={`¥${tax}`} compact={compact} />
+        <PriceBlock label="机建燃油" value={money(tax)} compact={compact} />
         <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
-        <PriceBlock label="行李额" value={baggageFee > 0 ? `+¥${baggageFee}` : '免费'} compact={compact} highlight={baggageFee > 0} />
+        <PriceBlock
+          label="行李额"
+          value={baggageFee === null ? '待确认' : baggageFee > 0 ? '+¥' + baggageFee : '免费'}
+          compact={compact}
+          highlight={baggageFee !== null && baggageFee > 0}
+        />
         <Equal className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <div className="col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0">
           <span className="mb-1 text-[11px] font-bold text-brand-orange sm:text-xs">综合总价</span>
-          <span className={`font-black leading-none text-brand-orange ${compact ? 'text-2xl' : 'text-3xl'}`}>¥{totalPrice}</span>
+          <span className={`font-black leading-none text-brand-orange ${compact ? 'text-2xl' : 'text-3xl'}`}>{money(computedTotal)}</span>
         </div>
       </div>
 
       <div className={`${sectionGap} space-y-2.5`}>
         <div className="flex items-center gap-3 rounded-2xl border border-brand-text/5 bg-white px-4 py-2 shadow-sm">
-          <div className={`flex h-9 w-9 items-center justify-center rounded-full ${hasBaggage ? 'bg-green-50' : 'bg-brand-orange/5'}`}>
-            <Briefcase className={`h-4 w-4 ${hasBaggage ? 'text-green-500' : 'text-brand-orange'}`} />
+          <div className={`flex h-9 w-9 items-center justify-center rounded-full ${hasBaggage === true ? 'bg-green-50' : 'bg-brand-orange/5'}`}>
+            <Briefcase className={`h-4 w-4 ${hasBaggage === true ? 'text-green-500' : 'text-brand-orange'}`} />
           </div>
-          <span className={`text-sm leading-6 font-medium ${baggageFee === 0 ? 'text-green-600' : 'text-brand-orange'}`}>
-            {baggageFee === 0 ? '含 20kg 免费托运行李额度' : `暂无免费托运行李额度，需加购 ¥${baggageFee}，已为您计算至最终费用`}
+          <span className={`text-sm leading-6 font-medium ${hasBaggage === true ? 'text-green-600' : 'text-brand-orange'}`}>
+            {hasBaggage === null || baggageFee === null
+              ? '行李额以预订页为准'
+              : hasBaggage
+                ? '含免费托运行李额度'
+                : '暂无免费托运行李额度，需加购 ¥' + baggageFee + '，已为您计算至最终费用'}
           </span>
         </div>
 
@@ -119,11 +149,24 @@ export function DiscoveryCardContent({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {prices.map((price) => (
-            <div key={price.name} className={`flex items-center justify-between ${price.lowest ? 'opacity-100' : 'opacity-45'}`}>
+            <div key={price.name} className={`flex items-center justify-between ${price.lowest === true ? 'opacity-100' : 'opacity-45'}`}>
               <span className="text-sm font-medium text-brand-text">{price.name}</span>
               <div className="flex items-center gap-2">
-                {price.lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
-                <span className={`text-sm font-black sm:text-base ${price.lowest ? 'text-brand-orange' : 'text-brand-text'}`}>¥{price.price}</span>
+                {price.lowest === true && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
+                {price.status === 'view_live_price' && isHttpsUrl(price.url) ? (
+                  <a
+                    href={price.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-black text-brand-orange sm:text-base"
+                  >
+                    查看实时价
+                  </a>
+                ) : (
+                  <span className={`text-sm font-black sm:text-base ${price.lowest === true ? 'text-brand-orange' : 'text-brand-text'}`}>
+                    {price.status ? statusText[price.status] ?? money(price.price) : money(price.price)}
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -162,6 +205,16 @@ export function DiscoveryCardContent({
       </div>
     </div>
   )
+}
+
+function isHttpsUrl(value: string | null | undefined): value is string {
+  if (!value) return false
+
+  try {
+    return new URL(value).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 function PriceBlock({

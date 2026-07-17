@@ -11,10 +11,53 @@ import { RecommendationCard } from '@/components/shared-components'
 import { recApi, searchApi } from '@/lib/api'
 import { dealToCardProps } from '@/lib/mappers'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
+import type { ChatSearchResponse, DealCardDto, SearchStreamEvent } from '@/lib/api'
 
 type Message =
-  | { role: 'user'; content: string }
-  | { role: 'assistant'; content: string; isSpecial?: boolean; hasCard?: boolean; cardData?: DiscoveryCardContentProps }
+  | { id: string; role: 'user'; content: string }
+  | { id: string; role: 'assistant'; content: string; isSpecial?: boolean; hasCard?: boolean; cardData?: DiscoveryCardContentProps }
+
+function assistantText(response: ChatSearchResponse) {
+  const deals = response.deals ?? []
+  const bestDeal = deals[0]
+
+  if (response.recommendation?.text) return response.recommendation.text
+  if (!bestDeal) return '暂未找到符合条件的航班，请换个搜索词试试。'
+  return bestDeal.price === null
+    ? `为您找到 ${deals.length} 个航班，请查看实时价格。`
+    : `为您找到 ${deals.length} 个航班，最低价 ¥${bestDeal.price}`
+}
+
+function cardPropsFromDeal(deal: DealCardDto): DiscoveryCardContentProps {
+  return { ...dealToCardProps(deal), totalPrice: deal.total_price }
+}
+
+function finalizeCard(cardData: DiscoveryCardContentProps): DiscoveryCardContentProps {
+  return {
+    ...cardData,
+    prices: cardData.prices.map((price) =>
+      price.status === 'loading'
+        ? { ...price, status: price.data_provider === 'ctrip_snapshot' ? 'queued' : 'timeout' }
+        : price
+    ),
+  }
+}
+
+function applyProviderStatus(
+  cardData: DiscoveryCardContentProps,
+  event: SearchStreamEvent
+): DiscoveryCardContentProps {
+  const provider = event.payload.provider
+  const status = event.payload.status
+  if (!provider || !status) return cardData
+
+  return {
+    ...cardData,
+    prices: cardData.prices.map((price) =>
+      price.data_provider === provider || price.name === provider ? { ...price, status } : price
+    ),
+  }
+}
 
 // 助手气泡用 Markdown 渲染：支持 GFM 表格/标题/加粗/列表，rehypeSanitize 防 XSS。
 // prose 限定在气泡内，避免 LLM 输出的 ### / |表格| 直接暴露成纯文本。
@@ -33,6 +76,16 @@ export function ChatPage() {
   const [inputValue, setInputValue] = React.useState('')
   const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [recommendedQuestions, setRecommendedQuestions] = React.useState<string[]>([])
+  const activeSearchRef = React.useRef<string | null>(null)
+  const searchControllerRef = React.useRef<AbortController | null>(null)
+  const nextMessageIdRef = React.useRef(0)
+
+  React.useEffect(() => {
+    return () => {
+      activeSearchRef.current = null
+      searchControllerRef.current?.abort()
+    }
+  }, [])
 
   React.useEffect(() => {
     const fetchQuestions = async () => {
@@ -62,40 +115,112 @@ export function ChatPage() {
     const value = inputValue.trim()
     if (!value) return
 
-    setMessages((prev) => [...prev, { role: 'user', content: value }])
+    searchControllerRef.current?.abort()
+    const clientSearchId = `search-${++nextMessageIdRef.current}`
+    const assistantMessageId = `assistant-${++nextMessageIdRef.current}`
+    const controller = new AbortController()
+    activeSearchRef.current = clientSearchId
+    searchControllerRef.current = controller
+
+    setMessages((prev) => [...prev, { id: `user-${++nextMessageIdRef.current}`, role: 'user', content: value }])
     setInputValue('')
 
     setMessages((prev) => [
       ...prev,
-      { role: 'assistant', content: '正在为您深度扫描全网特价资源...', isSpecial: true },
+      { id: assistantMessageId, role: 'assistant', content: '正在为您深度扫描全网特价资源...', isSpecial: true },
     ])
 
-    try {
-      const resp = await searchApi.search({ message: value, session_id: sessionId })
-      setSessionId(resp.session_id ?? null)
-      const deals = resp.deals ?? []
-      const bestDeal = deals[0]
-      const assistantText =
-        resp.recommendation?.text ||
-        (bestDeal ? `为您找到 ${deals.length} 个航班，最低价 ¥${bestDeal.price}` : '暂未找到符合条件的航班，请换个搜索词试试。')
+    const updateAssistant = (update: (message: Extract<Message, { role: 'assistant' }>) => Extract<Message, { role: 'assistant' }>) => {
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.role === 'assistant' && message.id === assistantMessageId ? update(message) : message
+        )
+      )
+    }
 
-      setMessages((prev) => {
-        const filtered = prev.filter((m) => !('isSpecial' in m && m.isSpecial))
-        return [
-          ...filtered,
-          {
-            role: 'assistant',
-            content: assistantText,
-            hasCard: !!bestDeal,
-            cardData: bestDeal ? dealToCardProps(bestDeal) : undefined,
-          },
-        ]
-      })
+    const completeSearch = (response: ChatSearchResponse) => {
+      setSessionId(response.session_id ?? null)
+      const bestDeal = response.deals?.[0]
+      updateAssistant((message) => ({
+        ...message,
+        content: assistantText(response),
+        isSpecial: false,
+        hasCard: !!bestDeal,
+        cardData: bestDeal ? finalizeCard(cardPropsFromDeal(bestDeal)) : undefined,
+      }))
+    }
+
+    let latestSequence = 0
+    let receivedComplete = false
+    const handleEvent = (event: SearchStreamEvent) => {
+      if (activeSearchRef.current !== clientSearchId || event.sequence <= latestSequence) return
+      latestSequence = event.sequence
+
+      if (event.type === 'provider_status') {
+        updateAssistant((message) =>
+          message.cardData ? { ...message, cardData: applyProviderStatus(message.cardData, event) } : message
+        )
+        return
+      }
+
+      if (event.type === 'results') {
+        const bestDeal = event.payload.deals?.[0]
+        if (!bestDeal) return
+        updateAssistant((message) => ({
+          ...message,
+          isSpecial: false,
+          hasCard: true,
+          cardData: cardPropsFromDeal(bestDeal),
+        }))
+        return
+      }
+
+      if (event.type === 'validation_error') {
+        updateAssistant((message) => ({
+          ...message,
+          content: event.payload.message ?? '请输入完整的航班信息。',
+          isSpecial: false,
+          hasCard: false,
+          cardData: undefined,
+        }))
+        return
+      }
+
+      if (event.type === 'complete') {
+        receivedComplete = true
+        if (event.payload.response) {
+          completeSearch(event.payload.response)
+          return
+        }
+        updateAssistant((message) => ({
+          ...message,
+          content: event.payload.message ?? event.payload.error ?? '搜索失败，请检查网络后重试。',
+          isSpecial: false,
+          hasCard: false,
+          cardData: undefined,
+        }))
+      }
+    }
+
+    try {
+      const response = await searchApi.stream(
+        { message: value, session_id: sessionId },
+        handleEvent,
+        controller.signal
+      )
+      if (activeSearchRef.current === clientSearchId && response && !receivedComplete) completeSearch(response)
     } catch {
-      setMessages((prev) => {
-        const filtered = prev.filter((m) => !('isSpecial' in m && m.isSpecial))
-        return [...filtered, { role: 'assistant', content: '搜索失败，请检查网络后重试。' }]
-      })
+      if (activeSearchRef.current === clientSearchId) {
+        updateAssistant((message) => ({
+          ...message,
+          content: '搜索失败，请检查网络后重试。',
+          isSpecial: false,
+          hasCard: false,
+          cardData: undefined,
+        }))
+      }
+    } finally {
+      if (searchControllerRef.current === controller) searchControllerRef.current = null
     }
   }
 
@@ -129,8 +254,8 @@ export function ChatPage() {
             </div>
           </div>
         ) : (
-          messages.map((message, index) => (
-            <motion.div key={`${message.role}-${index}`} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
+          messages.map((message) => (
+            <motion.div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div
                 className={`max-w-3xl rounded-[28px] p-5 text-sm sm:text-base ${
                   message.role === 'user' ? 'rounded-tr-none bg-brand-text text-white' : 'rounded-tl-none border border-brand-text/5 bg-white shadow-sm'
