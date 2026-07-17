@@ -6,7 +6,6 @@ import json
 import time
 import random
 import logging
-import os
 from typing import List, Dict
 
 from selenium.webdriver.support.ui import WebDriverWait
@@ -40,8 +39,8 @@ class CtripFlightClient:
                 headless=self.headless,
                 intercept_js=BATCH_INTERCEPT_JS,
             )
-        except WebDriverException as e:
-            logger.error("浏览器启动失败: %s", e)
+        except WebDriverException:
+            logger.error("ctrip_browser_init_failed")
             raise
 
     def close(self):
@@ -69,7 +68,9 @@ class CtripFlightClient:
         if not self.driver:
             self.init_session()
 
-        logger.info("正在从携程自动发现 %s 出发的所有国内航线...", dep_city_code)
+        logger.info(
+            "ctrip_destination_discovery_started origin=%s", dep_city_code
+        )
         destinations = {}
 
         try:
@@ -81,7 +82,9 @@ class CtripFlightClient:
                 "var r = window.__fuzzyResponses || []; window.__fuzzyResponses = []; return JSON.stringify(r);"
             )
             responses = json.loads(raw)
-            logger.debug("拦截到 %d 个 fuzzySearch 响应", len(responses))
+            logger.debug(
+                "ctrip_destination_responses count=%d", len(responses)
+            )
 
             # 收集所有国内航线城市
             all_cities = {}  # code -> name
@@ -106,12 +109,16 @@ class CtripFlightClient:
             if dep_city_code != "BJS" and "BJS" not in destinations:
                 destinations["BJS"] = "北京"
 
-            logger.info("发现 %d 个目的地城市", len(destinations))
-            sorted_names = sorted(destinations.values())
-            logger.info("目的地: %s", "、".join(sorted_names))
+            logger.info(
+                "ctrip_destination_discovery_complete count=%d",
+                len(destinations),
+            )
 
-        except Exception as e:
-            logger.warning("目的地发现失败: %s", e)
+        except Exception:
+            logger.warning(
+                "ctrip_destination_discovery_failed origin=%s",
+                dep_city_code,
+            )
 
         return destinations
 
@@ -129,7 +136,12 @@ class CtripFlightClient:
         flights = []
         got_response = False
         try:
-            logger.debug("访问: %s", url)
+            logger.debug(
+                "ctrip_search_started origin=%s destination=%s depart_date=%s",
+                dcity,
+                acity,
+                date_str,
+            )
             self.driver.get(url)
 
             # 等待 batchSearch API 响应
@@ -142,7 +154,13 @@ class CtripFlightClient:
                 )
                 intercepted = True
             except TimeoutException:
-                logger.warning("等待航班数据超时: %s->%s %s", dcity_name, acity_name, date_str)
+                logger.warning(
+                    "ctrip_search_timeout origin=%s destination=%s "
+                    "depart_date=%s",
+                    dcity,
+                    acity,
+                    date_str,
+                )
 
             # 额外等待确保数据完整
             time.sleep(2)
@@ -153,48 +171,68 @@ class CtripFlightClient:
             )
             responses = json.loads(raw)
 
-            # 诊断：检查页面是否有验证码或异常
-            page_url = self.driver.current_url
-            page_title = self.driver.title
-
             if not responses:
                 logger.warning(
-                    "  [诊断] %s->%s %s: 未拦截到API响应 | 拦截器触发=%s | 页面标题='%s' | URL=%s",
-                    dcity_name, acity_name, date_str, intercepted, page_title, page_url,
+                    "ctrip_search_no_response origin=%s destination=%s "
+                    "depart_date=%s intercepted=%s",
+                    dcity,
+                    acity,
+                    date_str,
+                    intercepted,
                 )
             else:
                 got_response = True
-                logger.debug("拦截到 %d 个 batchSearch 响应", len(responses))
+                logger.debug(
+                    "ctrip_search_responses origin=%s destination=%s "
+                    "depart_date=%s count=%d",
+                    dcity,
+                    acity,
+                    date_str,
+                    len(responses),
+                )
 
             for body_str in responses:
                 try:
                     data = json.loads(body_str)
-                    # 诊断：检查响应结构
-                    resp_msg = data.get("msg", "")
-                    resp_code = data.get("code", "")
                     fl_list = data.get("data", {}).get("flightItineraryList", [])
 
                     if not fl_list:
                         logger.warning(
-                            "  [诊断] %s->%s %s: API响应无航班列表 | code=%s msg='%s' | data keys=%s",
-                            dcity_name, acity_name, date_str, resp_code, resp_msg,
-                            list(data.get("data", {}).keys()) if data.get("data") else "无data字段",
+                            "ctrip_response_empty_flights origin=%s "
+                            "destination=%s depart_date=%s",
+                            dcity,
+                            acity,
+                            date_str,
                         )
 
                     parsed = self._parse_response(data, dcity_name, acity_name, date_str)
                     flights.extend(parsed)
-                except (json.JSONDecodeError, KeyError, TypeError) as e:
-                    logger.warning("  [诊断] %s->%s %s: 响应解析异常: %s | 响应前200字符: %s",
-                                   dcity_name, acity_name, date_str, e, body_str[:200])
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    logger.warning(
+                        "ctrip_response_parse_failed origin=%s destination=%s "
+                        "depart_date=%s",
+                        dcity,
+                        acity,
+                        date_str,
+                    )
 
             if not flights and responses:
                 logger.warning(
-                    "  [诊断] %s->%s %s: 拦截到 %d 个响应但解析出 0 个航班",
-                    dcity_name, acity_name, date_str, len(responses),
+                    "ctrip_search_zero_flights origin=%s destination=%s "
+                    "depart_date=%s response_count=%d",
+                    dcity,
+                    acity,
+                    date_str,
+                    len(responses),
                 )
 
-        except Exception as e:
-            logger.warning("搜索失败 %s->%s %s: %s", dcity_name, acity_name, date_str, e)
+        except Exception:
+            logger.warning(
+                "ctrip_search_failed origin=%s destination=%s depart_date=%s",
+                dcity,
+                acity,
+                date_str,
+            )
 
         # 请求延迟
         delay = REQUEST_DELAY + random.uniform(0, 1)
@@ -210,7 +248,7 @@ class CtripFlightClient:
 
         fl_list = data.get("data", {}).get("flightItineraryList", [])
         if not fl_list:
-            logger.debug("无航班数据: %s->%s %s", dcity_name, acity_name, date_str)
+            logger.debug("ctrip_parse_empty depart_date=%s", date_str)
             return flights
 
         no_price_list = 0
@@ -325,27 +363,23 @@ class CtripFlightClient:
                     "date": date_str,
                 })
 
-            except (KeyError, TypeError, IndexError) as e:
+            except (KeyError, TypeError, IndexError):
                 parse_error += 1
-                logger.debug("解析单条航班失败: %s", e)
                 continue
 
         # 解析结果为空时输出诊断统计
         if not flights:
             logger.warning(
-                "  [诊断] %s->%s %s: 航班列表 %d 条全部被过滤 | 无priceList=%d 无经济舱=%d 无有效价格=%d 解析异常=%d",
-                dcity_name, acity_name, date_str, len(fl_list),
-                no_price_list, no_cabin_y, no_valid_price, parse_error,
+                "ctrip_parse_all_filtered depart_date=%s input_count=%d "
+                "no_price_count=%d no_economy_count=%d "
+                "no_valid_price_count=%d parse_error_count=%d",
+                date_str,
+                len(fl_list),
+                no_price_list,
+                no_cabin_y,
+                no_valid_price,
+                parse_error,
             )
-            # 首次失败时保存原始响应供调试
-            debug_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".debug_response.json")
-            if not os.path.exists(debug_file):
-                try:
-                    with open(debug_file, "w", encoding="utf-8") as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                    logger.info("  [诊断] 已保存原始响应到 %s", debug_file)
-                except Exception:
-                    pass
 
         return flights
 

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from backend.data_sources.ctrip_source import CtripCollectionError
 from backend.infrastructure.db.flight_demand_repo import (
     claim_due_demands,
     enqueue_demand,
@@ -77,7 +78,8 @@ async def test_refresh_persists_real_ctrip_rows(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_overlap_skips_browser_and_seeding(monkeypatch):
+async def test_overlap_skips_browser_and_seeding(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="backend.workers.ctrip_refresh")
     monkeypatch.setattr(
         "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _rejected_lease
     )
@@ -94,17 +96,22 @@ async def test_overlap_skips_browser_and_seeding(monkeypatch):
 
     assert summary.skipped_overlap is True
     assert summary.processed == 0
+    assert "ctrip_refresh_complete processed=0 succeeded=0 failed=0 skipped=1" in caplog.text
 
 
 @pytest.mark.asyncio
-async def test_refresh_isolates_failures_and_delays_every_demand(monkeypatch):
+async def test_refresh_isolates_failures_and_delays_every_demand(
+    monkeypatch, caplog
+):
+    caplog.set_level("INFO", logger="backend.workers.ctrip_refresh")
     sleeps = []
     persisted = []
+    sentinel = "SENSITIVE_SENTINEL_DO_NOT_LOG"
 
     class PartiallyFailingSource:
         async def search_flights(self, origin, *args):
             if origin == "BJS":
-                raise RuntimeError("private browser payload")
+                raise CtripCollectionError() from RuntimeError(sentinel)
             return [{"flight_no": "MU456", "prices": [{"platform": "携程", "price": 600}]}]
 
     async def fake_sleep(delay):
@@ -140,6 +147,12 @@ async def test_refresh_isolates_failures_and_delays_every_demand(monkeypatch):
     assert len(persisted) == 1
     assert len(sleeps) == 2
     assert all(2.0 <= delay <= 5.0 for delay in sleeps)
+    assert (
+        "ctrip_refresh_demand_failed origin=BJS destination=SHA "
+        "depart_date=2099-08-01" in caplog.text
+    )
+    assert "ctrip_refresh_complete processed=2 succeeded=1 failed=1 skipped=0" in caplog.text
+    assert sentinel not in caplog.text
 
 
 @pytest.mark.asyncio

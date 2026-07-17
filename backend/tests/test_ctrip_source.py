@@ -4,12 +4,17 @@ Step 7 CtripSource 测试
 """
 from __future__ import annotations
 
+import importlib
+import json
 import sys
 from types import SimpleNamespace
 
 import pytest
 
-from backend.data_sources.ctrip_source import CtripSource
+from backend.data_sources.ctrip_source import CtripCollectionError, CtripSource
+
+
+SENSITIVE_SENTINEL = "SENSITIVE_SENTINEL_DO_NOT_LOG"
 
 
 # ── raw flight dict（模拟 CtripFlightClient.search_oneway 返回的一条记录）──
@@ -134,15 +139,52 @@ def test_normalize_discount_rate():
     assert result["original_price"] > result["price"]
 
 
-def test_third_party_import_failure_returns_empty():
-    """第三方库 import 失败时 search_flights 返回空列表（或 mock 数据）。"""
+@pytest.mark.asyncio
+async def test_production_import_failure_raises_typed_sanitized_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ctrip_api", None)
+    monkeypatch.setitem(sys.modules, "shared", None)
     source = CtripSource(enable_mock_fallback=False)
 
-    # 直接调用内部方法，模拟 import 失败
-    import asyncio
-    result = asyncio.run(source._try_third_party_search("PEK", "NRT", "2026-05-01", "2026-05-01"))
-    # 没有真实浏览器，应返回空列表
-    assert isinstance(result, list)
+    with pytest.raises(CtripCollectionError) as exc_info:
+        await source.search_flights("PEK", "NRT", "2099-08-01", "2099-08-01")
+
+    assert str(exc_info.value) == "Ctrip browser collection failed"
+
+
+@pytest.mark.asyncio
+async def test_import_failure_uses_mock_fallback_when_enabled(monkeypatch):
+    monkeypatch.setitem(sys.modules, "ctrip_api", None)
+    monkeypatch.setitem(sys.modules, "shared", None)
+    source = CtripSource(enable_mock_fallback=True)
+
+    results = await source.search_flights(
+        "PEK", "NRT", "2099-08-01", "2099-08-01"
+    )
+
+    assert len(results) > 0
+
+
+@pytest.mark.asyncio
+async def test_no_response_raises_typed_sanitized_error(monkeypatch):
+    _install_fake_client(monkeypatch, flights=[], got_response=False)
+    source = CtripSource(enable_mock_fallback=False, headless=True)
+
+    with pytest.raises(CtripCollectionError) as exc_info:
+        await source.search_flights("PEK", "NRT", "2099-08-01", "2099-08-01")
+
+    assert str(exc_info.value) == "Ctrip browser collection failed"
+
+
+@pytest.mark.asyncio
+async def test_valid_empty_response_is_success(monkeypatch):
+    _install_fake_client(monkeypatch, flights=[], got_response=True)
+    source = CtripSource(enable_mock_fallback=True, headless=True)
+
+    results = await source.search_flights(
+        "PEK", "NRT", "2099-08-01", "2099-08-01"
+    )
+
+    assert results == []
 
 
 @pytest.mark.asyncio
@@ -158,7 +200,7 @@ async def test_browser_failure_is_sanitized_and_propagated(monkeypatch):
             return False
 
         def search_oneway(self, **kwargs):
-            raise RuntimeError("cookie=super-secret payload=private")
+            raise RuntimeError(SENSITIVE_SENTINEL)
 
     async def no_retry_delay(fn, *args, **kwargs):
         return await fn(*args)
@@ -178,13 +220,60 @@ async def test_browser_failure_is_sanitized_and_propagated(monkeypatch):
     )
 
     source = CtripSource(enable_mock_fallback=False, headless=True)
-    with pytest.raises(RuntimeError) as exc_info:
-        await source._try_third_party_search(
+    with pytest.raises(CtripCollectionError) as exc_info:
+        await source.search_flights(
             "PEK", "NRT", "2099-08-01", "2099-08-01"
         )
 
     assert str(exc_info.value) == "Ctrip browser collection failed"
-    assert "super-secret" not in str(exc_info.value)
+    assert SENSITIVE_SENTINEL not in str(exc_info.value)
+
+
+def test_client_response_payload_is_not_logged_or_written(
+    monkeypatch, tmp_path, caplog
+):
+    ctrip_api = _load_ctrip_api(monkeypatch)
+    payload = json.dumps(
+        {
+            "code": SENSITIVE_SENTINEL,
+            "msg": SENSITIVE_SENTINEL,
+            "data": {"flightItineraryList": []},
+        }
+    )
+    driver = _FakeDriver(json.dumps([payload]))
+    client = ctrip_api.CtripFlightClient(headless=True)
+    client.driver = driver
+    monkeypatch.setattr(ctrip_api, "WebDriverWait", _ImmediateWait)
+    monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
+    monkeypatch.setattr(ctrip_api, "__file__", str(tmp_path / "ctrip_api.py"))
+    caplog.set_level("DEBUG", logger=ctrip_api.__name__)
+
+    flights, got_response = client.search_oneway(
+        "PEK", "NRT", "北京", "东京", "2099-08-01"
+    )
+
+    assert flights == []
+    assert got_response is True
+    assert SENSITIVE_SENTINEL not in caplog.text
+    assert not (tmp_path / ".debug_response.json").exists()
+
+
+def test_client_exception_text_is_not_logged(monkeypatch, caplog):
+    ctrip_api = _load_ctrip_api(monkeypatch)
+    client = ctrip_api.CtripFlightClient(headless=True)
+    client.driver = _FailingDriver()
+    monkeypatch.setattr(ctrip_api.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(ctrip_api.random, "uniform", lambda low, high: 0)
+    caplog.set_level("DEBUG", logger=ctrip_api.__name__)
+
+    flights, got_response = client.search_oneway(
+        "PEK", "NRT", "北京", "东京", "2099-08-01"
+    )
+
+    assert flights == []
+    assert got_response is False
+    assert SENSITIVE_SENTINEL not in caplog.text
 
 
 def test_mock_fallback_returns_deals():
@@ -200,3 +289,97 @@ def test_mock_fallback_returns_deals():
         assert "destination_city" in r
         assert "confidence" in r
         assert "verdict" in r
+
+
+def _install_fake_client(monkeypatch, *, flights, got_response):
+    class FakeClient:
+        def __init__(self, *, headless):
+            assert headless is True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def search_oneway(self, **kwargs):
+            return flights, got_response
+
+    async def no_retry_delay(fn, *args, **kwargs):
+        return await fn(*args)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "ctrip_api",
+        SimpleNamespace(CtripFlightClient=FakeClient),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "shared",
+        SimpleNamespace(resolve_city=lambda code: code),
+    )
+    monkeypatch.setattr(
+        "backend.data_sources.ctrip_source.retry_with_backoff", no_retry_delay
+    )
+
+
+class _ImmediateWait:
+    def __init__(self, driver, timeout):
+        self.driver = driver
+
+    def until(self, predicate):
+        return True
+
+
+class _FakeDriver:
+    current_url = f"https://invalid.example/{SENSITIVE_SENTINEL}"
+    title = SENSITIVE_SENTINEL
+
+    def __init__(self, response_json):
+        self.response_json = response_json
+
+    def get(self, url):
+        return None
+
+    def execute_script(self, script):
+        if script.startswith("var r = window.__flightResponses"):
+            return self.response_json
+        return True
+
+
+class _FailingDriver:
+    def get(self, url):
+        raise RuntimeError(SENSITIVE_SENTINEL)
+
+
+def _load_ctrip_api(monkeypatch):
+    class FakeTimeoutException(Exception):
+        pass
+
+    class FakeWebDriverException(Exception):
+        pass
+
+    module_stubs = {
+        "selenium": SimpleNamespace(),
+        "selenium.webdriver": SimpleNamespace(),
+        "selenium.webdriver.support": SimpleNamespace(),
+        "selenium.webdriver.support.ui": SimpleNamespace(
+            WebDriverWait=_ImmediateWait
+        ),
+        "selenium.common": SimpleNamespace(),
+        "selenium.common.exceptions": SimpleNamespace(
+            TimeoutException=FakeTimeoutException,
+            WebDriverException=FakeWebDriverException,
+        ),
+        "config": SimpleNamespace(REQUEST_DELAY=0),
+        "shared": SimpleNamespace(parse_datetime=lambda value: None),
+        "browser": SimpleNamespace(
+            init_browser=lambda **kwargs: (None, None),
+            close_browser=lambda driver, profile: None,
+            BATCH_INTERCEPT_JS="",
+        ),
+    }
+    for name, module in module_stubs.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.delitem(sys.modules, "ctrip_api", raising=False)
+    return importlib.import_module("ctrip_api")

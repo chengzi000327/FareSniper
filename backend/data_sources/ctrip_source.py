@@ -18,6 +18,11 @@ if _FM_PATH not in sys.path:
 _COUNTER = 0  # system_id 自增计数器
 
 
+class CtripCollectionError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("Ctrip browser collection failed")
+
+
 def _next_system_id() -> str:
     global _COUNTER
     _COUNTER += 1
@@ -51,12 +56,14 @@ class CtripSource(DataSource):
         date_start: str,
         date_end: str,
     ) -> List[Dict[str, Any]]:
-        results = await self._try_third_party_search(origin, destination, date_start, date_end)
-        if results:
-            return results
-        if not self.enable_mock_fallback:
-            return []
-        return self._build_mock_results(origin, destination, date_start)
+        try:
+            return await self._try_third_party_search(
+                origin, destination, date_start, date_end
+            )
+        except CtripCollectionError:
+            if self.enable_mock_fallback:
+                return self._build_mock_results(origin, destination, date_start)
+            raise
 
     async def get_history_prices(self, route: str, days: int) -> List[Dict[str, Any]]:
         today = datetime.now(timezone.utc).date()
@@ -77,7 +84,7 @@ class CtripSource(DataSource):
             from ctrip_api import CtripFlightClient  # type: ignore
             from shared import resolve_city  # type: ignore
         except Exception:
-            return []
+            raise CtripCollectionError() from None
 
         def _run() -> List[Dict[str, Any]]:
             origin_name = resolve_city(origin) or origin
@@ -93,13 +100,15 @@ class CtripSource(DataSource):
 
                 current = start
                 while current <= end:
-                    flights, _ = client.search_oneway(
+                    flights, got_response = client.search_oneway(
                         dcity=origin,
                         acity=destination,
                         dcity_name=origin_name,
                         acity_name=dest_name,
                         date_str=current.isoformat(),
                     )
+                    if not got_response:
+                        raise CtripCollectionError()
                     for f in flights:
                         results.append(self._normalize(f, origin, destination))
                     current += timedelta(days=1)
@@ -115,7 +124,7 @@ class CtripSource(DataSource):
                 max_delay=10.0,
             )
         except Exception:
-            raise RuntimeError("Ctrip browser collection failed") from None
+            raise CtripCollectionError() from None
 
     def _normalize(
         self,

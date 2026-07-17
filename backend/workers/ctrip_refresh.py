@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import random
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from backend.utils.airport_codes import resolve_airport
 
 
 CTRIP_WORKER_LEASE_KEY = 731_640_175
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,9 @@ async def seed_ctrip_demands() -> None:
 async def refresh_ctrip_once() -> CtripRefreshSummary:
     async with try_ctrip_worker_lease() as acquired:
         if not acquired:
-            return CtripRefreshSummary(skipped_overlap=True)
+            summary = CtripRefreshSummary(skipped_overlap=True)
+            _log_summary(summary)
+            return summary
 
         await seed_ctrip_demands()
         demands = await claim_due_demands(settings.ctrip_refresh_batch_size)
@@ -105,6 +109,13 @@ async def refresh_ctrip_once() -> CtripRefreshSummary:
                 succeeded += 1
             except Exception:
                 failed += 1
+                logger.warning(
+                    "ctrip_refresh_demand_failed origin=%s destination=%s "
+                    "depart_date=%s",
+                    demand.origin_code,
+                    demand.destination_code,
+                    demand.depart_date,
+                )
             await asyncio.sleep(
                 random.uniform(
                     settings.ctrip_request_delay_min_seconds,
@@ -112,8 +123,20 @@ async def refresh_ctrip_once() -> CtripRefreshSummary:
                 )
             )
 
-        return CtripRefreshSummary(
+        summary = CtripRefreshSummary(
             processed=len(demands),
             succeeded=succeeded,
             failed=failed,
         )
+        _log_summary(summary)
+        return summary
+
+
+def _log_summary(summary: CtripRefreshSummary) -> None:
+    logger.info(
+        "ctrip_refresh_complete processed=%d succeeded=%d failed=%d skipped=%d",
+        summary.processed,
+        summary.succeeded,
+        summary.failed,
+        int(summary.skipped_overlap),
+    )
