@@ -132,16 +132,103 @@ export interface SearchStreamEvent {
     provider?: string;
     status?: ProviderDisplayStatus;
     message?: string;
+    error?: string;
     [key: string]: unknown;
   };
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOwn(record: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function isProviderDisplayStatus(value: unknown): value is ProviderDisplayStatus {
+  return (
+    value === "loading" ||
+    value === "queued" ||
+    value === "success" ||
+    value === "empty" ||
+    value === "stale" ||
+    value === "timeout" ||
+    value === "disabled" ||
+    value === "error" ||
+    value === "view_live_price"
+  );
+}
+
+function isChatSearchResponse(value: unknown): value is ChatSearchResponse {
+  if (!isPlainRecord(value) || typeof value.session_id !== "string") return false;
+  if (hasOwn(value, "deals") && !Array.isArray(value.deals)) return false;
+  if (hasOwn(value, "recommendation") && !isPlainRecord(value.recommendation)) {
+    return false;
+  }
+  return !hasOwn(value, "fallback") || value.fallback === null || isPlainRecord(value.fallback);
+}
+
+function hasValidKnownPayloadFields(payload: Record<string, unknown>): boolean {
+  if (hasOwn(payload, "response") && !isChatSearchResponse(payload.response)) {
+    return false;
+  }
+  if (hasOwn(payload, "deals") && !Array.isArray(payload.deals)) return false;
+  if (hasOwn(payload, "provider") && typeof payload.provider !== "string") {
+    return false;
+  }
+  if (hasOwn(payload, "status") && !isProviderDisplayStatus(payload.status)) {
+    return false;
+  }
+  if (hasOwn(payload, "message") && typeof payload.message !== "string") {
+    return false;
+  }
+  return !hasOwn(payload, "error") || typeof payload.error === "string";
+}
+
 function parseSearchStreamEvent(line: string): SearchStreamEvent {
   const parsed: unknown = JSON.parse(line);
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  if (
+    !isPlainRecord(parsed) ||
+    (parsed.type !== "started" &&
+      parsed.type !== "provider_status" &&
+      parsed.type !== "results" &&
+      parsed.type !== "validation_error" &&
+      parsed.type !== "complete") ||
+    typeof parsed.search_id !== "string" ||
+    !parsed.search_id.trim() ||
+    typeof parsed.sequence !== "number" ||
+    !Number.isInteger(parsed.sequence) ||
+    parsed.sequence <= 0 ||
+    !isPlainRecord(parsed.payload) ||
+    !hasValidKnownPayloadFields(parsed.payload)
+  ) {
     throw new Error("invalid stream event");
   }
-  return parsed as SearchStreamEvent;
+
+  const payload = parsed.payload;
+  if (
+    (parsed.type === "provider_status" &&
+      (typeof payload.provider !== "string" ||
+        !isProviderDisplayStatus(payload.status))) ||
+    (parsed.type === "results" && !Array.isArray(payload.deals)) ||
+    (parsed.type === "validation_error" && typeof payload.message !== "string")
+  ) {
+    throw new Error("invalid stream event");
+  }
+
+  if (parsed.type === "complete") {
+    const hasResponse = hasOwn(payload, "response");
+    const isFailure =
+      typeof payload.error === "string" && typeof payload.message === "string";
+    if (
+      (hasResponse && (hasOwn(payload, "error") || !isChatSearchResponse(payload.response))) ||
+      (!hasResponse && !isFailure)
+    ) {
+      throw new Error("invalid stream event");
+    }
+  }
+
+  return parsed as unknown as SearchStreamEvent;
 }
 
 async function readNdjson(
@@ -155,15 +242,20 @@ async function readNdjson(
   let buffer = "";
   let finalResponse: ChatSearchResponse | null = null;
   let completed = false;
+  let terminalReceived = false;
   let failure: unknown;
 
   const emit = (line: string) => {
     if (!line.trim()) return;
     const event = parseSearchStreamEvent(line);
-    onEvent(event);
-    if (event.type === "complete" && event.payload.response) {
-      finalResponse = event.payload.response;
+    if (terminalReceived) {
+      throw new Error("stream event received after complete");
     }
+    if (event.type === "complete") {
+      terminalReceived = true;
+      finalResponse = event.payload.response ?? null;
+    }
+    onEvent(event);
   };
 
   const consumeLines = () => {

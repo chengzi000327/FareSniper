@@ -16,6 +16,24 @@ function ndjsonResponse(chunks: Uint8Array[]): Response {
   );
 }
 
+function streamEvents(...events: unknown[]): Response {
+  const encoder = new TextEncoder();
+  return ndjsonResponse(events.map((event) => encoder.encode(`${JSON.stringify(event)}\n`)));
+}
+
+function startedEvent(overrides: Record<string, unknown> = {}) {
+  return { type: "started", search_id: "search-1", sequence: 1, payload: {}, ...overrides };
+}
+
+function completeEvent(response: Record<string, unknown> = { session_id: "session-1" }) {
+  return {
+    type: "complete",
+    search_id: "search-1",
+    sequence: 5,
+    payload: { response },
+  };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -196,4 +214,153 @@ test("stream cancels the reader when an event callback throws", async () => {
 
   expect(cancel).toHaveBeenCalledTimes(1);
   expect(response.body?.locked).toBe(false);
+});
+
+test.each([
+  ["unknown event type", startedEvent({ type: "unknown" })],
+  ["missing search_id", startedEvent({ search_id: undefined })],
+  ["empty search_id", startedEvent({ search_id: "" })],
+  ["whitespace search_id", startedEvent({ search_id: "   " })],
+  ["non-positive sequence", startedEvent({ sequence: 0 })],
+  ["non-integer sequence", startedEvent({ sequence: 1.5 })],
+  ["non-object payload", startedEvent({ payload: [] })],
+])("stream rejects %s before invoking onEvent", async (_description, event) => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(streamEvents(event));
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test.each([
+  [
+    "provider_status without a string provider",
+    { type: "provider_status", search_id: "search-1", sequence: 2, payload: { provider: 1, status: "loading" } },
+  ],
+  [
+    "provider_status with an unknown status",
+    { type: "provider_status", search_id: "search-1", sequence: 2, payload: { provider: "flyai", status: "unknown" } },
+  ],
+  [
+    "results without a deals array",
+    { type: "results", search_id: "search-1", sequence: 2, payload: { deals: {} } },
+  ],
+  [
+    "validation_error without a string message",
+    { type: "validation_error", search_id: "search-1", sequence: 2, payload: { message: 1 } },
+  ],
+])("stream rejects %s before invoking onEvent", async (_description, event) => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(streamEvents(event));
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test("stream accepts valid lifecycle events and a canonical complete response", async () => {
+  const events = [
+    startedEvent(),
+    {
+      type: "provider_status",
+      search_id: "search-1",
+      sequence: 2,
+      payload: { provider: "flyai", status: "loading" },
+    },
+    { type: "results", search_id: "search-1", sequence: 3, payload: { deals: [] } },
+    {
+      type: "validation_error",
+      search_id: "search-1",
+      sequence: 4,
+      payload: { message: "请输入出发日期" },
+    },
+    completeEvent({
+      session_id: "session-1",
+      deals: [],
+      recommendation: {},
+      fallback: null,
+    }),
+  ];
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(streamEvents(...events));
+  const onEvent = vi.fn();
+
+  const response = await searchApi.stream({ session_id: null, message: "hi" }, onEvent);
+
+  expect(onEvent.mock.calls.map(([event]) => event.type)).toEqual(
+    events.map((event) => event.type)
+  );
+  expect(response).toMatchObject({ session_id: "session-1", deals: [] });
+});
+
+test.each([
+  ["a string response", { response: "not-a-response" }],
+  ["an array response", { response: [] }],
+  ["a response without session_id", { response: {} }],
+  ["a response with non-string session_id", { response: { session_id: 1 } }],
+  ["a response with non-array deals", { response: { session_id: "s1", deals: {} } }],
+  ["a response with non-object recommendation", { response: { session_id: "s1", recommendation: [] } }],
+  ["a response with invalid fallback", { response: { session_id: "s1", fallback: 1 } }],
+  ["a failure response mixed with a canonical response", { response: { session_id: "s1" }, error: "search_failed", message: "暂时不可用" }],
+  ["a failure response with non-string error", { error: 1, message: "暂时不可用" }],
+  ["a failure response with non-string message", { error: "search_failed", message: 1 }],
+])("stream rejects complete with %s before invoking onEvent", async (_description, payload) => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents({
+      type: "complete",
+      search_id: "search-1",
+      sequence: 5,
+      payload,
+    })
+  );
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("invalid stream event");
+
+  expect(onEvent).not.toHaveBeenCalled();
+});
+
+test("stream accepts a canonical sanitized failure complete payload", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents({
+      type: "complete",
+      search_id: "search-1",
+      sequence: 5,
+      payload: { error: "search_failed", message: "搜索暂时不可用，请稍后重试" },
+    })
+  );
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).resolves.toBeNull();
+
+  expect(onEvent).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  ["a duplicate complete", [completeEvent({ session_id: "first" }), completeEvent({ session_id: "second" })]],
+  [
+    "an event after complete",
+    [
+      completeEvent({ session_id: "first" }),
+      { type: "results", search_id: "search-1", sequence: 6, payload: { deals: [] } },
+    ],
+  ],
+])("stream rejects %s without invoking onEvent for the rejected event", async (_description, events) => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(streamEvents(...events));
+  const onEvent = vi.fn();
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, onEvent)
+  ).rejects.toThrow("stream event received after complete");
+
+  expect(onEvent).toHaveBeenCalledTimes(1);
+  expect(onEvent.mock.calls[0][0].payload.response.session_id).toBe("first");
 });
