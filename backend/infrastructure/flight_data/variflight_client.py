@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 import httpx
 
+from backend.application.services.airport_catalog import AirportCatalog
 from backend.config import settings
 
 logger = logging.getLogger("faresniper.variflight")
@@ -20,38 +21,15 @@ logger = logging.getLogger("faresniper.variflight")
 _VARIFLIGHT_GATEWAY_URL = "https://mcp.variflight.com/api/v1/mcp/data"
 _REQUEST_TIMEOUT = 20.0
 
-# City code aliases: our internal IATA airport codes → variflight city codes.
-# Variflight uses 3-letter *city* codes (BJS for all Beijing airports, etc.).
-_AIRPORT_TO_CITY: dict[str, str] = {
-    "PEK": "BJS",
-    "PKX": "BJS",
-    "SHA": "SHA",
-    "PVG": "SHA",
-    "CAN": "CAN",
-    "SZX": "SZX",
-    "CTU": "CTU",
-    "CKG": "CKG",
-    "XIY": "SIA",
-    "HGH": "HGH",
-    "NKG": "NKG",
-    "WUH": "WUH",
-    "CSX": "CSX",
-    "KMG": "KMG",
-    "SYX": "SYX",
-    "HAK": "HAK",
-    "XMN": "XMN",
-    "TAO": "TAO",
-    "DLC": "DLC",
-    "SHE": "SHE",
-    "HRB": "HRB",
-    "URC": "URC",
-    "LHW": "LHW",
-}
+_AIRPORT_CATALOG = AirportCatalog.load_default()
 
 
 def _to_city_code(code: str) -> str:
     """Map airport IATA → variflight city code, pass through if unknown."""
-    return _AIRPORT_TO_CITY.get(code.upper(), code.upper())
+    location = _AIRPORT_CATALOG.resolve_location(code)
+    if location is None:
+        return code.upper()
+    return location.provider_code("variflight")
 
 
 def _mask_key(api_key: str) -> str:

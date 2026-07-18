@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select, update
 
+from backend.application.contracts.flight_provider import FlightOffer
 import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
 from backend.infrastructure.db.flight_snapshot_repo import (
     FlightSnapshot,
@@ -14,6 +15,7 @@ from backend.infrastructure.db.flight_snapshot_repo import (
     read_deals_latest,
     read_provider_deals,
     upsert_flights,
+    upsert_provider_offers,
     upsert_provider_flights,
 )
 
@@ -175,6 +177,128 @@ async def test_provider_upsert_preserves_other_provider_rows(seeded_pg):
     assert legacy_rows[0]["prices"][0]["platform"] == "legacy"
     assert age is not None
     assert stale is False
+
+
+@pytest.mark.asyncio
+async def test_provider_offer_upsert_updates_seller_and_preserves_other_provider(
+    seeded_pg,
+):
+    def offer(price: int) -> FlightOffer:
+        return FlightOffer(
+            data_provider="ctrip",
+            seller_name="携程",
+            flight_no="MU5106",
+            airline="东方航空",
+            origin_city="北京",
+            origin_code="BJS",
+            destination_city="上海",
+            destination_code="SHA",
+            depart_date="2099-08-01",
+            depart_time="08:00",
+            arrive_time="10:00",
+            duration_minutes=120,
+            currency="CNY",
+            total_price=price,
+            booking_url="https://flights.ctrip.com/booking/MU5106",
+        )
+
+    await upsert_provider_flights(
+        "legacy",
+        [
+            {
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "origin_code": "BJS",
+                "destination_code": "SHA",
+                "depart_date": "2099-08-01",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "prices": [{"platform": "legacy", "price": 600}],
+            }
+        ],
+        ttl_minutes=60,
+    )
+    await upsert_provider_offers(
+        "ctrip_snapshot", [offer(580)], ttl_minutes=75
+    )
+    await upsert_provider_offers(
+        "ctrip_snapshot", [offer(560)], ttl_minutes=75
+    )
+
+    ctrip_rows, _, _ = await read_provider_deals(
+        provider="ctrip_snapshot",
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+    legacy_rows, _, _ = await read_provider_deals(
+        provider="legacy",
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+
+    assert len(ctrip_rows) == 1
+    assert ctrip_rows[0]["lowest_price"] == 560
+    assert len(ctrip_rows[0]["prices"]) == 1
+    assert legacy_rows[0]["lowest_price"] == 600
+
+
+@pytest.mark.asyncio
+async def test_empty_provider_offers_do_not_erase_last_success(seeded_pg):
+    offer = FlightOffer(
+        data_provider="ctrip",
+        seller_name="携程",
+        flight_no="MU5106",
+        origin_city="北京",
+        origin_code="BJS",
+        destination_city="上海",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+        total_price=580,
+    )
+    await upsert_provider_offers("ctrip_snapshot", [offer], ttl_minutes=75)
+
+    await upsert_provider_offers("ctrip_snapshot", [], ttl_minutes=75)
+
+    rows, _, _ = await read_provider_deals(
+        provider="ctrip_snapshot",
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+    assert rows
+    assert rows[0]["lowest_price"] == 580
+
+
+@pytest.mark.asyncio
+async def test_provider_offers_never_persist_raw_reference(seeded_pg):
+    sentinel = "RAW_BROWSER_CONTENT_SENTINEL"
+    offer = FlightOffer(
+        data_provider="ctrip",
+        seller_name="携程",
+        flight_no="MU5106",
+        origin_city="北京",
+        origin_code="BJS",
+        destination_city="上海",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+        total_price=580,
+        raw_reference=sentinel,
+    )
+
+    await upsert_provider_offers("ctrip_snapshot", [offer], ttl_minutes=75)
+
+    async with seeded_pg.connect() as connection:
+        raw_payload = (
+            await connection.execute(
+                select(PlatformPriceSnapshot.raw_payload).where(
+                    PlatformPriceSnapshot.data_provider == "ctrip_snapshot"
+                )
+            )
+        ).scalar_one()
+    assert raw_payload is None
 
 
 @pytest.mark.asyncio
@@ -388,6 +512,7 @@ async def test_mixed_provider_rows_keep_legacy_price_and_freshness(seeded_pg):
         "price_status": "priced",
         "data_provider": "legacy",
         "data_freshness": "fresh",
+        "expires_at": rows[0]["prices"][0]["expires_at"],
     }
     assert rows[0]["winning_price_id"] == rows[0]["prices"][0]["id"]
     assert rows[0]["data_freshness"] == "fresh"
@@ -690,7 +815,7 @@ async def test_provider_refresh_atomically_replaces_partial_route_inventory(
 
 
 @pytest.mark.asyncio
-async def test_provider_refresh_with_empty_success_clears_route_inventory(
+async def test_empty_ctrip_refresh_preserves_last_successful_route_inventory(
     seeded_pg,
 ):
     scope = {
@@ -726,9 +851,77 @@ async def test_provider_refresh_with_empty_success_clears_route_inventory(
         provider="ctrip_snapshot", **scope
     )
 
-    assert rows == []
+    assert len(rows) == 1
+    assert rows[0]["flight_no"] == "MU5106"
+    assert rows[0]["lowest_price"] == 580
     assert age is not None
     assert stale is False
+
+
+@pytest.mark.asyncio
+async def test_read_provider_deals_batches_child_price_query(
+    seeded_pg,
+    monkeypatch,
+):
+    scope = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    base = {
+        **scope,
+        "airline": "东方航空",
+        "arr_time": "10:00",
+        "duration": "120分钟",
+        "stops": 0,
+    }
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **base,
+                "flight_no": "MU5106",
+                "dep_time": "08:00",
+                "prices": [{"platform": "携程", "price": 580}],
+            },
+            {
+                **base,
+                "flight_no": "MU5108",
+                "dep_time": "09:00",
+                "prices": [{"platform": "携程", "price": 620}],
+            },
+        ],
+        ttl_minutes=75,
+    )
+    real_get_session = snapshot_repo.get_session
+    execute_count = 0
+
+    class CountingSession:
+        def __init__(self, session):
+            self.session = session
+
+        async def execute(self, *args, **kwargs):
+            nonlocal execute_count
+            execute_count += 1
+            return await self.session.execute(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self.session, name)
+
+    @asynccontextmanager
+    async def counting_session():
+        async with real_get_session() as session:
+            yield CountingSession(session)
+
+    monkeypatch.setattr(snapshot_repo, "get_session", counting_session)
+
+    rows, _, _ = await read_provider_deals(
+        provider="ctrip_snapshot",
+        **scope,
+    )
+
+    assert len(rows) == 2
+    assert execute_count == 3
 
 
 @pytest.mark.asyncio
@@ -767,17 +960,17 @@ async def test_empty_provider_observation_is_scoped_and_expires_by_ttl(
         "legacy", [], ttl_minutes=120, **target
     )
     await upsert_provider_flights(
-        "ctrip_snapshot", [], ttl_minutes=120, **other_route
+        "serpapi_snapshot", [], ttl_minutes=120, **other_route
     )
     await upsert_provider_flights(
-        "ctrip_snapshot", [], ttl_minutes=120, **other_date
+        "serpapi_snapshot", [], ttl_minutes=120, **other_date
     )
     await upsert_provider_flights(
-        "ctrip_snapshot", [], ttl_minutes=60, **target
+        "serpapi_snapshot", [], ttl_minutes=60, **target
     )
 
     rows, age, stale = await read_provider_deals(
-        provider="ctrip_snapshot", **target
+        provider="serpapi_snapshot", **target
     )
     assert rows == []
     assert age == 0
@@ -785,8 +978,8 @@ async def test_empty_provider_observation_is_scoped_and_expires_by_ttl(
 
     for provider, scope in (
         ("legacy", target),
-        ("ctrip_snapshot", other_route),
-        ("ctrip_snapshot", other_date),
+        ("serpapi_snapshot", other_route),
+        ("serpapi_snapshot", other_date),
     ):
         other_rows, other_age, other_stale = await read_provider_deals(
             provider=provider, **scope
@@ -798,7 +991,7 @@ async def test_empty_provider_observation_is_scoped_and_expires_by_ttl(
     FrozenDateTime.current = observed_at + timedelta(minutes=61)
 
     rows, age, stale = await read_provider_deals(
-        provider="ctrip_snapshot", **target
+        provider="serpapi_snapshot", **target
     )
     assert rows == []
     assert age == 61 * 60
@@ -806,8 +999,8 @@ async def test_empty_provider_observation_is_scoped_and_expires_by_ttl(
 
     for provider, scope in (
         ("legacy", target),
-        ("ctrip_snapshot", other_route),
-        ("ctrip_snapshot", other_date),
+        ("serpapi_snapshot", other_route),
+        ("serpapi_snapshot", other_date),
     ):
         _, _, other_stale = await read_provider_deals(
             provider=provider, **scope

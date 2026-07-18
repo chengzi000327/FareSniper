@@ -5,6 +5,10 @@
 """
 from __future__ import annotations
 
+from types import MappingProxyType
+
+from backend.application.services.airport_catalog import AirportCatalog
+
 # 北京出发热门目的地（国内高频 OD 对）。
 # 从最初的 5 条扩到 14 条，给探索页瀑布流足够的卡片池做无限滚动。
 HOT_ROUTES: list[tuple[str, str]] = [
@@ -25,14 +29,18 @@ HOT_ROUTES: list[tuple[str, str]] = [
     ("BJS", "DLC"),  # 北京→大连
 ]
 
-# 三字码 → 中文城市名
-CITY_NAMES: dict[str, str] = {
-    "BJS": "北京", "SHA": "上海", "SYX": "三亚", "CTU": "成都",
-    "CAN": "广州", "XMN": "厦门", "CKG": "重庆", "SZX": "深圳",
-    "NKG": "南京", "HGH": "杭州", "WUH": "武汉", "XIY": "西安",
-    "KMG": "昆明", "URC": "乌鲁木齐", "HRB": "哈尔滨",
-    "TAO": "青岛", "DLC": "大连",
-}
+_AIRPORT_CATALOG = AirportCatalog.load_default()
+CITY_NAMES = MappingProxyType(
+    {
+        code: city.name
+        for city in _AIRPORT_CATALOG.cities
+        for code in city.provider_codes.values()
+    }
+)
+
+
+def route_city_name(code: str) -> str:
+    return _AIRPORT_CATALOG.code_to_city(code)
 
 # 路线运营标签（卡片上展示的氛围标签）
 ROUTE_TAGS: dict[tuple[str, str], list[str]] = {

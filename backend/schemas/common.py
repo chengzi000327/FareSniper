@@ -76,8 +76,10 @@ class DealCardDto(BaseModel):
     platform: str
     origin_city: str
     origin_code: str
+    origin_airport_code: Optional[str] = None
     destination_city: str
     destination_code: str
+    destination_airport_code: Optional[str] = None
     depart_date: str
     airline: str
     depart_time: str

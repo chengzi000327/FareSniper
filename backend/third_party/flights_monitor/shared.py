@@ -8,51 +8,11 @@ from datetime import date, datetime, timedelta
 from functools import lru_cache
 from typing import Optional
 
+from backend.application.services.airport_catalog import AirportCatalog
+from backend.utils.airport_codes import resolve_airport
 from config import HOLIDAYS
 
-# === 城市名 → (code, name) 映射表 ===
-CITY_MAP = {
-    "北京": ("BJS", "北京"),
-    "上海": ("SHA", "上海"),
-    "广州": ("CAN", "广州"),
-    "深圳": ("SZX", "深圳"),
-    "成都": ("CTU", "成都"),
-    "杭州": ("HGH", "杭州"),
-    "武汉": ("WUH", "武汉"),
-    "西安": ("SIA", "西安"),
-    "重庆": ("CKG", "重庆"),
-    "南京": ("NKG", "南京"),
-    "长沙": ("CSX", "长沙"),
-    "昆明": ("KMG", "昆明"),
-    "天津": ("TSN", "天津"),
-    "青岛": ("TAO", "青岛"),
-    "大连": ("DLC", "大连"),
-    "厦门": ("XMN", "厦门"),
-    "沈阳": ("SHE", "沈阳"),
-    "哈尔滨": ("HRB", "哈尔滨"),
-    "郑州": ("CGO", "郑州"),
-    "福州": ("FOC", "福州"),
-    "济南": ("TNA", "济南"),
-    "合肥": ("HFE", "合肥"),
-    "贵阳": ("KWE", "贵阳"),
-    "南宁": ("NNG", "南宁"),
-    "海口": ("HAK", "海口"),
-    "三亚": ("SYX", "三亚"),
-    "拉萨": ("LXA", "拉萨"),
-    "乌鲁木齐": ("URC", "乌鲁木齐"),
-    "兰州": ("LHW", "兰州"),
-    "银川": ("INC", "银川"),
-    "西宁": ("XNN", "西宁"),
-    "呼和浩特": ("HET", "呼和浩特"),
-    "太原": ("TYN", "太原"),
-    "石家庄": ("SJW", "石家庄"),
-    "长春": ("CGQ", "长春"),
-    "南昌": ("KHN", "南昌"),
-    "珠海": ("ZUH", "珠海"),
-    "无锡": ("WUX", "无锡"),
-    "宁波": ("NGB", "宁波"),
-    "温州": ("WNZ", "温州"),
-}
+_AIRPORT_CATALOG = AirportCatalog.load_default()
 
 # === 国际航班: 国家/地区名 → ISO 代码映射 ===
 INTL_COUNTRY_MAP = {
@@ -124,15 +84,13 @@ def resolve_city(city_name_or_code):
     根据城市名或代码解析出 (code, name)
     支持中文名（如"上海"）或三字码（如"SHA"）
     """
-    if city_name_or_code in CITY_MAP:
-        return CITY_MAP[city_name_or_code]
-    upper = city_name_or_code.upper()
-    for name, (code, cname) in CITY_MAP.items():
-        if code == upper:
-            return (code, name)
-    if len(city_name_or_code) == 3 and city_name_or_code.isalpha():
-        return (upper, city_name_or_code)
-    return (city_name_or_code, city_name_or_code)
+    location = _AIRPORT_CATALOG.resolve_location(city_name_or_code)
+    if location is not None:
+        return (location.provider_code("ctrip"), location.city_name)
+    ref = resolve_airport(city_name_or_code)
+    if ref is not None:
+        return (ref.code, ref.city)
+    raise ValueError("无法识别城市或机场")
 
 
 @lru_cache(maxsize=1)

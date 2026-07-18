@@ -40,7 +40,14 @@ def calc_recommend_score(
     pref_raw = min(matched_count, 3) / 3.0
 
     stops_bonus = 1.0 if _num(flight.get("stops", 0)) == 0 else 0.0
-    baggage_bonus = 1.0 if _num(flight.get("baggage_fee", 0)) == 0 else 0.0
+    baggage_fee = flight.get("baggage_fee")
+    baggage_bonus = (
+        1.0
+        if not isinstance(baggage_fee, bool)
+        and isinstance(baggage_fee, (int, float))
+        and baggage_fee == 0
+        else 0.0
+    )
     bonus_raw = stops_bonus * 0.5 + baggage_bonus * 0.5
 
     score = (hist_raw * 0.5 + pref_raw * 0.3 + bonus_raw * 0.2) * 10

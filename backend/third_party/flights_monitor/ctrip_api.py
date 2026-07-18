@@ -28,6 +28,12 @@ class _CtripStructuralParseError(Exception):
     pass
 
 
+class CtripBrowserError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__("Ctrip browser collection failed")
+
+
 def _is_recognized_success_envelope(response) -> bool:
     """Accept the inventory shape used here plus repository success codes.
 
@@ -152,151 +158,94 @@ class CtripFlightClient:
 
         return destinations
 
-    def search_oneway(
+    def search_batch_search(
         self, dcity: str, acity: str, dcity_name: str, acity_name: str, date_str: str
-    ) -> tuple:
-        """搜索单程航班，返回 (航班列表, 是否收到有效API响应)"""
+    ) -> list[dict]:
+        """Return only recognized batchSearch response envelopes."""
         if not self.driver:
-            self.init_session()
+            try:
+                self.init_session()
+            except WebDriverException:
+                raise CtripBrowserError("dependency_error") from None
 
         url = self.LIST_URL_TPL.format(
             dcity=dcity.lower(), acity=acity.lower(), date=date_str
         )
-
-        flights = []
-        got_response = False
         try:
-            logger.debug(
-                "ctrip_search_started origin=%s destination=%s depart_date=%s",
-                dcity,
-                acity,
-                date_str,
-            )
             self.driver.get(url)
-
-            # 等待 batchSearch API 响应
-            intercepted = False
             try:
                 WebDriverWait(self.driver, self.PAGE_LOAD_WAIT).until(
                     lambda d: d.execute_script(
                         "return (window.__flightResponses && window.__flightResponses.length > 0)"
                     )
                 )
-                intercepted = True
             except TimeoutException:
-                logger.warning(
-                    "ctrip_search_timeout origin=%s destination=%s "
-                    "depart_date=%s",
-                    dcity,
-                    acity,
-                    date_str,
-                )
+                raise CtripBrowserError(self._page_state_error() or "timeout") from None
 
-            # 额外等待确保数据完整
             time.sleep(2)
-
-            # 提取拦截到的响应数据
             raw = self.driver.execute_script(
                 "var r = window.__flightResponses || []; window.__flightResponses = []; return JSON.stringify(r);"
             )
             responses = json.loads(raw)
+        except CtripBrowserError:
+            raise
+        except TimeoutException:
+            raise CtripBrowserError(self._page_state_error() or "timeout") from None
+        except WebDriverException:
+            raise CtripBrowserError("dependency_error") from None
+        except (json.JSONDecodeError, TypeError):
+            raise CtripBrowserError("parse_error") from None
 
-            if not responses:
-                logger.warning(
-                    "ctrip_search_no_response origin=%s destination=%s "
-                    "depart_date=%s intercepted=%s",
-                    dcity,
-                    acity,
-                    date_str,
-                    intercepted,
-                )
-            else:
-                logger.debug(
-                    "ctrip_search_responses origin=%s destination=%s "
-                    "depart_date=%s count=%d",
-                    dcity,
-                    acity,
-                    date_str,
-                    len(responses),
-                )
+        if not isinstance(responses, list):
+            raise CtripBrowserError("parse_error")
+        if not responses:
+            raise CtripBrowserError(self._page_state_error() or "timeout")
 
-            for body_str in responses:
-                try:
-                    data = json.loads(body_str)
-                    if not _is_recognized_success_envelope(data):
-                        logger.warning(
-                            "ctrip_response_rejected origin=%s destination=%s "
-                            "depart_date=%s",
-                            dcity,
-                            acity,
-                            date_str,
-                        )
-                        continue
-                    fl_list = data.get("data", {}).get("flightItineraryList", [])
+        payloads: list[dict] = []
+        for body in responses:
+            try:
+                payload = json.loads(body) if isinstance(body, str) else body
+            except json.JSONDecodeError:
+                continue
+            if _is_recognized_success_envelope(payload):
+                payloads.append(payload)
+        if not payloads:
+            raise CtripBrowserError(self._page_state_error() or "parse_error")
+        return payloads
 
-                    if not fl_list:
-                        logger.warning(
-                            "ctrip_response_empty_flights origin=%s "
-                            "destination=%s depart_date=%s",
-                            dcity,
-                            acity,
-                            date_str,
-                        )
-
-                    parsed = self._parse_response(data, dcity_name, acity_name, date_str)
-                    flights.extend(parsed)
-                    got_response = True
-                except _CtripStructuralParseError:
-                    logger.warning(
-                        "ctrip_response_structural_parse_failed origin=%s "
-                        "destination=%s depart_date=%s",
-                        dcity,
-                        acity,
-                        date_str,
-                    )
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    logger.warning(
-                        "ctrip_response_parse_failed origin=%s destination=%s "
-                        "depart_date=%s",
-                        dcity,
-                        acity,
-                        date_str,
-                    )
-
-            if not got_response and responses:
-                logger.warning(
-                    "ctrip_search_no_valid_response origin=%s destination=%s "
-                    "depart_date=%s response_count=%d",
-                    dcity,
-                    acity,
-                    date_str,
-                    len(responses),
-                )
-            elif not flights:
-                logger.warning(
-                    "ctrip_search_zero_flights origin=%s destination=%s "
-                    "depart_date=%s response_count=%d",
-                    dcity,
-                    acity,
-                    date_str,
-                    len(responses),
-                )
-
-        except Exception:
-            flights = []
-            got_response = False
-            logger.warning(
-                "ctrip_search_failed origin=%s destination=%s depart_date=%s",
-                dcity,
-                acity,
-                date_str,
+    def search_oneway(
+        self, dcity: str, acity: str, dcity_name: str, acity_name: str, date_str: str
+    ) -> tuple:
+        """Legacy monitor adapter returning parsed rows and a success flag."""
+        try:
+            payloads = self.search_batch_search(
+                dcity, acity, dcity_name, acity_name, date_str
             )
+        except CtripBrowserError:
+            return [], False
 
-        # 请求延迟
+        flights = []
+        for payload in payloads:
+            try:
+                flights.extend(self._parse_response(payload, dcity_name, acity_name, date_str))
+            except _CtripStructuralParseError:
+                return [], False
         delay = REQUEST_DELAY + random.uniform(0, 1)
         time.sleep(delay)
+        return flights, True
 
-        return flights, got_response
+    def _page_state_error(self) -> str | None:
+        if not self.driver:
+            return None
+        text = " ".join(
+            str(getattr(self.driver, attribute, ""))
+            for attribute in ("current_url", "title", "page_source")
+        ).lower()
+        if "captcha" in text or "验证码" in text:
+            return "captcha_required"
+        if "login" in text or "登录" in text:
+            return "login_required"
+        return None
 
     def _parse_response(
         self, data: dict, dcity_name: str, acity_name: str, date_str: str

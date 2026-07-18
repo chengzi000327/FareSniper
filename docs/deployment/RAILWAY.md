@@ -1,68 +1,58 @@
 # Railway 部署
 
-FareSniper 在 Railway dashboard 中创建三个独立服务：`backend`、`worker`、`frontend`。每个 Config-as-Code 文件只描述一个 deployment。
+FareSniper 在 Railway 中使用 `backend`、`worker`、`frontend` 三个服务。携程浏览器不在 Railway 运行，而是在独立 Mac collector 上运行。
 
 ## Dashboard 设置
-
-backend 与 worker 从完整 monorepo 构建，Root Directory 设为 `/`；frontend 的 Root Directory 设为 `/frontend`。Config File 都使用仓库绝对路径：
 
 | 服务 | Root Directory | Config File | 副本 |
 | --- | --- | --- | --- |
 | `backend` | `/` | `/backend/railway.api.toml` | 1 或按 API 流量扩展 |
 | `worker` | `/` | `/backend/railway.worker.toml` | **严格单副本** |
-| `frontend` | `/frontend` | `/frontend/railway.toml` | 1 或按前端流量扩展 |
+| `frontend` | `/frontend` | `/frontend/railway.toml` | 1 或按流量扩展 |
 
-worker 必须严格单副本。携程每小时任务本身有数据库 advisory lock，但同一进程中的告警扫描和旧 `hourly_scrape` 没有全局跨副本锁；增加 worker 副本会重复执行这些任务。
+worker 必须严格单副本，以免提醒扫描和定时需求播种重复执行。三个 Config-as-Code 文件各自只描述一个 deployment。
 
 ## 构建与启动
 
-backend 与 worker 的生产构建都使用 `backend/Dockerfile`。该镜像从仓库根构建，包含 Python 3.13、Debian Chromium/ChromeDriver、Node.js 22、固定 `@fly-ai/flyai-cli@1.0.16`，并安装：
+backend 和 worker 的生产构建共享 `backend/Dockerfile`。镜像包含 Python 3.13、Node.js 22、固定 `@fly-ai/flyai-cli@1.0.16` 和 `backend/requirements.txt`，不包含 Chromium、ChromeDriver、Selenium collector 或用户 profile。
 
-```text
-backend/requirements.txt
-backend/third_party/flights_monitor/requirements.txt
-```
+- API：pre-deploy 运行 `alembic -c backend/alembic.ini upgrade head`，Docker CMD 启动 Uvicorn，healthcheck 为 `/health`。
+- worker：启动 `python -m backend.workers.run_all`，只负责调度、需求队列和提醒，不导入 `backend.collector` 或浏览器模块。
+- frontend：在 `/frontend` 执行 `npm ci && npm run build`，再以 `npm run start -- -p $PORT` 启动。
 
-容器 `WORKDIR` 是仓库根 `/app`，因此 `python -m backend...` 可以正常导入。API 镜像使用 Dockerfile 的 shell CMD，在容器内展开 `${PORT:-8000}`；Railway API config 不覆盖该 CMD。
-
-`backend/nixpacks.toml` 仅是可执行的 API 人工 fallback，不是 backend/worker 的生产 Railway builder。从仓库根运行：
+`backend/nixpacks.toml` 是 API 的人工 fallback：
 
 ```bash
 nixpacks build . --config backend/nixpacks.toml
 ```
 
-该 config 在 `/opt/venv` 创建 Python 3.13 虚拟环境，通过虚拟环境中的 pip 从 repo root 安装两套 requirements，并通过同一环境中的 Uvicorn 启动 API；同时安装 GCC、Chromium/ChromeDriver、Node 22 和固定 FlyAI CLI。worker 生产构建仍使用 Dockerfile 和独立 worker start override。
-
-服务生命周期由各自 config 管理：
-
-- API：`preDeployCommand` 单独运行 `alembic -c backend/alembic.ini upgrade head`；Docker CMD 只运行 Uvicorn；healthcheck 是 `/health`。
-- worker：start 保持 `python -m backend.workers.run_all`，不重复 migration。
-- frontend：在 `/frontend` Root Directory 中显式执行 `npm ci && npm run build`，并以 `npm run start -- -p $PORT` 启动。
-
-FlyAI 运行时直接调用 `flyai` 并从环境读取 `FLYAI_API_KEY`。构建和请求路径不执行 `npx`，也不执行 `flyai config set`。
-
-`npx skills add alibaba-flyai/flyai-skill` 安装的是 coding-agent host 的开发说明，不是 FareSniper 生产依赖。Railway 不安装该 skill。
+它同样不安装浏览器，只保留 Python、Node 和固定 FlyAI CLI。Railway 构建和请求路径都不执行 `npx` 或 `flyai config set`。
 
 ## Backend Variables
 
 ```dotenv
-DATABASE_URL=<Railway PostgreSQL reference>
-REDIS_URL=<Railway Redis reference>
-MODEL_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MODEL_API_KEY=
-MODEL_INTENT=qwen-plus
-MODEL_JUDGE=deepseek-v3
-MODEL_AGENT=qwen-plus
-MODEL_THINKING=disabled
+DATABASE_URL=
+REDIS_URL=
 JWT_SECRET=
-CORS_ORIGINS=["https://<frontend>.up.railway.app"]
+CORS_ORIGINS=[]
+
+MODEL_BASE_URL=
+MODEL_API_KEY=
+MODEL_INTENT=
+MODEL_JUDGE=
+MODEL_AGENT=
+MODEL_THINKING=disabled
 
 ENABLE_MOCK_FALLBACK=false
 FLYAI_API_KEY=
 FLYAI_CLI_PATH=flyai
 SERPAPI_API_KEY=
 FLIGHT_PROVIDER_TIMEOUT_SECONDS=10
+
+CTRIP_COLLECTOR_TOKEN=
 CTRIP_SNAPSHOT_TTL_MINUTES=75
+CTRIP_COLLECTOR_HEARTBEAT_TIMEOUT_SECONDS=180
+CTRIP_COLLECTOR_LEASE_SECONDS=180
 RUN_SCHEDULER_IN_API=false
 
 FARESNIPER_LANGSMITH_TRACING=true
@@ -73,19 +63,17 @@ LANGSMITH_PROJECT=faresniper
 LANGCHAIN_TRACING_V2=false
 ```
 
-Provider key 示例故意留空，实际值只写 Railway Variables。缺少 FlyAI 或 SerpAPI key 只禁用对应来源，不阻止 API 启动。生产必须保持 `ENABLE_MOCK_FALLBACK=false`。
+`SERPAPI_API_KEY` 可选；缺少时只禁用 Google Flights 来源。`FLYAI_API_KEY` 和 `CTRIP_COLLECTOR_TOKEN` 在启用相应来源时必填。`CTRIP_COLLECTOR_TOKEN` 使用高熵 token68 值，并与 Mac `collector.env` 保持一致。
 
 ## Worker Variables
 
 ```dotenv
-DATABASE_URL=<same Railway PostgreSQL reference>
-REDIS_URL=<same Railway Redis reference>
-CTRIP_SNAPSHOT_TTL_MINUTES=75
-CTRIP_REFRESH_BATCH_SIZE=20
-CTRIP_REQUEST_DELAY_MIN_SECONDS=2
-CTRIP_REQUEST_DELAY_MAX_SECONDS=5
-VARIFLIGHT_API_KEY=
+DATABASE_URL=
+REDIS_URL=
 RUN_SCHEDULER_IN_API=false
+VARIFLIGHT_API_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=
 
 FARESNIPER_LANGSMITH_TRACING=true
 LANGSMITH_TRACING=false
@@ -95,61 +83,76 @@ LANGSMITH_PROJECT=faresniper
 LANGCHAIN_TRACING_V2=false
 ```
 
-携程 `ctrip_hourly_refresh` 无论 VariFlight 是否配置都在每小时整点运行。只有配置 `VARIFLIGHT_API_KEY` 时，scheduler 才注册旧 `hourly_scrape`；未配置时不会固定产生失败任务。如启用告警推送，还需给 worker 配置 VAPID/通知变量。
+worker 的 push dispatcher 使用 `VAPID_PRIVATE_KEY` 和 `VAPID_SUBJECT` 发送 Web Push。worker 不需要模型变量，也不得配置 FlyAI、SerpAPI、携程 token、浏览器路径、profile 或 Cookie。`VARIFLIGHT_API_KEY` 仅用于可选的旧 `hourly_scrape` 调度；未配置时该任务不注册。携程每小时任务只播种待采集航线，真正的页面采集由 Mac 完成。
 
 ## Frontend Variables
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=https://<backend>.up.railway.app
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 ```
 
-同时把 frontend 域名加入 backend 的 `CORS_ORIGINS`。
+`NEXT_PUBLIC_VAPID_PUBLIC_KEY` 是与 worker 私钥配套的公开 key。另需把 frontend 域名加入 backend 的 `CORS_ORIGINS`。
 
-## Custom-only LangSmith
+## LangSmith
 
-`FARESNIPER_LANGSMITH_TRACING=true` 只启用 Task 10 的手工安全 span。应用初始化会调用官方 `langsmith.configure(enabled=False)`，并始终把 `LANGSMITH_TRACING` 和 `LANGCHAIN_TRACING_V2` 保持为 `false`；LangSmith key/project/endpoint 仍提供给局部 `tracing_context(enabled=True)`。不要开启 `LANGSMITH_TRACING`。不要开启 `LANGCHAIN_TRACING_V2`。任一官方自动 tracing 开关都可能让第三方 instrumentation 记录未经 allowlist 处理的输入。
+`FARESNIPER_LANGSMITH_TRACING=true` 启用项目的手工安全 span。不要开启 `LANGSMITH_TRACING`，不要开启 `LANGCHAIN_TRACING_V2`。自动 instrumentation 可能记录未经 allowlist 处理的用户输入或第三方数据。
 
-自定义 span 只记录航线/日期、状态、数量、延迟与缓存年龄等摘要，不记录密钥、完整用户消息、raw offer、预订 URL 或第三方原始错误。`/health` 的 `langsmith_ok` 使用同一个 custom-tracing 安全启用条件。
+允许的 span 只包含航线、日期、状态、结果数量、延迟、缓存年龄和匿名 job id。禁止记录密钥、Cookie、完整消息、raw offer、完整预订 URL 和第三方原始错误。
+
+相关 trace 名称包括 `flight_search`、`ctrip_collector_claim`、`ctrip_local_collect` 和 `ctrip_collector_ingest`。
 
 ## 部署顺序
 
-1. 创建 PostgreSQL/Redis，并配置 backend 与 worker Variables。
-2. 按 dashboard 表配置并部署 backend；确认 pre-deploy migration 和 `/health`。
-3. 部署严格单副本 worker；确认 `ctrip_hourly_refresh` 每小时运行。
-4. 部署 frontend，并更新 backend `CORS_ORIGINS`。
+1. 创建独立 PostgreSQL 和 Redis，并给 backend/worker 配置各自变量。
+2. 部署 backend，确认 pre-deploy migration 成功。
+3. 串行检查数据库已经在 Alembic head：
+
+```bash
+alembic -c backend/alembic.ini current --check-heads
+```
+
+不要在共享 `TEST_DATABASE_URL` 上并行运行 downgrade/upgrade 与业务测试；migration 测试会短暂改变 schema。
+
+4. 部署严格单副本 worker，确认 scheduler 启动。
+5. 部署 frontend，并更新 backend `CORS_ORIGINS`。
+6. 按 [`MAC_CTRIP_COLLECTOR.md`](MAC_CTRIP_COLLECTOR.md) 配置 Mac collector，完成可见登录后再激活 launchd。
 
 ## 验证
 
-`2099-08-01` 只是未来日期示例。该日期失效后，必须替换成执行当天之后的日期；城市参数使用中文全称。
+先检查服务：
 
 ```bash
-flyai --help
-flyai search-flight --origin "北京" --destination "上海" --dep-date 2099-08-01 --sort-type 3
+curl -fsS https://<backend>.up.railway.app/health
 ```
 
-渐进 NDJSON：
+真实票价验证需要环境中已有 `FARESNIPER_API_URL` 和 `CTRIP_COLLECTOR_TOKEN`。下面通过现有 `/api/session` 端点签发匿名 JWT：命令替换会直接把响应中的 token 放入当前 shell 变量，不会把 token 打印到终端或保存到仓库。不要开启 shell tracing，也不要把变量值粘贴到命令行、日志或文件。
 
 ```bash
-curl -N -X POST "https://<backend>/api/search/stream" \
-  -H "Authorization: Bearer <session-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":null,"message":"8月1日北京到上海"}'
+FARESNIPER_VERIFY_JWT="$(
+  curl -fsS -X POST "$FARESNIPER_API_URL/api/session" \
+    -H 'Content-Type: application/json' \
+    -d '{}' |
+    python -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)"
+export FARESNIPER_VERIFY_JWT
+DEPART_DATE="$(python -c 'from datetime import date, timedelta; print(date.today() + timedelta(days=14))')"
+
+python -m backend.scripts.verify_live_fares \
+  --origin 北京 \
+  --destination 三亚 \
+  --depart-date "$DEPART_DATE" \
+  --timeout-seconds 180 \
+  --require-fresh
+
+unset FARESNIPER_VERIFY_JWT
 ```
 
-只有目标环境已安全配置 provider key 时才运行真实 smoke：
-
-```bash
-python -m backend.scripts.verify_flight_providers \
-  --origin 北京 --destination 上海 --depart-date 2099-08-01
-python -m backend.scripts.verify_flight_providers \
-  --origin 上海 --destination 新加坡 --depart-date 2099-08-01
-```
-
-stdout 永远只有 `provider_statuses`、`deal_count`、`sellers`。至少一个 provider 为 `success` 或 `empty` 时退出 0；只有 error/timeout/disabled/queued/stale 或没有 provider 时退出 1；输入不合法时退出 2。输出不包含 key、URL、raw offer、raw error 或疑似敏感 seller。
+脚本依次检查 Mac heartbeat、航线 job 状态、携程数字价格和 HTTPS 预订链接，并确认 `analysis.min_price`、卡片价格与推荐文本一致。stdout 只输出 `collector`、`job`、币种/价格和固定 trace 名称，不输出 token、JWT、URL 或 raw payload。
 
 ## 能力边界
 
-- 国内航线使用 FlyAI 实时结果与携程小时快照；国际航线使用 FlyAI、SerpAPI 和匹配的携程快照。
-- 单个来源 disabled、超时或失败不会阻止其他来源完成。
-- FareSniper 只展示报价和第三方跳转，不在站内出票、支付或保证库存。
-- 携程是最长 75 分钟有效的 worker 快照，不是每次请求现场抓取。
+- FlyAI/飞猪是实时来源；SerpAPI 是可选国际来源。
+- 携程是由 Mac 采集并上传的快照，默认有效期 75 分钟；`--require-fresh` 会拒绝只有过期快照的结果。
+- 单个来源 disabled、empty、timeout 或 error 不阻止其他来源返回。
+- FareSniper 只提供比价和第三方跳转，不保证最终库存或成交价。

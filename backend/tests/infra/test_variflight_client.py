@@ -177,3 +177,8 @@ def test_mask_key():
     assert vc._mask_key("KEYABCDEFGH1234") == "KEYA...1234"
     assert vc._mask_key("") == ""
     assert vc._mask_key("short") == "*****"
+
+
+def test_catalog_converts_non_legacy_airport_to_variflight_city_code():
+    assert vc._to_city_code("TFU") == "CTU"
+    assert vc._to_city_code("DEJ") == "TEN"

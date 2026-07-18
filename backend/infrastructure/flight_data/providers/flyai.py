@@ -141,6 +141,13 @@ def _minutes(value: object) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _provider_location(query: FlightQuery, side: str) -> str:
+    location = getattr(query, side, None)
+    if location is not None:
+        return location.airport_iata or location.provider_code("flyai")
+    return getattr(query, f"{side}_city")
+
+
 def _segments_for(item: dict) -> list[dict]:
     segments: list[dict] = []
     journeys = item.get("journeys") or []
@@ -247,9 +254,9 @@ class FlyAIProvider:
                 self._cli_path,
                 "search-flight",
                 "--origin",
-                query.origin_city,
+                _provider_location(query, "origin"),
                 "--destination",
-                query.destination_city,
+                _provider_location(query, "destination"),
                 "--dep-date",
                 query.depart_date,
                 "--sort-type",

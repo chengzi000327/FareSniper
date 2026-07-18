@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -21,7 +21,12 @@ from backend.application.services.intent_registry import (
     match_intent,
     required_slots_for,
 )
-from backend.utils.airport_codes import CITY_TO_AIRPORT, city_to_code
+from backend.application.services.airport_catalog import AirportCatalog
+from backend.utils.airport_codes import (
+    AIRPORT_TO_CITY,
+    CITY_TO_AIRPORT,
+    resolve_airport,
+)
 
 REQUIRED_SEARCH_SLOTS = ("origin", "destination", "depart_date")
 FLIGHT_KEYWORDS = tuple(
@@ -31,7 +36,9 @@ FLIGHT_KEYWORDS = tuple(
     for keyword in definition.keywords
 )
 ORIGIN_MARKERS = ("从", "自", "由")
-DESTINATION_MARKERS = ("到", "去", "飞", "回")
+DESTINATION_MARKERS = ("到", "去", "飞", "回", "至", "->", "→", "-", "/")
+_ROUTE_SEPARATOR_PATTERN = r"(?:到|去|飞|回|至|->|→|-|/)"
+_ROUTE_SEPARATOR = re.compile(_ROUTE_SEPARATOR_PATTERN)
 _TZ = ZoneInfo("Asia/Shanghai")
 _CHINESE_NUMERALS = {
     "一": 1,
@@ -46,6 +53,97 @@ _CHINESE_NUMERALS = {
     "九": 9,
     "十": 10,
 }
+_CATALOG = AirportCatalog.load_default()
+
+
+@dataclass(frozen=True)
+class _LocationMention:
+    start: int
+    end: int
+    value: str
+    city_id: str
+    is_airport: bool
+
+
+@dataclass(frozen=True)
+class _LocationTerm:
+    text: str
+    value: str
+    city_id: str
+    is_airport: bool
+    is_ascii_code: bool
+
+
+def _build_location_terms() -> tuple[_LocationTerm, ...]:
+    terms: set[str] = set()
+    for city in _CATALOG.cities:
+        terms.update((city.name, *city.aliases, *city.provider_codes.values()))
+        for airport in city.airports:
+            terms.update(
+                value
+                for value in (
+                    airport.name,
+                    *airport.aliases,
+                    airport.iata,
+                    airport.icao,
+                )
+                if value
+            )
+    terms.update(CITY_TO_AIRPORT)
+    terms.update(AIRPORT_TO_CITY)
+    resolved: list[_LocationTerm] = []
+    for term in terms:
+        location = _CATALOG.resolve_location(term)
+        if location is not None:
+            value = location.airport_iata or location.city_name
+            city_id = location.city_id
+            is_airport = location.airport_iata is not None
+        else:
+            ref = resolve_airport(term)
+            if ref is None:
+                continue
+            upper = term.upper()
+            is_airport = upper in ref.airport_ids
+            value = upper if is_airport else ref.city
+            city_id = f"international:{ref.code.lower()}"
+        resolved.append(
+            _LocationTerm(
+                text=term,
+                value=value,
+                city_id=city_id,
+                is_airport=is_airport,
+                is_ascii_code=(
+                    term.isascii()
+                    and term.isalpha()
+                    and len(term) in (3, 4)
+                ),
+            )
+        )
+    return tuple(
+        sorted(resolved, key=lambda item: (-len(item.text), item.text))
+    )
+
+
+_LOCATION_TERMS = _build_location_terms()
+
+
+def _build_location_matcher(
+    terms: tuple[_LocationTerm, ...],
+) -> tuple[dict[str, _LocationTerm], re.Pattern[str]]:
+    term_by_text: dict[str, _LocationTerm] = {}
+    alternatives: list[str] = []
+    for term in terms:
+        key = term.text.casefold()
+        if key in term_by_text:
+            continue
+        term_by_text[key] = term
+        alternatives.append(re.escape(term.text))
+    return term_by_text, re.compile("|".join(alternatives), re.IGNORECASE)
+
+
+_LOCATION_TERM_BY_TEXT, _LOCATION_MATCHER = _build_location_matcher(
+    _LOCATION_TERMS
+)
 
 
 def fill_slots(
@@ -69,8 +167,6 @@ def fill_slots(
     merged = merge_slot_bundle(base, extracted)
     if merged.intent is None and intent_match:
         merged = replace(merged, intent=intent_match.intent_name)
-    elif merged.intent is None and looks_like_flight_search(text, merged):
-        merged = replace(merged, intent="search_flight")
     return merged
 
 
@@ -88,8 +184,10 @@ def extract_slots(
     definitions = intent_definitions or DEFAULT_INTENTS
     intent_match = match_intent(normalized, definitions, current)
     intent_name = matched_intent or (intent_match.intent_name if intent_match else None)
-    cities = _extract_cities(normalized)
-    origin, destination = _infer_origin_destination(normalized, cities, current)
+    mentions = _extract_location_mentions(normalized)
+    origin, destination = _infer_origin_destination(
+        normalized, mentions, current
+    )
     depart_date = _extract_depart_date(normalized, today=today)
     budget = _extract_budget(normalized)
     target_price = _extract_target_price(normalized)
@@ -97,7 +195,11 @@ def extract_slots(
 
     return SlotBundle(
         intent=intent_name
-        or ("search_flight" if looks_like_flight_search(normalized, current) else None),
+        or (
+            "search_flight"
+            if _looks_like_flight_search(normalized, current, mentions)
+            else None
+        ),
         origin=origin,
         destination=destination,
         depart_date=depart_date,
@@ -205,15 +307,24 @@ def build_clarify_question(slots: SlotBundle | None, missing: list[str]) -> str:
 def looks_like_flight_search(text: str, slots: SlotBundle | None = None) -> bool:
     """Classify whether the current turn belongs to the flight-search intent."""
     normalized = _normalize_text(text)
+    mentions = _extract_location_mentions(normalized)
+    return _looks_like_flight_search(normalized, slots, mentions)
+
+
+def _looks_like_flight_search(
+    normalized: str,
+    slots: SlotBundle | None,
+    mentions: list[_LocationMention],
+) -> bool:
     if slots and slots.intent == "search_flight":
         return True
     if slots and slots.intent and slots.intent != "search_flight":
         return False
     if any(keyword in normalized for keyword in FLIGHT_KEYWORDS):
         return True
-    if len(_extract_cities(normalized)) >= 2:
+    if len(_select_endpoint_mentions(normalized, mentions)) >= 2:
         return True
-    if _extract_depart_date(normalized) and _extract_cities(normalized):
+    if _extract_depart_date(normalized) and mentions:
         return True
     return False
 
@@ -232,26 +343,136 @@ def _normalize_text(text: str) -> str:
     return (text or "").strip().replace("号", "日")
 
 
-def _location(city: str | None) -> LocationRef | None:
-    if not city:
+def resolve_location_ref(value: str | None) -> LocationRef | None:
+    if not value:
         return None
-    return LocationRef(city=city, iata_code=city_to_code(city))
+    location = _CATALOG.resolve_location(value)
+    if location is not None:
+        return LocationRef(
+            city=location.city_name,
+            iata_code=(
+                location.airport_iata or location.provider_code("ctrip")
+            ),
+        )
+    ref = resolve_airport(value)
+    if ref is None:
+        return None
+    airport_code = value.upper()
+    return LocationRef(
+        city=ref.city,
+        iata_code=(airport_code if airport_code in ref.airport_ids else ref.code),
+    )
+
+
+def _location(city: str | None) -> LocationRef | None:
+    return resolve_location_ref(city)
 
 
 def _extract_cities(text: str) -> list[str]:
-    positions: list[tuple[int, str]] = []
-    for city in CITY_TO_AIRPORT:
-        idx = text.find(city)
-        if idx >= 0:
-            positions.append((idx, city))
-    return [city for _, city in sorted(positions)]
+    return [mention.value for mention in _extract_location_mentions(text)]
+
+
+def _extract_location_mentions(text: str) -> list[_LocationMention]:
+    mentions: list[_LocationMention] = []
+    for match in _LOCATION_MATCHER.finditer(text):
+        term = _LOCATION_TERM_BY_TEXT[match.group(0).casefold()]
+        if term.is_ascii_code and not _has_ascii_code_boundaries(
+            text, match.start(), match.end()
+        ):
+            continue
+        if (
+            term.is_ascii_code
+            and not match.group(0).isupper()
+            and not _has_route_code_context(text, match.start(), match.end())
+        ):
+            continue
+        mentions.append(
+            _LocationMention(
+                start=match.start(),
+                end=match.end(),
+                value=term.value,
+                city_id=term.city_id,
+                is_airport=term.is_airport,
+            )
+        )
+    return mentions
+
+
+def _has_ascii_code_boundaries(text: str, start: int, end: int) -> bool:
+    left_is_alphanumeric = start > 0 and bool(
+        re.match(r"[A-Za-z0-9]", text[start - 1])
+    )
+    right_is_alphanumeric = end < len(text) and bool(
+        re.match(r"[A-Za-z0-9]", text[end])
+    )
+    return not left_is_alphanumeric and not right_is_alphanumeric
+
+
+def _has_route_code_context(text: str, start: int, end: int) -> bool:
+    return bool(
+        re.search(rf"{_ROUTE_SEPARATOR_PATTERN}\s*$", text[:start])
+        or re.match(rf"\s*{_ROUTE_SEPARATOR_PATTERN}", text[end:])
+        or re.search(r"(?:从|自|由)\s*$", text[:start])
+    )
+
+
+def _partition_endpoint_mentions(
+    text: str,
+    mentions: list[_LocationMention],
+) -> list[list[_LocationMention]]:
+    groups: list[list[_LocationMention]] = []
+    for mention in mentions:
+        if not groups:
+            groups.append([mention])
+            continue
+        previous = groups[-1][-1]
+        crossed_separator = bool(
+            _ROUTE_SEPARATOR.search(text[previous.end : mention.start])
+        )
+        if crossed_separator or previous.city_id != mention.city_id:
+            groups.append([mention])
+        else:
+            groups[-1].append(mention)
+    return groups
+
+
+def _select_endpoint_mention(
+    mentions: list[_LocationMention],
+) -> _LocationMention:
+    return next(
+        (mention for mention in mentions if mention.is_airport),
+        mentions[0],
+    )
+
+
+def _select_endpoint_mentions(
+    text: str,
+    mentions: list[_LocationMention],
+) -> list[_LocationMention]:
+    return [
+        _select_endpoint_mention(group)
+        for group in _partition_endpoint_mentions(text, mentions)
+    ]
+
+
+def extract_route_locations(
+    text: str, accumulated: SlotBundle | None = None
+) -> tuple[str | None, str | None]:
+    current = accumulated or SlotBundle()
+    mentions = _extract_location_mentions(text)
+    return _infer_origin_destination(text, mentions, current)
 
 
 def _infer_origin_destination(
-    text: str, cities: list[str], accumulated: SlotBundle
+    text: str,
+    mentions: list[_LocationMention],
+    accumulated: SlotBundle,
 ) -> tuple[str | None, str | None]:
-    origin = _extract_marked_city(text, ORIGIN_MARKERS)
-    destination = _extract_marked_city(text, DESTINATION_MARKERS)
+    groups = _partition_endpoint_mentions(text, mentions)
+    endpoints = [_select_endpoint_mention(group) for group in groups]
+    cities = [mention.value for mention in endpoints]
+    origin = _extract_marked_endpoint(text, ORIGIN_MARKERS, groups)
+    destination = _extract_marked_endpoint(text, DESTINATION_MARKERS, groups)
 
     if origin and destination and origin == destination and len(cities) > 1:
         destination = next((city for city in cities if city != origin), destination)
@@ -275,13 +496,15 @@ def _infer_origin_destination(
     return origin, destination
 
 
-def _extract_marked_city(text: str, markers: tuple[str, ...]) -> str | None:
-    city_alt = "|".join(map(re.escape, CITY_TO_AIRPORT.keys()))
-    for marker in markers:
-        pattern = rf"{re.escape(marker)}\s*({city_alt})"
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
+def _extract_marked_endpoint(
+    text: str,
+    markers: tuple[str, ...],
+    groups: list[list[_LocationMention]],
+) -> str | None:
+    for group in groups:
+        prefix = text[: group[0].start]
+        if any(re.search(rf"{re.escape(marker)}\s*$", prefix) for marker in markers):
+            return _select_endpoint_mention(group).value
     return None
 
 

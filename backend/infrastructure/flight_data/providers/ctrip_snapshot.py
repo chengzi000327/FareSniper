@@ -94,8 +94,12 @@ def ctrip_rows_to_offers(
                 airline=row.get("airline", ""),
                 origin_city=query.origin_city,
                 origin_code=query.origin_code,
+                origin_airport_code=row.get("origin_airport_code"),
                 destination_city=query.destination_city,
                 destination_code=query.destination_code,
+                destination_airport_code=row.get(
+                    "destination_airport_code"
+                ),
                 depart_date=query.depart_date,
                 depart_time=row.get("dep_time", ""),
                 arrive_time=row.get("arr_time", ""),
@@ -131,11 +135,16 @@ class CtripSnapshotProvider:
         return True
 
     async def search(self, query: FlightQuery) -> ProviderResult:
+        scope = {
+            "origin_code": query.origin_code,
+            "origin_airport_code": query.origin_airport_scope,
+            "destination_code": query.destination_code,
+            "destination_airport_code": query.destination_airport_scope,
+            "depart_date": query.depart_date,
+        }
         rows, age, stale = await read_provider_deals(
             provider="ctrip_snapshot",
-            origin_code=query.origin_code,
-            destination_code=query.destination_code,
-            depart_date=query.depart_date,
+            **scope,
         )
         if not rows:
             if age is not None and not stale:
@@ -146,9 +155,7 @@ class CtripSnapshotProvider:
                     cache_age_seconds=age,
                 )
             await enqueue_demand(
-                origin_code=query.origin_code,
-                destination_code=query.destination_code,
-                depart_date=query.depart_date,
+                **scope,
                 priority=50,
                 source="recent_search",
             )
@@ -175,9 +182,7 @@ class CtripSnapshotProvider:
         )
         if effective_stale:
             await enqueue_demand(
-                origin_code=query.origin_code,
-                destination_code=query.destination_code,
-                depart_date=query.depart_date,
+                **scope,
                 priority=50,
                 source="recent_search",
             )

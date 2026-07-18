@@ -11,6 +11,12 @@ logger = logging.getLogger("faresniper.graph.render_response")
 
 from backend.application.contracts.decision import FrontendResponse
 from backend.application.graph.state import WorkflowState
+from backend.application.services.grounded_response import (
+    ResponseFacts,
+    build_response_facts,
+    render_flight_markdown,
+    validate_optional_prose,
+)
 
 
 def _now() -> str:
@@ -104,8 +110,24 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             ):
                 deal["recommend_score"] = None
 
-    primary_currency = _primary_currency(deals)
-    prices = _extract_prices(search_result, deals, primary_currency)
+    response_facts: ResponseFacts | None = None
+    if deals:
+        response_facts = build_response_facts(deals, _response_budget(state, intent))
+        deals = response_facts.card_deals()
+
+    primary_currency = (
+        response_facts.currency if response_facts else _primary_currency(deals)
+    )
+    prices = (
+        [
+            row.display_price
+            for row in response_facts.rows
+            if row.currency == response_facts.currency
+            and row.display_price is not None
+        ]
+        if response_facts
+        else _extract_prices(search_result, deals, primary_currency)
+    )
     pref_reasons: list[str] = []
     if pref_result:
         if isinstance(pref_result, dict):
@@ -126,18 +148,35 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         else None
     )
 
-    analysis = {
-        "min_price": min(prices) if prices else None,
-        "max_price": max(prices) if prices else None,
-        "avg_price": int(sum(prices) / len(prices)) if prices else None,
-        "currency": primary_currency,
-        "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
-        "lower_than_avg": lower_than_avg,
-        "price_spread_pct": None,
-        "match_score": _match_score(pref_result, len(deals)),
-        "within_budget": bool(decision and "符合心理价位" in decision.signals),
-        "matched_preferences": list(set(pref_reasons)),
-    }
+    if response_facts is not None:
+        analysis = {
+            "min_price": min(prices) if prices else None,
+            "max_price": max(prices) if prices else None,
+            "avg_price": int(sum(prices) / len(prices)) if prices else None,
+            "currency": response_facts.currency,
+            "avg_90d": None,
+            "lower_than_avg": None,
+            "price_spread_pct": None,
+            "match_score": 0.0,
+            "within_budget": response_facts.within_budget,
+            "matched_preferences": [],
+            "budget": response_facts.budget,
+        }
+    else:
+        analysis = {
+            "min_price": min(prices) if prices else None,
+            "max_price": max(prices) if prices else None,
+            "avg_price": int(sum(prices) / len(prices)) if prices else None,
+            "currency": primary_currency,
+            "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
+            "lower_than_avg": lower_than_avg,
+            "price_spread_pct": None,
+            "match_score": _match_score(pref_result, len(deals)),
+            "within_budget": bool(
+                decision and "符合心理价位" in decision.signals
+            ),
+            "matched_preferences": list(set(pref_reasons)),
+        }
 
     query_summary = None
     if intent and not intent.parse_failed:
@@ -150,7 +189,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "destination_code": intent.destination.iata_code if intent.destination else "",
             "date_start": intent.date_window.start_date if intent.date_window else "",
             "date_end": intent.date_window.end_date if intent.date_window else "",
-            "budget": intent.budget_cny,
+            "budget": response_facts.budget if response_facts else intent.budget_cny,
         }
 
     empty_search_text = (
@@ -158,8 +197,20 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         if isinstance(search_result, dict) and not deals
         else None
     )
+    final_text = _last_ai_text(state)
     recommendation = {}
-    if empty_search_text is not None:
+    if response_facts is not None:
+        grounded_text = render_flight_markdown(response_facts)
+        optional_prose = validate_optional_prose(final_text, response_facts)
+        if optional_prose:
+            grounded_text = f"{grounded_text}\n\n{optional_prose}"
+        recommendation = {
+            "action": "watch",
+            "text": grounded_text,
+            "confidence": "medium",
+            "signals": [],
+        }
+    elif empty_search_text is not None:
         recommendation = {
             "action": "watch",
             "text": empty_search_text,
@@ -173,22 +224,6 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "confidence": decision.confidence,
             "signals": decision.signals,
         }
-    elif deals:
-        lowest_text = (
-            f"{primary_currency} {min(prices)}"
-            if prices and primary_currency
-            else str(min(prices)) if prices else ""
-        )
-        recommendation = {
-            "action": "watch",
-            "text": (
-                f"为你找到 {len(deals)} 个航班，最低价 {lowest_text}。"
-                if prices
-                else f"为你找到 {len(deals)} 个航班。"
-            ),
-            "confidence": "medium",
-            "signals": [],
-        }
     elif search_result:
         recommendation = {
             "action": "watch",
@@ -197,8 +232,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "signals": ["no_deals"],
         }
 
-    final_text = _last_ai_text(state)
-    if final_text and empty_search_text is None:
+    if final_text and response_facts is None and empty_search_text is None:
         if recommendation:
             recommendation["text"] = final_text
         else:
@@ -302,6 +336,22 @@ def _match_score(pref_result, deal_count: int) -> float:
     return round(
         len([p for p in pref_result.items if p.matched]) / max(deal_count, 1),
         2,
+    )
+
+
+def _response_budget(state, intent) -> int | None:
+    slots = state.get("accumulated_slots")
+    if isinstance(slots, dict):
+        budget = slots.get("budget")
+    else:
+        budget = getattr(slots, "budget", None)
+    if isinstance(budget, int) and not isinstance(budget, bool):
+        return budget
+    intent_budget = getattr(intent, "budget_cny", None)
+    return (
+        intent_budget
+        if isinstance(intent_budget, int) and not isinstance(intent_budget, bool)
+        else None
     )
 
 

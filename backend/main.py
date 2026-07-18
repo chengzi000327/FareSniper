@@ -14,6 +14,7 @@ from backend.__version__ import PRD_VERSION, PRODUCT_NAME, __version__
 from backend.api.admin_intents import router as admin_intents_router
 from backend.api.alerts import router as alerts_router
 from backend.api.auth import router as auth_router
+from backend.api.collector import router as collector_router
 from backend.api.memory import router as memory_router
 from backend.api.price_history import router as price_history_router
 from backend.api.push_subscriptions import router as push_subscriptions_router
@@ -192,6 +193,7 @@ def create_app() -> FastAPI:
     app.include_router(track_router, prefix=settings.api_prefix)
     app.include_router(flight_status_router, prefix=settings.api_prefix)
     app.include_router(admin_intents_router, prefix=settings.api_prefix)
+    app.include_router(collector_router)
 
     return app
 

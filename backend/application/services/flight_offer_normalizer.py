@@ -34,10 +34,14 @@ _STATUS_DATA_PROVIDERS = {
 }
 
 
-def _identity(offer: FlightOffer) -> tuple[str, str, str, str, str]:
+def _identity(
+    offer: FlightOffer,
+) -> tuple[str, str, str, str, str, str, str]:
     return (
         offer.origin_code,
+        offer.origin_airport_code or "",
         offer.destination_code,
+        offer.destination_airport_code or "",
         offer.depart_date,
         offer.flight_no,
         offer.depart_time,
@@ -103,20 +107,28 @@ def _offer_freshness(
     return "unknown"
 
 
-def _is_stale_ctrip_candidate(
+def _is_ctrip_candidate(
     offer: FlightOffer,
     provider_status: ProviderStatus,
     *,
     now: datetime,
 ) -> bool:
-    return (
+    if (
         offer.data_provider == "ctrip_snapshot"
-        and provider_status is ProviderStatus.stale
-        and offer.price_status is PriceStatus.stale
         and isinstance(offer.total_price, int)
         and offer.booking_url is not None
-        and _offer_freshness(offer, provider_status, now=now) == "stale"
-    )
+    ):
+        freshness = _offer_freshness(offer, provider_status, now=now)
+        return (
+            provider_status is ProviderStatus.success
+            and offer.price_status is PriceStatus.priced
+            and freshness == "fresh"
+        ) or (
+            provider_status is ProviderStatus.stale
+            and offer.price_status is PriceStatus.stale
+            and freshness == "stale"
+        )
+    return False
 
 
 def _is_ranked_offer(
@@ -130,7 +142,7 @@ def _is_ranked_offer(
         and _is_fresh_numeric(offer)
         and _offer_freshness(offer, provider_status, now=now) == "fresh"
     )
-    return is_fresh_realtime or _is_stale_ctrip_candidate(
+    return is_fresh_realtime or _is_ctrip_candidate(
         offer, provider_status, now=now
     )
 
@@ -346,8 +358,10 @@ def _new_card(offer: FlightOffer) -> dict[str, Any]:
         "platform": "",
         "origin_city": offer.origin_city,
         "origin_code": offer.origin_code,
+        "origin_airport_code": offer.origin_airport_code,
         "destination_city": offer.destination_city,
         "destination_code": offer.destination_code,
+        "destination_airport_code": offer.destination_airport_code,
         "depart_date": offer.depart_date,
         "depart_time": offer.depart_time,
         "arrive_time": offer.arrive_time,
@@ -385,9 +399,9 @@ def offers_to_deals(
         pass_now = pass_now.replace(tzinfo=timezone.utc)
     else:
         pass_now = pass_now.astimezone(timezone.utc)
-    cards: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
+    cards: dict[tuple[str, str, str, str, str, str, str], dict[str, Any]] = {}
     card_offers: dict[
-        tuple[str, str, str, str, str],
+        tuple[str, str, str, str, str, str, str],
         list[tuple[FlightOffer, ProviderStatus]],
     ] = {}
 

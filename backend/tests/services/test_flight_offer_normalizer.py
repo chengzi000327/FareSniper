@@ -284,6 +284,44 @@ def test_stale_ctrip_snapshot_can_win_and_drive_headline_and_booking():
     assert winner["price_status"] == "stale"
 
 
+def test_fresh_ctrip_snapshot_can_win_and_drive_headline_and_booking():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[_offer(provider="flyai", seller="飞猪", price=560)],
+        ),
+        "ctrip": ProviderResult(
+            provider="ctrip",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="ctrip_snapshot",
+                    seller="携程",
+                    price=500,
+                    realtime=False,
+                    booking_url="https://flights.ctrip.com/online/list/oneway-bjs-sha",
+                    expires_at="2099-08-01T01:00:00+00:00",
+                )
+            ],
+        ),
+    }
+
+    deal = offers_to_deals(
+        _query(),
+        results,
+        now=datetime(2099, 8, 1, 0, 0, tzinfo=timezone.utc),
+    )[0]
+
+    assert deal["platform"] == "携程"
+    assert deal["total_price"] == 500
+    assert deal["booking_url"].startswith("https://flights.ctrip.com/")
+    assert deal["data_freshness"] == "fresh"
+    winner = next(row for row in deal["prices"] if row["lowest"])
+    assert winner["data_provider"] == "ctrip_snapshot"
+    assert winner["price_status"] == "priced"
+
+
 def test_stale_serpapi_offer_cannot_beat_a_live_flyai_offer():
     results = {
         "flyai": ProviderResult(

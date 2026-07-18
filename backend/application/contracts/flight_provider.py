@@ -47,9 +47,11 @@ class FlightQuery(BaseModel):
     origin_city: str
     origin_code: str
     origin_airport_ids: list[str]
+    origin_airport_scope: str | None = None
     destination_city: str
     destination_code: str
     destination_airport_ids: list[str]
+    destination_airport_scope: str | None = None
     depart_date: str
     currency: str = "CNY"
     is_mainland_domestic: bool
@@ -67,8 +69,10 @@ class FlightOffer(BaseModel):
     airline: str = ""
     origin_city: str
     origin_code: str
+    origin_airport_code: str | None = None
     destination_city: str
     destination_code: str
+    destination_airport_code: str | None = None
     depart_date: str
     depart_time: str = ""
     arrive_time: str = ""

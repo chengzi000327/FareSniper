@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from datetime import date
 
+import backend.application.services.intent_slot_filler as slot_filler
+import backend.services.intent_parser as legacy_intent_parser
 from backend.application.contracts.intent import SlotBundle
 from backend.application.services.default_intents import DEFAULT_INTENTS
 from backend.application.services.intent_registry import match_intent
 from backend.application.services.intent_slot_filler import (
     build_clarify_question,
+    extract_route_locations,
     fill_slots,
     missing_required_slots,
     slots_to_intent,
 )
+from backend.services.intent_parser import IntentParser
 
 
 def test_extracts_complete_route_with_relative_date():
@@ -106,3 +110,153 @@ def test_same_intent_fresh_match_keeps_session():
     flight = SlotBundle(intent="search_flight")
     match = match_intent("帮我查北京到上海的机票", DEFAULT_INTENTS, flight)
     assert match.intent_name == "search_flight"
+
+
+def test_catalog_aliases_fill_non_hot_route():
+    slots = fill_slots(
+        "明天从阿勒泰飞臺北", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "阿勒泰"
+    assert slots.destination == "台北"
+    assert slots.depart_date == "2026-07-20"
+
+
+def test_explicit_airport_alias_survives_slot_filling():
+    slots = fill_slots(
+        "明天从北京大兴机场飞上海", today=date(2026, 7, 19)
+    )
+    intent = slots_to_intent(slots, "明天从北京大兴机场飞上海")
+
+    assert slots.origin == "PKX"
+    assert slots.destination == "上海"
+    assert intent.origin.city == "北京"
+    assert intent.origin.iata_code == "PKX"
+
+
+def test_legacy_intent_parser_uses_catalog_alias_and_airport_code():
+    parsed = IntentParser()._parse_heuristic(
+        "从北京大兴机场飞臺北"
+    )
+
+    assert parsed["origin"] == "北京"
+    assert parsed["origin_code"] == "PKX"
+    assert parsed["destination"] == "台北"
+    assert parsed["destination_code"] == "TPE"
+
+
+def test_ordinary_lowercase_english_is_not_guessed_as_airport_route():
+    origin, destination = extract_route_locations("she can help")
+
+    assert origin is None
+    assert destination is None
+
+
+def test_lowercase_codes_are_allowed_in_unambiguous_route_syntax():
+    slots = fill_slots(
+        "明天从pvg飞pek", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "PEK"
+
+
+def test_contiguous_airport_mention_wins_over_broader_city():
+    slots = fill_slots(
+        "明天从上海浦东机场飞北京", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "北京"
+
+
+def test_separated_airport_mention_wins_over_broader_city():
+    slots = fill_slots(
+        "明天从上海的浦东机场飞北京", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "北京"
+
+
+def test_same_city_marked_airports_preserve_both_constraints():
+    slots = fill_slots("从上海浦东机场到上海虹桥机场")
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "SHA"
+
+
+def test_same_city_delimited_airports_preserve_both_constraints():
+    slots = fill_slots("上海浦东机场-上海虹桥机场")
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "SHA"
+
+
+def test_lowercase_code_routes_support_slash_and_zhi_separators():
+    for text in ("pvg/pek", "pvg至pek"):
+        origin, destination = extract_route_locations(text)
+
+        assert origin == "PVG"
+        assert destination == "PEK"
+
+
+def test_slot_extraction_scans_location_terms_once(monkeypatch):
+    calls = 0
+    original = slot_filler._extract_location_mentions
+
+    def counted(text):
+        nonlocal calls
+        calls += 1
+        return original(text)
+
+    monkeypatch.setattr(slot_filler, "_extract_location_mentions", counted)
+
+    slots = fill_slots(
+        "明天从上海的浦东机场飞北京", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "PVG"
+    assert calls == 1
+
+
+def test_location_extraction_runs_one_precompiled_matcher_scan(monkeypatch):
+    calls = 0
+    original = slot_filler._LOCATION_MATCHER
+
+    class CountingMatcher:
+        def finditer(self, text):
+            nonlocal calls
+            calls += 1
+            return original.finditer(text)
+
+    monkeypatch.setattr(slot_filler, "_LOCATION_MATCHER", CountingMatcher())
+
+    slots = fill_slots(
+        "明天从上海的浦东机场飞北京", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "北京"
+    assert calls == 1
+
+
+def test_legacy_intent_parser_extracts_route_once(monkeypatch):
+    calls = 0
+    original = legacy_intent_parser.extract_route_locations
+
+    def counted(text):
+        nonlocal calls
+        calls += 1
+        return original(text)
+
+    monkeypatch.setattr(
+        legacy_intent_parser, "extract_route_locations", counted
+    )
+
+    parsed = legacy_intent_parser.IntentParser()._parse_heuristic(
+        "从上海的浦东机场飞北京"
+    )
+
+    assert parsed["origin_code"] == "PVG"
+    assert calls == 1

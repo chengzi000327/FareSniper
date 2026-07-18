@@ -48,10 +48,10 @@ async def test_plan_skills_are_valid(agent: IntentionAgent):
 
 
 async def test_intent_has_required_fields(agent: IntentionAgent):
-    """intent dict 必须含 origin / destination / date_start / date_end。"""
+    """intent dict 必须含当前搜索槽位使用的标准字段。"""
     msg = Msg(name="user", content="北京到东京下个月", role="user")
     result = await agent.reply(msg)
 
     intent = result.metadata["intent"]
-    for field in ("origin", "destination", "date_start", "date_end"):
+    for field in ("origin", "destination", "depart_date", "return_date"):
         assert field in intent, f"Missing field: {field}"

@@ -6,7 +6,10 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from backend.utils.airport_codes import CITY_TO_AIRPORT
+from backend.application.services.intent_slot_filler import (
+    extract_route_locations,
+    resolve_location_ref,
+)
 
 _HOLIDAY_MAP = {
     "五一": ("2026-05-01", "2026-05-05"),
@@ -86,15 +89,16 @@ class IntentParser:
             return {"_parse_failed": True}
 
     def _normalize(self, raw: dict[str, Any], original_text: str) -> dict[str, Any]:
-        origin = raw.get("origin")
-        destination = raw.get("destination")
+        origin_ref = resolve_location_ref(raw.get("origin"))
+        destination_ref = resolve_location_ref(raw.get("destination"))
+        origin = origin_ref.city if origin_ref else None
+        destination = destination_ref.city if destination_ref else None
         date_range = raw.get("date_range") or {}
         date_start = date_range.get("start") if isinstance(date_range, dict) else None
         date_end = date_range.get("end") if isinstance(date_range, dict) else None
 
-        # 将城市名转为 IATA code
-        origin_code = CITY_TO_AIRPORT.get(origin) if origin else None
-        dest_code = CITY_TO_AIRPORT.get(destination) if destination else None
+        origin_code = origin_ref.iata_code if origin_ref else None
+        dest_code = destination_ref.iata_code if destination_ref else None
 
         return {
             "origin": origin,
@@ -111,8 +115,9 @@ class IntentParser:
         }
 
     def _parse_heuristic(self, text: str) -> dict[str, Any]:
-        origin, origin_code = _extract_city(text, is_origin=True)
-        destination, dest_code = _extract_city(text, is_origin=False)
+        origin_value, destination_value = extract_route_locations(text)
+        origin, origin_code = _resolved_location(origin_value)
+        destination, dest_code = _resolved_location(destination_value)
         date_start, date_end = _extract_dates(text)
         budget = _extract_budget(text)
         constraints = _extract_constraints(text)
@@ -166,26 +171,11 @@ def _today() -> date:
     return datetime.now(tz=timezone.utc).date()
 
 
-def _extract_city(text: str, is_origin: bool) -> tuple[str | None, str | None]:
-    if is_origin:
-        patterns = [r"从([一-龥]{2,4})出发", r"从([一-龥]{2,4})飞", r"([一-龥]{2,4})出发"]
-    else:
-        patterns = [r"去([一-龥]{2,4})", r"到([一-龥]{2,4})", r"飞([一-龥]{2,4})"]
-
-    for pat in patterns:
-        m = re.search(pat, text)
-        if m:
-            city = m.group(1)
-            code = CITY_TO_AIRPORT.get(city)
-            if code:
-                return city, code
-
-    # 直接匹配城市名
-    for city, code in CITY_TO_AIRPORT.items():
-        if city in text:
-            return city, code
-
-    return None, None
+def _resolved_location(value: str | None) -> tuple[str | None, str | None]:
+    location = resolve_location_ref(value)
+    if location is None:
+        return None, None
+    return location.city, location.iata_code
 
 
 def _extract_dates(text: str) -> tuple[str | None, str | None]:

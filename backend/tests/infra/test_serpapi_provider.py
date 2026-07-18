@@ -75,6 +75,16 @@ def test_mainland_route_is_not_supported():
     ) is False
 
 
+def test_exact_international_airports_are_sent_as_single_ids():
+    provider = SerpApiProvider(api_key="secret")
+    query = build_flight_query("HND", "JFK", "2099-08-01")
+
+    params = provider._search_params(query)
+
+    assert params["departure_id"] == "HND"
+    assert params["arrival_id"] == "JFK"
+
+
 @pytest.mark.asyncio
 async def test_search_uses_google_flights_request_parameters():
     requests = []

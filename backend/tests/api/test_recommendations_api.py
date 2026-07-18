@@ -10,6 +10,14 @@ from httpx import AsyncClient
 from backend.infrastructure.db.flight_snapshot_repo import upsert_flights
 
 
+@pytest.fixture(autouse=True)
+def use_in_process_recommendation_cache(monkeypatch, fake_redis):
+    monkeypatch.setattr(
+        "backend.application.services.recommendation_service._redis",
+        lambda: fake_redis,
+    )
+
+
 @pytest.mark.asyncio
 async def test_cold_start_returns_hot_cards(
     seeded_pg, fake_redis, client: AsyncClient, valid_jwt_for_anon_new
