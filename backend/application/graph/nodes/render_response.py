@@ -148,22 +148,35 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         else None
     )
 
-    analysis = {
-        "min_price": min(prices) if prices else None,
-        "max_price": max(prices) if prices else None,
-        "avg_price": int(sum(prices) / len(prices)) if prices else None,
-        "currency": primary_currency,
-        "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
-        "lower_than_avg": lower_than_avg,
-        "price_spread_pct": None,
-        "match_score": _match_score(pref_result, len(deals)),
-        "within_budget": (
-            response_facts.within_budget is True
-            if response_facts
-            else bool(decision and "符合心理价位" in decision.signals)
-        ),
-        "matched_preferences": list(set(pref_reasons)),
-    }
+    if response_facts is not None:
+        analysis = {
+            "min_price": min(prices) if prices else None,
+            "max_price": max(prices) if prices else None,
+            "avg_price": int(sum(prices) / len(prices)) if prices else None,
+            "currency": response_facts.currency,
+            "avg_90d": None,
+            "lower_than_avg": None,
+            "price_spread_pct": None,
+            "match_score": 0.0,
+            "within_budget": response_facts.within_budget,
+            "matched_preferences": [],
+            "budget": response_facts.budget,
+        }
+    else:
+        analysis = {
+            "min_price": min(prices) if prices else None,
+            "max_price": max(prices) if prices else None,
+            "avg_price": int(sum(prices) / len(prices)) if prices else None,
+            "currency": primary_currency,
+            "avg_90d": int(sum(avg_90d_vals) / len(avg_90d_vals)) if avg_90d_vals else None,
+            "lower_than_avg": lower_than_avg,
+            "price_spread_pct": None,
+            "match_score": _match_score(pref_result, len(deals)),
+            "within_budget": bool(
+                decision and "符合心理价位" in decision.signals
+            ),
+            "matched_preferences": list(set(pref_reasons)),
+        }
 
     query_summary = None
     if intent and not intent.parse_failed:
@@ -176,7 +189,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "destination_code": intent.destination.iata_code if intent.destination else "",
             "date_start": intent.date_window.start_date if intent.date_window else "",
             "date_end": intent.date_window.end_date if intent.date_window else "",
-            "budget": intent.budget_cny,
+            "budget": response_facts.budget if response_facts else intent.budget_cny,
         }
 
     empty_search_text = (
@@ -192,10 +205,10 @@ async def render_response(state: WorkflowState) -> WorkflowState:
         if optional_prose:
             grounded_text = f"{grounded_text}\n\n{optional_prose}"
         recommendation = {
-            "action": decision.action.value if decision else "watch",
+            "action": "watch",
             "text": grounded_text,
-            "confidence": decision.confidence if decision else "medium",
-            "signals": decision.signals if decision else [],
+            "confidence": "medium",
+            "signals": [],
         }
     elif empty_search_text is not None:
         recommendation = {

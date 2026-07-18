@@ -3,27 +3,11 @@
 from __future__ import annotations
 
 import copy
-import re
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 
-_CURRENCY_AMOUNT_RE = re.compile(
-    r"(?:[¥￥$€£]\s*\d|\b[A-Z]{3}\s*\d|\d(?:[\d,.]*\d)?\s*(?:元|人民币))",
-    re.IGNORECASE,
-)
-_PRICE_OR_BUDGET_CLAIM_RE = re.compile(
-    r"(?:价格|票价|低价|均价|折扣|便宜|预算|税费|行李费)"
-)
-_FLIGHT_NUMBER_RE = re.compile(
-    r"(?<![A-Z0-9])(?:[A-Z0-9]{2})\s?\d{3,4}(?![A-Z0-9])",
-    re.IGNORECASE,
-)
-_TIME_RE = re.compile(
-    r"(?<!\d)(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}月\d{1,2}日|"
-    r"(?:[01]?\d|2[0-3]):[0-5]\d|(?:[01]?\d|2[0-3])点(?:[0-5]?\d分)?)(?!\d)"
-)
 _INELIGIBLE_PROVIDER_STATUSES = {
     "disabled",
     "empty",
@@ -79,14 +63,14 @@ def _primary_currency(deals: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _display_price(deal: Mapping[str, Any], currency: str) -> int | None:
+    eligible: list[int] = []
     deal_currency = _currency(deal.get("currency")) or currency
     if deal_currency == currency:
         for key in ("display_price", "price", "total_price", "lowest_price"):
             price = _numeric_price(deal.get(key))
             if price is not None:
-                return price
+                eligible.append(price)
 
-    nested: list[int] = []
     for item in deal.get("prices") or ():
         if not isinstance(item, Mapping):
             continue
@@ -96,8 +80,8 @@ def _display_price(deal: Mapping[str, Any], currency: str) -> int | None:
             continue
         price = _numeric_price(item.get("price"))
         if price is not None:
-            nested.append(price)
-    return min(nested) if nested else None
+            eligible.append(price)
+    return min(eligible) if eligible else None
 
 
 def _has_stale_price(deal: Mapping[str, Any]) -> bool:
@@ -255,19 +239,6 @@ def render_flight_markdown(facts: ResponseFacts) -> str:
 
 
 def validate_optional_prose(text: str | None, facts: ResponseFacts) -> str | None:
-    """Accept optional prose only when it contains no mutable fare facts."""
-    del facts  # The policy rejects factual tokens even when they happen to match.
-    if not isinstance(text, str) or not text.strip():
-        return None
-    candidate = text.strip()
-    if any(
-        pattern.search(candidate)
-        for pattern in (
-            _CURRENCY_AMOUNT_RE,
-            _PRICE_OR_BUDGET_CLAIM_RE,
-            _FLIGHT_NUMBER_RE,
-            _TIME_RE,
-        )
-    ):
-        return None
-    return candidate
+    """Conservatively reject model prose when final deals are available."""
+    del text, facts
+    return None

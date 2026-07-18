@@ -77,6 +77,50 @@ def test_markdown_preserves_first_deal_and_uses_stale_display_price():
     assert "可设置 ¥500 价格提醒" in markdown
 
 
+def test_display_price_compares_fresh_top_level_fields_with_stale_ctrip_row():
+    deal = _deal(
+        "JD5121",
+        700,
+        freshness="fresh",
+        prices=[
+            {
+                "id": "ctrip-JD5121-20260720",
+                "name": "携程",
+                "price": 620,
+                "currency": "CNY",
+                "lowest": False,
+                "price_status": "stale",
+                "provider_status": "stale",
+                "data_provider": "ctrip",
+                "data_freshness": "stale",
+            },
+            {
+                "id": "disabled-JD5121-20260720",
+                "name": "不可用平台",
+                "price": 100,
+                "currency": "CNY",
+                "provider_status": "disabled",
+            },
+        ],
+    )
+    deal.update(
+        {
+            "display_price": 740,
+            "lowest_price": 680,
+            "total_price": 710,
+            "winning_price_id": "fresh-JD5121-20260720",
+        }
+    )
+
+    facts = build_response_facts([deal], budget=650)
+
+    assert facts.rows[0].display_price == 620
+    assert facts.minimum_display_price == 620
+    assert facts.within_budget is True
+    assert facts.has_stale_prices is True
+    assert "平台展示价最低：¥620" in render_flight_markdown(facts)
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -87,6 +131,12 @@ def test_markdown_preserves_first_deal_and_uses_stale_display_price():
         "建议购买 JD5121",
         "建议选择 08:00 出发",
         "建议选择 2026-07-20 出发",
+        "JD-5121 明早起飞，含税且有免费托运行李",
+        "符合你的心理价位",
+        "明天起飞，不是后天",
+        "票价不含税",
+        "可以免费托运行李",
+        "预算充足，但这不是最低价",
     ],
 )
 def test_optional_prose_rejects_factual_fare_tokens(text: str):
@@ -95,9 +145,7 @@ def test_optional_prose_rejects_factual_fare_tokens(text: str):
     assert validate_optional_prose(text, facts) is None
 
 
-def test_optional_prose_accepts_non_factual_chitchat():
+def test_optional_prose_conservatively_rejects_even_non_factual_text():
     facts = build_response_facts([_deal("JD5121", 650)], budget=None)
 
-    assert validate_optional_prose("希望这些结果能帮你做决定。", facts) == (
-        "希望这些结果能帮你做决定。"
-    )
+    assert validate_optional_prose("希望这些结果能帮你做决定。", facts) is None
