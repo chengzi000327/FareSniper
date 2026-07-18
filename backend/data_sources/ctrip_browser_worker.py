@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from backend.application.contracts.collector import CollectorErrorCode
+
+
+_FM_PATH = str(
+    Path(__file__).resolve().parents[1] / "third_party" / "flights_monitor"
+)
+if _FM_PATH not in sys.path:
+    sys.path.insert(0, _FM_PATH)
 
 
 class CtripWorkerError(RuntimeError):

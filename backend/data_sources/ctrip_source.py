@@ -6,7 +6,6 @@ import json
 import os
 import signal
 import sys
-from pathlib import Path
 from typing import Any
 
 from backend.application.contracts.collector import (
@@ -24,12 +23,6 @@ from backend.infrastructure.flight_data.ctrip_parser import (
     parse_batch_search,
 )
 
-
-_FM_PATH = str(
-    Path(__file__).resolve().parents[1] / "third_party" / "flights_monitor"
-)
-if _FM_PATH not in sys.path:
-    sys.path.insert(0, _FM_PATH)
 
 _WORKER_ENV_ALLOWLIST = (
     "PATH",
@@ -96,8 +89,6 @@ class CtripSource(DataSource):
         result = await self.search_with_status(
             origin, destination, date_start, date_end
         )
-        if result.error_code is not None:
-            raise CtripCollectionError(result.error_code)
         return result.offers
 
     async def get_history_prices(self, route: str, days: int) -> list[dict[str, object]]:

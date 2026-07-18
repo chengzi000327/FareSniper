@@ -189,7 +189,11 @@ class CtripFlightClient:
             responses = json.loads(raw)
         except CtripBrowserError:
             raise
-        except (WebDriverException, json.JSONDecodeError, TypeError):
+        except TimeoutException:
+            raise CtripBrowserError(self._page_state_error() or "timeout") from None
+        except WebDriverException:
+            raise CtripBrowserError("dependency_error") from None
+        except (json.JSONDecodeError, TypeError):
             raise CtripBrowserError("parse_error") from None
 
         if not isinstance(responses, list):
