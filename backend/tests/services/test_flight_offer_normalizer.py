@@ -249,6 +249,71 @@ def test_price_rows_keep_currency_and_separate_provider_from_price_status():
     assert "status" not in deal["prices"][0]
 
 
+def test_stale_ctrip_snapshot_can_win_and_drive_headline_and_booking():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[_offer(provider="flyai", seller="飞猪", price=560)],
+        ),
+        "ctrip": ProviderResult(
+            provider="ctrip",
+            status=ProviderStatus.stale,
+            offers=[
+                _offer(
+                    provider="ctrip_snapshot",
+                    seller="携程",
+                    price=500,
+                    status=PriceStatus.stale,
+                    realtime=False,
+                    booking_url="https://ctrip.example.test/book",
+                    expires_at="2000-01-01T00:00:00+00:00",
+                )
+            ],
+        ),
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+
+    assert deal["platform"] == "携程"
+    assert deal["total_price"] == 500
+    assert deal["booking_url"] == "https://ctrip.example.test/book"
+    assert deal["data_freshness"] == "stale"
+    winner = next(row for row in deal["prices"] if row["lowest"])
+    assert winner["data_provider"] == "ctrip_snapshot"
+    assert winner["price_status"] == "stale"
+
+
+def test_stale_serpapi_offer_cannot_beat_a_live_flyai_offer():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[_offer(provider="flyai", seller="飞猪", price=560)],
+        ),
+        "serpapi": ProviderResult(
+            provider="serpapi",
+            status=ProviderStatus.stale,
+            offers=[
+                _offer(
+                    provider="serpapi_google_flights",
+                    seller="Google Flights",
+                    price=500,
+                    status=PriceStatus.stale,
+                    booking_url="https://serpapi.example.test/book",
+                )
+            ],
+        ),
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+
+    assert deal["platform"] == "飞猪"
+    assert deal["total_price"] == 560
+    winner = next(row for row in deal["prices"] if row["lowest"])
+    assert winner["data_provider"] == "flyai"
+
+
 @pytest.mark.parametrize(
     ("expires_at", "expected_freshness", "has_winner"),
     [

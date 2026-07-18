@@ -103,16 +103,35 @@ def _offer_freshness(
     return "unknown"
 
 
-def _is_ranked_offer(
+def _is_stale_ctrip_candidate(
     offer: FlightOffer,
     provider_status: ProviderStatus,
     *,
     now: datetime,
 ) -> bool:
     return (
+        offer.data_provider == "ctrip_snapshot"
+        and provider_status is ProviderStatus.stale
+        and offer.price_status is PriceStatus.stale
+        and isinstance(offer.total_price, int)
+        and offer.booking_url is not None
+        and _offer_freshness(offer, provider_status, now=now) == "stale"
+    )
+
+
+def _is_ranked_offer(
+    offer: FlightOffer,
+    provider_status: ProviderStatus,
+    *,
+    now: datetime,
+) -> bool:
+    is_fresh_realtime = (
         offer.is_realtime
         and _is_fresh_numeric(offer)
         and _offer_freshness(offer, provider_status, now=now) == "fresh"
+    )
+    return is_fresh_realtime or _is_stale_ctrip_candidate(
+        offer, provider_status, now=now
     )
 
 

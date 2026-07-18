@@ -108,6 +108,88 @@ def test_deal_card_rejects_a_winner_that_disagrees_with_the_headline():
         DealCardDto.model_validate(payload)
 
 
+def test_deal_card_accepts_stale_ctrip_winner_with_matching_link():
+    from backend.schemas.common import DealCardDto
+
+    row = {
+        **_deal_payload()["prices"][0],
+        "id": "ctrip-stale-cny",
+        "name": "携程",
+        "price": 500,
+        "lowest": True,
+        "price_status": "stale",
+        "provider_status": "stale",
+        "url": "https://ctrip.example.test/book",
+        "data_provider": "ctrip_snapshot",
+        "data_freshness": "stale",
+        "expires_at": "2000-01-01T00:00:00+00:00",
+    }
+    dto = DealCardDto.model_validate(
+        _deal_payload(
+            platform="携程",
+            price=500,
+            lowest_price=500,
+            total_price=500,
+            winning_price_id="ctrip-stale-cny",
+            data_freshness="stale",
+            prices=[row],
+            booking_url="https://ctrip.example.test/book",
+            h5_fallback_url="https://ctrip.example.test/book",
+            inventory_expires_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    assert dto.winning_price_id == "ctrip-stale-cny"
+
+
+@pytest.mark.parametrize(
+    ("row_overrides", "card_overrides"),
+    [
+        ({"data_provider": "serpapi_google_flights"}, {}),
+        ({"url": None}, {"booking_url": None, "h5_fallback_url": None}),
+        ({"provider_status": "success"}, {}),
+    ],
+)
+def test_deal_card_rejects_stale_winner_outside_ctrip_contract(
+    row_overrides,
+    card_overrides,
+):
+    from backend.schemas.common import DealCardDto
+
+    row = {
+        **_deal_payload()["prices"][0],
+        "id": "ctrip-stale-cny",
+        "name": "携程",
+        "price": 500,
+        "lowest": True,
+        "price_status": "stale",
+        "provider_status": "stale",
+        "url": "https://ctrip.example.test/book",
+        "data_provider": "ctrip_snapshot",
+        "data_freshness": "stale",
+        "expires_at": "2000-01-01T00:00:00+00:00",
+        **row_overrides,
+    }
+
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(
+            {
+                **_deal_payload(
+                    platform="携程",
+                    price=500,
+                    lowest_price=500,
+                    total_price=500,
+                    winning_price_id="ctrip-stale-cny",
+                    data_freshness="stale",
+                    prices=[row],
+                    booking_url="https://ctrip.example.test/book",
+                    h5_fallback_url="https://ctrip.example.test/book",
+                    inventory_expires_at="2000-01-01T00:00:00+00:00",
+                ),
+                **card_overrides,
+            }
+        )
+
+
 @pytest.mark.parametrize("nonwinner_lowest", [True, None])
 def test_deal_card_requires_every_nonwinner_to_have_lowest_false(
     nonwinner_lowest,
