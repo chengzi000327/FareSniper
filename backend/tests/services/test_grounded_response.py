@@ -121,6 +121,52 @@ def test_display_price_compares_fresh_top_level_fields_with_stale_ctrip_row():
     assert "平台展示价最低：¥620" in render_flight_markdown(facts)
 
 
+def test_nested_price_keeps_selected_amount_and_currency_atomic():
+    deals = [
+        _deal("JD5121", 700, depart_time="08:00", arrive_time="10:00"),
+        {
+            "flight_no": "JD5577",
+            "depart_time": "11:00",
+            "arrive_time": "13:20",
+            "price": 80,
+            "lowest_price": 80,
+            "total_price": 80,
+            "currency": "USD",
+            "data_freshness": "fresh",
+            "prices": [
+                {
+                    "id": "ctrip-JD5577-20260720",
+                    "name": "携程",
+                    "price": 620,
+                    "currency": "CNY",
+                    "price_status": "stale",
+                    "provider_status": "stale",
+                    "data_provider": "ctrip",
+                    "data_freshness": "stale",
+                }
+            ],
+        },
+    ]
+
+    facts = build_response_facts(deals, budget=650)
+    cards = facts.card_deals()
+    markdown = render_flight_markdown(facts)
+
+    assert facts.currency == "CNY"
+    assert (facts.rows[1].display_price, facts.rows[1].currency) == (620, "CNY")
+    assert facts.minimum_display_price == 620
+    assert facts.within_budget is True
+    assert "| JD5577 | 11:00 | 13:20 | ¥620 |" in markdown
+    assert "USD 620" not in markdown
+    assert "平台展示价最低：¥620" in markdown
+    assert "当前最低平台展示价在预算 ¥650 内" in markdown
+    assert "价格可能已更新，以预订页为准" in markdown
+    assert cards == deals
+    assert [row.flight_no for row in facts.rows] == [
+        card["flight_no"] for card in cards
+    ]
+
+
 @pytest.mark.parametrize(
     "text",
     [

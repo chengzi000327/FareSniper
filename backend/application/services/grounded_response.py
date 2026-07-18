@@ -62,26 +62,33 @@ def _primary_currency(deals: Sequence[Mapping[str, Any]]) -> str:
     return "CNY"
 
 
-def _display_price(deal: Mapping[str, Any], currency: str) -> int | None:
-    eligible: list[int] = []
+def _display_price(
+    deal: Mapping[str, Any], currency: str
+) -> tuple[int | None, str]:
+    eligible: list[tuple[int, str]] = []
     deal_currency = _currency(deal.get("currency")) or currency
     if deal_currency == currency:
         for key in ("display_price", "price", "total_price", "lowest_price"):
             price = _numeric_price(deal.get(key))
             if price is not None:
-                eligible.append(price)
+                eligible.append((price, deal_currency))
 
     for item in deal.get("prices") or ():
         if not isinstance(item, Mapping):
             continue
         if item.get("provider_status") in _INELIGIBLE_PROVIDER_STATUSES:
             continue
-        if (_currency(item.get("currency")) or currency) != currency:
+        item_currency = _currency(item.get("currency")) or currency
+        if item_currency != currency:
             continue
         price = _numeric_price(item.get("price"))
         if price is not None:
-            eligible.append(price)
-    return min(eligible) if eligible else None
+            eligible.append((price, item_currency))
+    return (
+        min(eligible, key=lambda item: item[0])
+        if eligible
+        else (None, deal_currency)
+    )
 
 
 def _has_stale_price(deal: Mapping[str, Any]) -> bool:
@@ -141,18 +148,21 @@ def build_response_facts(
 
     snapshot = [copy.deepcopy(dict(deal)) for deal in deals[:limit]]
     currency = _primary_currency(snapshot)
-    rows = tuple(
-        ResponseRow(
-            flight_no=str(deal.get("flight_no") or "待确认"),
-            depart_time=str(deal.get("depart_time") or "待确认"),
-            arrive_time=str(deal.get("arrive_time") or "待确认"),
-            display_price=_display_price(deal, currency),
-            currency=_currency(deal.get("currency")) or currency,
-            is_stale=_has_stale_price(deal),
-            card=_freeze(deal),
+    response_rows: list[ResponseRow] = []
+    for deal in snapshot:
+        display_price, display_currency = _display_price(deal, currency)
+        response_rows.append(
+            ResponseRow(
+                flight_no=str(deal.get("flight_no") or "待确认"),
+                depart_time=str(deal.get("depart_time") or "待确认"),
+                arrive_time=str(deal.get("arrive_time") or "待确认"),
+                display_price=display_price,
+                currency=display_currency,
+                is_stale=_has_stale_price(deal),
+                card=_freeze(deal),
+            )
         )
-        for deal in snapshot
-    )
+    rows = tuple(response_rows)
     eligible_prices = [
         row.display_price
         for row in rows
