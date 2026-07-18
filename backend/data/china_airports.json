@@ -39,24 +39,78 @@
       },
       "reviewed_overrides": {
         "path": "backend/data/china_airport_overrides.json",
-        "sha256": "4eeec01308fad42fb1d4dc493cf09559569756bc1958e7d122ab540f4144fddf"
+        "sha256": "de2198800c096230ad3a0b800a9a225b9a3c695079973dcabeb7091497b19dad"
       }
     },
     "mainland_transport_airports": 270,
     "mainland_bookable_airports": 270,
     "regional_airports": {
+      "mainland": 270,
       "hong_kong": 1,
       "macau": 1,
-      "mainland": 270,
       "taiwan": 16
     },
     "regional_cities": {
+      "mainland": 256,
       "hong_kong": 1,
       "macau": 1,
-      "mainland": 256,
       "taiwan": 14
     },
-    "excluded_airports": {}
+    "excluded_airports": {},
+    "regional_reconciliation": {
+      "source_candidate_airports": {
+        "hong_kong": 1,
+        "macau": 1,
+        "taiwan": 19
+      },
+      "included_airports": {
+        "hong_kong": 1,
+        "macau": 1,
+        "taiwan": 16
+      },
+      "excluded_airports": {
+        "DSX": {
+          "category": "military_only",
+          "name": "Dongsha Island (Pratas Island) Airport",
+          "reason": "Dongsha is a restricted defense facility without public commercial passenger booking.",
+          "region_group": "taiwan",
+          "review_evidence": {
+            "source_title": "Taipei FIR AIP ENR 5.1 Restricted Areas",
+            "source_url": "https://ais.caa.gov.tw/eaip/AIP%20AMDT%2001-23_2023_01_12/eAIP/RC-ENR%205.1-en-GB.html",
+            "observation_date": "2026-07-18",
+            "rationale": "The official AIP describes Dongsha as continuously restricted and requiring prior authorization, so it is not a public commercial passenger airport."
+          }
+        },
+        "HCN": {
+          "category": "no_current_commercial_passenger_service",
+          "name": "Hengchun Airport",
+          "reason": "Hengchun has no currently bookable scheduled commercial passenger service.",
+          "region_group": "taiwan",
+          "review_evidence": {
+            "source_title": "Taiwan CAA airport organization and current operations review",
+            "source_url": "https://www.caa.gov.tw/Article.aspx?a=532&lang=1",
+            "observation_date": "2026-07-18",
+            "rationale": "The airport remains operational under Kaohsiung management, but the current route review found no public scheduled passenger inventory; it must not be emitted as bookable."
+          }
+        },
+        "HSZ": {
+          "category": "military_only",
+          "name": "Hsinchu Air Base",
+          "reason": "Hsinchu Air Base is not a public commercial passenger airport.",
+          "region_group": "taiwan",
+          "review_evidence": {
+            "source_title": "Taiwan CAA airport distribution and operating-data review",
+            "source_url": "https://www.caa.gov.tw/Article.aspx?a=982&lang=1",
+            "observation_date": "2026-07-18",
+            "rationale": "The official civil-airport operating data does not list Hsinchu Air Base as a public passenger airport; the OurAirports row is military-only for catalog purposes."
+          }
+        }
+      },
+      "excluded_airports_by_category": {
+        "military_only": 2,
+        "no_current_commercial_passenger_service": 1
+      }
+    }
   },
   "cities": [
     {

@@ -10,6 +10,7 @@ from typing import Any, Mapping
 
 
 _WHITESPACE = re.compile(r"\s+")
+_AIRPORT_CODE = re.compile(r"[A-Za-z]{3,4}")
 
 
 def _normalize(value: str) -> str:
@@ -18,6 +19,11 @@ def _normalize(value: str) -> str:
         if normalized.endswith(suffix):
             normalized = normalized[: -len(suffix)]
     return normalized
+
+
+def _is_explicit_airport_query(value: str) -> bool:
+    compact = _WHITESPACE.sub("", value).strip()
+    return compact.endswith("机场") or _AIRPORT_CODE.fullmatch(compact) is not None
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,7 @@ class CatalogMetadata:
     regional_airports: Mapping[str, int]
     regional_cities: Mapping[str, int]
     excluded_airports: Mapping[str, tuple[str, ...]]
+    regional_reconciliation: Mapping[str, Any]
     sources: Mapping[str, Any]
 
 
@@ -89,6 +96,9 @@ class AirportCatalog:
                     for reason, names in metadata["excluded_airports"].items()
                 }
             ),
+            regional_reconciliation=MappingProxyType(
+                dict(metadata["regional_reconciliation"])
+            ),
             sources=MappingProxyType(dict(metadata["sources"])),
         )
         self.cities = tuple(self._parse_city(city) for city in payload["cities"])
@@ -112,6 +122,11 @@ class AirportCatalog:
                             (city, airport),
                             "airport alias",
                         )
+        for key in self._city_index.keys() & self._airport_index.keys():
+            city = self._city_index[key]
+            airport_city, _ = self._airport_index[key]
+            if city.city_id != airport_city.city_id:
+                raise ValueError(f"cross-index ambiguity across cities: {key}")
 
     @staticmethod
     def _add_unique(
@@ -167,11 +182,11 @@ class AirportCatalog:
 
     def resolve_location(self, text: str) -> ResolvedLocation | None:
         key = _normalize(text)
-        airport_match = self._airport_index.get(key)
-        if airport_match:
-            city, airport = airport_match
-            return self._resolved(city, airport)
         city = self._city_index.get(key)
+        airport_match = self._airport_index.get(key)
+        if airport_match and (_is_explicit_airport_query(text) or city is None):
+            airport_city, airport = airport_match
+            return self._resolved(airport_city, airport)
         return self._resolved(city) if city else None
 
     def city_to_provider_code(self, city_id: str, provider: str) -> str:

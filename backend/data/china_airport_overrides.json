@@ -4780,8 +4780,14 @@
       "iata": "ZAT",
       "aliases": [],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "图木舒克/唐王城": {
       "city_id": "tumushuke",
@@ -5259,8 +5265,14 @@
         "褡裢机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "丽水": {
       "city_id": "lishui",
@@ -5268,8 +5280,14 @@
       "iata": "LIJ",
       "aliases": [],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "鞍山/腾鳌": {
       "city_id": "anshan",
@@ -5513,8 +5531,14 @@
         "大河机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "六盘水/月照": {
       "city_id": "liupanshui",
@@ -5535,10 +5559,17 @@
       "timezone": "Asia/Shanghai",
       "icao": "ZJYX",
       "source_record_override": {
-        "latitude_deg": "16.8328",
-        "longitude_deg": "112.344002"
-      },
-      "source_record_basis": "CAAC transport-airport directory; IATA XYI and ICAO ZJYX reviewed manually"
+        "record": {
+          "latitude_deg": "16.8328",
+          "longitude_deg": "112.344002"
+        },
+        "review_evidence": {
+          "source_title": "中国民用航空局运输机场目录 and OurAirports XP-0003 source-row review",
+          "source_url": "https://www.caac.gov.cn/GYMH/MHGK/MYJC/",
+          "observation_date": "2026-07-18",
+          "rationale": "The CAAC directory identifies Sansha Yongxing as a transport airport; the reviewed XP-0003 source row supplies coordinates while the CAAC-reviewed XYI/ZJYX codes supply the missing identifiers."
+        }
+      }
     },
     "甘孜/格萨尔": {
       "city_id": "ganzi",
@@ -5564,8 +5595,14 @@
         "东宁机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "新源/那拉提": {
       "city_id": "xinyuan",
@@ -5602,8 +5639,14 @@
         "瑞金机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "布尔津/喀纳斯": {
       "city_id": "buerjin",
@@ -5620,8 +5663,14 @@
       "iata": "BZJ",
       "aliases": [],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "九寨/黄龙": {
       "city_id": "jiuzhai",
@@ -5649,8 +5698,14 @@
         "红原机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "百色/巴马": {
       "city_id": "baise",
@@ -5696,8 +5751,14 @@
         "普兰机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "重庆/仙女山": {
       "city_id": "chongqing",
@@ -5779,8 +5840,14 @@
         "桃来机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "CAAC 2025 transport-airport baseline and current operations review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "2025年全国民用运输机场吞吐量排名",
+          "source_url": "https://www.caac.gov.cn/PHONE/XXGK_17/XXGK/TJSJ/202602/P020260226360830390937.xlsx",
+          "effective_date": "2025-12-31",
+          "rationale": "The CAAC passenger-throughput baseline identifies this as an operating transport airport; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "阿拉善右旗/巴丹吉林": {
       "city_id": "alashanyouqi",
@@ -5844,9 +5911,14 @@
         "德江机场"
       ],
       "timezone": "Asia/Shanghai",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "Official operation began 2026-05-18",
-      "operational_since": "2026-05-18"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "铜仁德江机场正式通航",
+          "source_url": "https://www.tongren.gov.cn/2026/0518/348346.shtml",
+          "effective_date": "2026-05-18",
+          "rationale": "The official Tongren government notice confirms passenger operations began on 2026-05-18; the OurAirports scheduled-service flag predates opening."
+        }
+      }
     },
     "蚌埠滕湖机场": {
       "city_id": "bengbu",
@@ -5995,8 +6067,14 @@
         "綠島機場"
       ],
       "timezone": "Asia/Taipei",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "Taiwan CAA remote-island commercial passenger service review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "Taipei FIR AIP AD 1.3 Index to Aerodromes",
+          "source_url": "https://ais.caa.gov.tw/eaip/AIRAC%20AIP%20AMDT%2005-24_2024_10_03/eAIP/RC-AD%201.3-en-GB.html",
+          "observation_date": "2026-07-18",
+          "rationale": "The Taiwan CAA aerodrome index identifies Ludao as accepting scheduled traffic; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "CMJ": {
       "city_id": "qimei",
@@ -6005,8 +6083,14 @@
         "七美機場"
       ],
       "timezone": "Asia/Taipei",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "Taiwan CAA remote-island commercial passenger service review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "Taipei FIR AIP AD 1.3 Index to Aerodromes",
+          "source_url": "https://ais.caa.gov.tw/eaip/AIRAC%20AIP%20AMDT%2005-24_2024_10_03/eAIP/RC-AD%201.3-en-GB.html",
+          "observation_date": "2026-07-18",
+          "rationale": "The Taiwan CAA aerodrome index identifies Qimei as accepting scheduled traffic; the OurAirports scheduled-service flag is stale."
+        }
+      }
     },
     "WOT": {
       "city_id": "wangan",
@@ -6015,8 +6099,46 @@
         "望安機場"
       ],
       "timezone": "Asia/Taipei",
-      "scheduled_passenger_override": true,
-      "scheduled_passenger_basis": "Taiwan CAA remote-island commercial passenger service review"
+      "scheduled_passenger_override": {
+        "review_evidence": {
+          "source_title": "Taipei FIR AIP AD 1.3 Index to Aerodromes",
+          "source_url": "https://ais.caa.gov.tw/eaip/AIRAC%20AIP%20AMDT%2005-24_2024_10_03/eAIP/RC-AD%201.3-en-GB.html",
+          "observation_date": "2026-07-18",
+          "rationale": "The Taiwan CAA aerodrome index identifies Wang'an as accepting scheduled traffic; the OurAirports scheduled-service flag is stale."
+        }
+      }
+    }
+  },
+  "regional_exclusions": {
+    "DSX": {
+      "category": "military_only",
+      "reason": "Dongsha is a restricted defense facility without public commercial passenger booking.",
+      "review_evidence": {
+        "source_title": "Taipei FIR AIP ENR 5.1 Restricted Areas",
+        "source_url": "https://ais.caa.gov.tw/eaip/AIP%20AMDT%2001-23_2023_01_12/eAIP/RC-ENR%205.1-en-GB.html",
+        "observation_date": "2026-07-18",
+        "rationale": "The official AIP describes Dongsha as continuously restricted and requiring prior authorization, so it is not a public commercial passenger airport."
+      }
+    },
+    "HCN": {
+      "category": "no_current_commercial_passenger_service",
+      "reason": "Hengchun has no currently bookable scheduled commercial passenger service.",
+      "review_evidence": {
+        "source_title": "Taiwan CAA airport organization and current operations review",
+        "source_url": "https://www.caa.gov.tw/Article.aspx?a=532&lang=1",
+        "observation_date": "2026-07-18",
+        "rationale": "The airport remains operational under Kaohsiung management, but the current route review found no public scheduled passenger inventory; it must not be emitted as bookable."
+      }
+    },
+    "HSZ": {
+      "category": "military_only",
+      "reason": "Hsinchu Air Base is not a public commercial passenger airport.",
+      "review_evidence": {
+        "source_title": "Taiwan CAA airport distribution and operating-data review",
+        "source_url": "https://www.caa.gov.tw/Article.aspx?a=982&lang=1",
+        "observation_date": "2026-07-18",
+        "rationale": "The official civil-airport operating data does not list Hsinchu Air Base as a public passenger airport; the OurAirports row is military-only for catalog purposes."
+      }
     }
   }
 }

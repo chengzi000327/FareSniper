@@ -7,3 +7,4 @@ id,ident,type,name,latitude_deg,longitude_deg,elevation_ft,continent,iso_country
 6,ZGNS,medium_airport,Fixture No Service Airport,24.0,114.0,10,AS,CN,CN-44,Fixture,no,ZGNS,NOS,ZGNS,,,,
 7,ZSYW,medium_airport,Yiwu Airport,29.3447,120.032,262,AS,CN,CN-33,Yiwu,yes,ZSYW,YIW,ZSYW,,,,
 8,ZBXT,small_airport,Xingtai Dalian Airport,36.8831,114.429,0,AS,CN,CN-13,Xingtai,no,ZBXT,XNT,ZBXT,,,,
+9,RCKW,medium_airport,Hengchun Airport,22.0411,120.730003,46,AS,TW,TW-PIF,Hengchun,no,RCKW,HCN,RCKW,,,,

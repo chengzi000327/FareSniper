@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
 from backend.application.services.airport_catalog import AirportCatalog
+
+
+CATALOG_PATH = Path(__file__).parents[2] / "data" / "china_airports.json"
 
 
 def test_default_catalog_covers_all_regions() -> None:
@@ -18,6 +26,18 @@ def test_default_catalog_covers_all_regions() -> None:
     ]
     assert len(mainland_airports) == catalog.metadata.mainland_transport_airports
     assert catalog.metadata.excluded_airports == {}
+    reconciliation = catalog.metadata.regional_reconciliation
+    assert reconciliation["source_candidate_airports"] == {
+        "hong_kong": 1,
+        "macau": 1,
+        "taiwan": 19,
+    }
+    assert reconciliation["included_airports"] == {
+        "hong_kong": 1,
+        "macau": 1,
+        "taiwan": 16,
+    }
+    assert set(reconciliation["excluded_airports"]) == {"DSX", "HCN", "HSZ"}
 
 
 def test_multi_airport_and_specific_airport_resolution() -> None:
@@ -28,6 +48,22 @@ def test_multi_airport_and_specific_airport_resolution() -> None:
     assert catalog.resolve_location("PVG").city_name == "上海"
     assert catalog.resolve_location("香港").provider_code("ctrip") == "HKG"
     assert catalog.resolve_location("台北桃园机场").airport_iata == "TPE"
+
+
+def test_plain_city_wins_normalized_name_collision_but_airport_input_stays_specific(
+) -> None:
+    catalog = AirportCatalog.load_default()
+
+    assert catalog.resolve_location("义乌").city_name == "义乌"
+    assert catalog.resolve_location("义乌").airport_iata is None
+    assert catalog.resolve_location("义乌机场").airport_iata == "YIW"
+    assert catalog.resolve_location("YIW").airport_iata == "YIW"
+    assert catalog.resolve_location("ZSYW").airport_icao == "ZSYW"
+
+    assert catalog.resolve_city("SHA").name == "上海"
+    assert catalog.resolve_airport("SHA").iata == "SHA"
+    assert catalog.resolve_location("上海").airport_iata is None
+    assert catalog.resolve_location("SHA").airport_iata == "SHA"
 
 
 def test_resolution_normalizes_only_documented_variants() -> None:
@@ -58,3 +94,12 @@ def test_city_and_airport_resolvers_keep_their_scope() -> None:
     assert catalog.resolve_airport("BJS") is None
     assert catalog.code_to_city("rctp") == "台北"
     assert catalog.city_to_provider_code("beijing", "serpapi") == "BJS"
+
+
+def test_catalog_rejects_cross_city_city_airport_index_ambiguity() -> None:
+    payload = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    beijing = next(city for city in payload["cities"] if city["city_id"] == "beijing")
+    beijing["aliases"].append("ZSYW")
+
+    with pytest.raises(ValueError, match="cross-index ambiguity"):
+        AirportCatalog(payload)
