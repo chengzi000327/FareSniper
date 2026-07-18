@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import sqlalchemy as sa
 from sqlalchemy import insert, text
 
 from backend.config import settings
@@ -33,6 +34,69 @@ def _test_database_env() -> dict[str, str]:
     )
     assert raw_test_database_url != settings.test_database_url
     return {**os.environ, "DATABASE_URL": raw_test_database_url}
+
+
+def _run_alembic(
+    *arguments: str, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "alembic",
+            "-c",
+            "backend/alembic.ini",
+            *arguments,
+        ],
+        capture_output=True,
+        text=True,
+        check=check,
+        env=_test_database_env(),
+        timeout=60,
+    )
+
+
+async def _restore_collector_migration_head(seeded_pg) -> None:
+    await seeded_pg.dispose()
+    async with seeded_pg.begin() as connection:
+        current_revision = await connection.scalar(
+            text("SELECT version_num FROM alembic_version")
+        )
+        if current_revision != "20260718_ctrip_collector":
+            await connection.execute(
+                text("DROP TABLE IF EXISTS collector_nodes")
+            )
+    await seeded_pg.dispose()
+    await asyncio.to_thread(_run_alembic, "upgrade", "head")
+    await seeded_pg.dispose()
+
+
+def _collector_upgrade_schema(sync_connection) -> dict[str, object]:
+    inspector = sa.inspect(sync_connection)
+    return {
+        "collector_columns": inspector.get_columns("collector_nodes"),
+        "collector_pk": inspector.get_pk_constraint("collector_nodes"),
+        "demand_columns": {
+            column["name"]
+            for column in inspector.get_columns("flight_search_demands")
+        },
+        "snapshot_columns": {
+            column["name"]
+            for column in inspector.get_columns("flight_snapshots")
+        },
+        "seller_constraints": {
+            constraint["name"]
+            for constraint in inspector.get_unique_constraints(
+                "platform_price_snapshots"
+            )
+        },
+        "inventory_columns": [
+            column["name"]
+            for column in inspector.get_columns(
+                "provider_inventory_observations"
+            )
+        ],
+    }
 
 
 def test_alembic_history_lists_init():
@@ -138,6 +202,198 @@ def test_demand_metadata_matches_migration_keys():
         "created_at",
         "updated_at",
     } <= set(table.columns.keys())
+
+
+@pytest.mark.asyncio
+async def test_collector_upgrade_adopts_production_precreated_nodes_table(
+    seeded_pg,
+):
+    await seeded_pg.dispose()
+    try:
+        await asyncio.to_thread(
+            _run_alembic, "downgrade", "20260718_provider_inventory"
+        )
+        await seeded_pg.dispose()
+        async with seeded_pg.begin() as connection:
+            start_revision = await connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            )
+            start_schema = await connection.run_sync(
+                lambda sync_connection: {
+                    "demand_columns": {
+                        column["name"]
+                        for column in sa.inspect(sync_connection).get_columns(
+                            "flight_search_demands"
+                        )
+                    },
+                    "inventory_columns": [
+                        column["name"]
+                        for column in sa.inspect(sync_connection).get_columns(
+                            "provider_inventory_observations"
+                        )
+                    ],
+                }
+            )
+            await connection.execute(
+                text(
+                    """
+                    CREATE TABLE collector_nodes (
+                        node_id VARCHAR PRIMARY KEY NOT NULL,
+                        version VARCHAR NOT NULL,
+                        status VARCHAR NOT NULL,
+                        last_heartbeat TIMESTAMP WITH TIME ZONE NOT NULL,
+                        last_success TIMESTAMP WITH TIME ZONE NULL
+                    )
+                    """
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO collector_nodes (
+                        node_id, version, status, last_heartbeat, last_success
+                    ) VALUES (
+                        'production-drift-node', 'worker-v1', 'healthy',
+                        '2099-07-18 12:00:00+00', NULL
+                    )
+                    """
+                )
+            )
+
+        assert start_revision == "20260718_provider_inventory"
+        assert "status" not in start_schema["demand_columns"]
+        inventory_columns = start_schema["inventory_columns"]
+
+        await seeded_pg.dispose()
+        await asyncio.to_thread(_run_alembic, "upgrade", "head")
+        await seeded_pg.dispose()
+        async with seeded_pg.connect() as connection:
+            end_revision = await connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            )
+            end_schema = await connection.run_sync(_collector_upgrade_schema)
+            collector_row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT node_id, version, status,
+                               last_heartbeat, last_success
+                        FROM collector_nodes
+                        WHERE node_id = 'production-drift-node'
+                        """
+                    )
+                )
+            ).one()
+
+        collector_columns = end_schema["collector_columns"]
+        assert end_revision == "20260718_ctrip_collector"
+        assert [column["name"] for column in collector_columns] == [
+            "node_id",
+            "version",
+            "status",
+            "last_heartbeat",
+            "last_success",
+        ]
+        assert [column["nullable"] for column in collector_columns] == [
+            False,
+            False,
+            False,
+            False,
+            True,
+        ]
+        assert all(
+            isinstance(column["type"], sa.String)
+            and column["type"].length is None
+            for column in collector_columns[:3]
+        )
+        assert all(
+            isinstance(column["type"], sa.DateTime)
+            and column["type"].timezone is True
+            for column in collector_columns[3:]
+        )
+        assert all(column["default"] is None for column in collector_columns)
+        assert end_schema["collector_pk"]["constrained_columns"] == ["node_id"]
+        assert {
+            "origin_airport_code",
+            "destination_airport_code",
+            "demand_hour",
+            "status",
+            "next_attempt_at",
+            "created_at",
+            "updated_at",
+        } <= end_schema["demand_columns"]
+        assert {
+            "origin_airport_code",
+            "destination_airport_code",
+        } <= end_schema["snapshot_columns"]
+        assert (
+            "uq_platform_price_provider_seller"
+            in end_schema["seller_constraints"]
+        )
+        assert end_schema["inventory_columns"] == inventory_columns
+        assert collector_row.node_id == "production-drift-node"
+        assert collector_row.version == "worker-v1"
+        assert collector_row.status == "healthy"
+        assert collector_row.last_heartbeat == datetime(
+            2099, 7, 18, 12, tzinfo=timezone.utc
+        )
+        assert collector_row.last_success is None
+    finally:
+        await _restore_collector_migration_head(seeded_pg)
+
+
+@pytest.mark.asyncio
+async def test_collector_upgrade_rejects_incompatible_precreated_nodes_table(
+    seeded_pg,
+):
+    await seeded_pg.dispose()
+    try:
+        await asyncio.to_thread(
+            _run_alembic, "downgrade", "20260718_provider_inventory"
+        )
+        await seeded_pg.dispose()
+        async with seeded_pg.begin() as connection:
+            await connection.execute(
+                text(
+                    """
+                    CREATE TABLE collector_nodes (
+                        node_id VARCHAR PRIMARY KEY NOT NULL,
+                        version VARCHAR NOT NULL,
+                        status VARCHAR NOT NULL,
+                        last_heartbeat TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                        last_success TIMESTAMP WITH TIME ZONE NULL
+                    )
+                    """
+                )
+            )
+
+        await seeded_pg.dispose()
+        proc = await asyncio.to_thread(
+            _run_alembic, "upgrade", "head", check=False
+        )
+        await seeded_pg.dispose()
+        async with seeded_pg.connect() as connection:
+            current_revision = await connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            )
+            demand_columns = await connection.run_sync(
+                lambda sync_connection: {
+                    column["name"]
+                    for column in sa.inspect(sync_connection).get_columns(
+                        "flight_search_demands"
+                    )
+                }
+            )
+
+        assert proc.returncode != 0
+        assert "collector_nodes has incompatible schema" in proc.stderr
+        assert "last_heartbeat" in proc.stderr
+        assert "TIMESTAMP WITH TIME ZONE NOT NULL" in proc.stderr
+        assert "refusing to adopt the existing table" in proc.stderr
+        assert current_revision == "20260718_provider_inventory"
+        assert "status" not in demand_columns
+    finally:
+        await _restore_collector_migration_head(seeded_pg)
 
 
 @pytest.mark.asyncio

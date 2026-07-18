@@ -18,8 +18,85 @@ down_revision: Union[str, Sequence[str], None] = (
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+_COLLECTOR_NODE_COLUMNS = {
+    "node_id": ("VARCHAR", False),
+    "version": ("VARCHAR", False),
+    "status": ("VARCHAR", False),
+    "last_heartbeat": ("TIMESTAMP WITH TIME ZONE", False),
+    "last_success": ("TIMESTAMP WITH TIME ZONE", True),
+}
+
+
+def _column_type_name(column_type: sa.types.TypeEngine) -> str:
+    if isinstance(column_type, sa.VARCHAR):
+        if column_type.length is None:
+            return "VARCHAR"
+        return f"VARCHAR({column_type.length})"
+    if isinstance(column_type, sa.TIMESTAMP):
+        timezone = "WITH" if column_type.timezone else "WITHOUT"
+        return f"TIMESTAMP {timezone} TIME ZONE"
+    return str(column_type)
+
+
+def _collector_nodes_table_exists() -> bool:
+    inspector = sa.inspect(op.get_bind())
+    if "collector_nodes" not in inspector.get_table_names():
+        return False
+
+    columns = inspector.get_columns("collector_nodes")
+    columns_by_name = {column["name"]: column for column in columns}
+    errors: list[str] = []
+    if set(columns_by_name) != set(_COLLECTOR_NODE_COLUMNS):
+        errors.append(
+            "columns must be exactly "
+            f"{list(_COLLECTOR_NODE_COLUMNS)}; found {list(columns_by_name)}"
+        )
+
+    for name, (expected_type, expected_nullable) in (
+        _COLLECTOR_NODE_COLUMNS.items()
+    ):
+        column = columns_by_name.get(name)
+        if column is None:
+            continue
+        actual_type = _column_type_name(column["type"])
+        actual_nullable = bool(column["nullable"])
+        has_default = column.get("default") is not None
+        if (
+            actual_type != expected_type
+            or actual_nullable != expected_nullable
+            or has_default
+        ):
+            expected_nullability = "NULL" if expected_nullable else "NOT NULL"
+            actual_nullability = "NULL" if actual_nullable else "NOT NULL"
+            actual_default = (
+                f" default {column['default']}" if has_default else ""
+            )
+            errors.append(
+                f"column {name!r} must be {expected_type} "
+                f"{expected_nullability} with no default; found "
+                f"{actual_type} {actual_nullability}{actual_default}"
+            )
+
+    primary_key = inspector.get_pk_constraint("collector_nodes")
+    primary_key_columns = primary_key.get("constrained_columns") or []
+    if primary_key_columns != ["node_id"]:
+        errors.append(
+            "primary key must be exactly ['node_id']; "
+            f"found {primary_key_columns}"
+        )
+
+    if errors:
+        raise RuntimeError(
+            "collector_nodes has incompatible schema: "
+            + "; ".join(errors)
+            + "; refusing to adopt the existing table"
+        )
+    return True
+
 
 def upgrade() -> None:
+    collector_nodes_exists = _collector_nodes_table_exists()
+
     op.drop_index(
         "ix_flight_search_demands_due", table_name="flight_search_demands"
     )
@@ -161,16 +238,19 @@ def upgrade() -> None:
         ["active", "status", "next_attempt_at", "priority"],
     )
 
-    op.create_table(
-        "collector_nodes",
-        sa.Column("node_id", sa.String(), primary_key=True),
-        sa.Column("version", sa.String(), nullable=False),
-        sa.Column("status", sa.String(), nullable=False),
-        sa.Column(
-            "last_heartbeat", sa.DateTime(timezone=True), nullable=False
-        ),
-        sa.Column("last_success", sa.DateTime(timezone=True), nullable=True),
-    )
+    if not collector_nodes_exists:
+        op.create_table(
+            "collector_nodes",
+            sa.Column("node_id", sa.String(), primary_key=True),
+            sa.Column("version", sa.String(), nullable=False),
+            sa.Column("status", sa.String(), nullable=False),
+            sa.Column(
+                "last_heartbeat", sa.DateTime(timezone=True), nullable=False
+            ),
+            sa.Column(
+                "last_success", sa.DateTime(timezone=True), nullable=True
+            ),
+        )
 
     op.add_column(
         "flight_snapshots",
