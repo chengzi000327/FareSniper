@@ -164,7 +164,7 @@ export function DiscoveryCardContent({
       price.currency === currency &&
       price.name === platform &&
       price.data_freshness === dataFreshness &&
-      (freshWinner || staleCtripWinner)
+      (freshWinner || (staleCtripWinner && isHttpsUrl(price.url)))
     )
   }
   const selectedWinner = prices.find(isSelectedWinner)
@@ -329,7 +329,7 @@ export function DiscoveryCardContent({
               <span className="text-sm font-medium text-brand-text">{price.name}</span>
               <div className="flex items-center gap-2">
                 {lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
-                {price.provider_status === 'success' && price.data_freshness === 'fresh' && price.price_status === 'view_live_price' && isExpiryCurrent(price.expires_at, expiryNow) && isHttpsUrl(price.url) ? (
+                {price.price === null && price.provider_status === 'success' && price.data_freshness === 'fresh' && price.price_status === 'view_live_price' && isExpiryCurrent(price.expires_at, expiryNow) && isHttpsUrl(price.url) ? (
                   <a
                     href={price.url}
                     target="_blank"

@@ -55,6 +55,34 @@ test("renders source states without fake zeroes", () => {
   expect(screen.queryByText("¥0")).not.toBeInTheDocument();
 });
 
+test("renders a numeric view-live-price row as its known amount", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={null}
+      totalPrice={null}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      prices={[
+        priceRow({
+          name: "飞猪",
+          price: 500,
+          price_status: "view_live_price",
+          url: "https://fly.test",
+        }),
+      ]}
+    />
+  );
+
+  const row = screen.getByText("飞猪").parentElement!;
+  expect(within(row).getByText("¥500")).toBeInTheDocument();
+  expect(within(row).queryByText("查看实时价")).not.toBeInTheDocument();
+});
+
 test("renders a neutral header for landing placeholders", () => {
   render(
     <DiscoveryCardContent
@@ -336,6 +364,43 @@ test("renders a stale Ctrip winner without realtime copy", () => {
   expect(screen.queryByText("价格可能已更新")).not.toBeInTheDocument();
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
   expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
+});
+
+test("does not select a stale Ctrip winner without an HTTPS row URL", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={500}
+      totalPrice={500}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="携程"
+      bookingUrl="https://ctrip.example.test/book"
+      winningPriceId="ctrip-stale-cny"
+      dataFreshness="stale"
+      prices={[
+        priceRow({
+          id: "ctrip-stale-cny",
+          name: "携程",
+          price: 500,
+          lowest: true,
+          price_status: "stale",
+          provider_status: "stale",
+          data_provider: "ctrip_snapshot",
+          data_freshness: "stale",
+          url: "http://ctrip.example.test/book",
+        }),
+      ]}
+    />
+  );
+
+  const row = screen.getByText("携程").parentElement!;
+  expect(within(row).queryByText("最低")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
 });
 
 test("keeps a numeric unknown-freshness row visible without realtime claims", () => {
