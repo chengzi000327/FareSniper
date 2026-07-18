@@ -179,6 +179,28 @@ def test_separated_airport_mention_wins_over_broader_city():
     assert slots.destination == "北京"
 
 
+def test_same_city_marked_airports_preserve_both_constraints():
+    slots = fill_slots("从上海浦东机场到上海虹桥机场")
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "SHA"
+
+
+def test_same_city_delimited_airports_preserve_both_constraints():
+    slots = fill_slots("上海浦东机场-上海虹桥机场")
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "SHA"
+
+
+def test_lowercase_code_routes_support_slash_and_zhi_separators():
+    for text in ("pvg/pek", "pvg至pek"):
+        origin, destination = extract_route_locations(text)
+
+        assert origin == "PVG"
+        assert destination == "PEK"
+
+
 def test_slot_extraction_scans_location_terms_once(monkeypatch):
     calls = 0
     original = slot_filler._extract_location_mentions
@@ -195,6 +217,27 @@ def test_slot_extraction_scans_location_terms_once(monkeypatch):
     )
 
     assert slots.origin == "PVG"
+    assert calls == 1
+
+
+def test_location_extraction_runs_one_precompiled_matcher_scan(monkeypatch):
+    calls = 0
+    original = slot_filler._LOCATION_MATCHER
+
+    class CountingMatcher:
+        def finditer(self, text):
+            nonlocal calls
+            calls += 1
+            return original.finditer(text)
+
+    monkeypatch.setattr(slot_filler, "_LOCATION_MATCHER", CountingMatcher())
+
+    slots = fill_slots(
+        "明天从上海的浦东机场飞北京", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "PVG"
+    assert slots.destination == "北京"
     assert calls == 1
 
 

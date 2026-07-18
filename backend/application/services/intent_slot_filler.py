@@ -36,7 +36,9 @@ FLIGHT_KEYWORDS = tuple(
     for keyword in definition.keywords
 )
 ORIGIN_MARKERS = ("从", "自", "由")
-DESTINATION_MARKERS = ("到", "去", "飞", "回")
+DESTINATION_MARKERS = ("到", "去", "飞", "回", "至", "->", "→", "-", "/")
+_ROUTE_SEPARATOR_PATTERN = r"(?:到|去|飞|回|至|->|→|-|/)"
+_ROUTE_SEPARATOR = re.compile(_ROUTE_SEPARATOR_PATTERN)
 _TZ = ZoneInfo("Asia/Shanghai")
 _CHINESE_NUMERALS = {
     "一": 1,
@@ -123,6 +125,25 @@ def _build_location_terms() -> tuple[_LocationTerm, ...]:
 
 
 _LOCATION_TERMS = _build_location_terms()
+
+
+def _build_location_matcher(
+    terms: tuple[_LocationTerm, ...],
+) -> tuple[dict[str, _LocationTerm], re.Pattern[str]]:
+    term_by_text: dict[str, _LocationTerm] = {}
+    alternatives: list[str] = []
+    for term in terms:
+        key = term.text.casefold()
+        if key in term_by_text:
+            continue
+        term_by_text[key] = term
+        alternatives.append(re.escape(term.text))
+    return term_by_text, re.compile("|".join(alternatives), re.IGNORECASE)
+
+
+_LOCATION_TERM_BY_TEXT, _LOCATION_MATCHER = _build_location_matcher(
+    _LOCATION_TERMS
+)
 
 
 def fill_slots(
@@ -301,7 +322,7 @@ def _looks_like_flight_search(
         return False
     if any(keyword in normalized for keyword in FLIGHT_KEYWORDS):
         return True
-    if len(_collapse_location_mentions(mentions)) >= 2:
+    if len(_select_endpoint_mentions(normalized, mentions)) >= 2:
         return True
     if _extract_depart_date(normalized) and mentions:
         return True
@@ -352,60 +373,86 @@ def _extract_cities(text: str) -> list[str]:
 
 
 def _extract_location_mentions(text: str) -> list[_LocationMention]:
-    candidates: list[_LocationMention] = []
-    for term in _LOCATION_TERMS:
-        pattern = re.escape(term.text)
-        if term.is_ascii_code:
-            pattern = rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])"
-        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-            if (
-                term.is_ascii_code
-                and not match.group(0).isupper()
-                and not _has_route_code_context(text, match.start(), match.end())
-            ):
-                continue
-            candidates.append(
-                _LocationMention(
-                    start=match.start(),
-                    end=match.end(),
-                    value=term.value,
-                    city_id=term.city_id,
-                    is_airport=term.is_airport,
-                )
-            )
-
-    selected: list[_LocationMention] = []
-    occupied_until = -1
-    for candidate in sorted(
-        candidates,
-        key=lambda item: (item.start, -(item.end - item.start), item.value),
-    ):
-        if candidate.start < occupied_until:
+    mentions: list[_LocationMention] = []
+    for match in _LOCATION_MATCHER.finditer(text):
+        term = _LOCATION_TERM_BY_TEXT[match.group(0).casefold()]
+        if term.is_ascii_code and not _has_ascii_code_boundaries(
+            text, match.start(), match.end()
+        ):
             continue
-        selected.append(candidate)
-        occupied_until = candidate.end
-    return selected
+        if (
+            term.is_ascii_code
+            and not match.group(0).isupper()
+            and not _has_route_code_context(text, match.start(), match.end())
+        ):
+            continue
+        mentions.append(
+            _LocationMention(
+                start=match.start(),
+                end=match.end(),
+                value=term.value,
+                city_id=term.city_id,
+                is_airport=term.is_airport,
+            )
+        )
+    return mentions
+
+
+def _has_ascii_code_boundaries(text: str, start: int, end: int) -> bool:
+    left_is_alphanumeric = start > 0 and bool(
+        re.match(r"[A-Za-z0-9]", text[start - 1])
+    )
+    right_is_alphanumeric = end < len(text) and bool(
+        re.match(r"[A-Za-z0-9]", text[end])
+    )
+    return not left_is_alphanumeric and not right_is_alphanumeric
 
 
 def _has_route_code_context(text: str, start: int, end: int) -> bool:
-    route_syntax = r"(?:从|自|由|到|去|飞|回|->|→|-)"
     return bool(
-        re.search(rf"{route_syntax}\s*$", text[:start])
-        or re.match(rf"\s*{route_syntax}", text[end:])
+        re.search(rf"{_ROUTE_SEPARATOR_PATTERN}\s*$", text[:start])
+        or re.match(rf"\s*{_ROUTE_SEPARATOR_PATTERN}", text[end:])
+        or re.search(r"(?:从|自|由)\s*$", text[:start])
     )
 
 
-def _collapse_location_mentions(
+def _partition_endpoint_mentions(
+    text: str,
+    mentions: list[_LocationMention],
+) -> list[list[_LocationMention]]:
+    groups: list[list[_LocationMention]] = []
+    for mention in mentions:
+        if not groups:
+            groups.append([mention])
+            continue
+        previous = groups[-1][-1]
+        crossed_separator = bool(
+            _ROUTE_SEPARATOR.search(text[previous.end : mention.start])
+        )
+        if crossed_separator or previous.city_id != mention.city_id:
+            groups.append([mention])
+        else:
+            groups[-1].append(mention)
+    return groups
+
+
+def _select_endpoint_mention(
+    mentions: list[_LocationMention],
+) -> _LocationMention:
+    return next(
+        (mention for mention in mentions if mention.is_airport),
+        mentions[0],
+    )
+
+
+def _select_endpoint_mentions(
+    text: str,
     mentions: list[_LocationMention],
 ) -> list[_LocationMention]:
-    collapsed: list[_LocationMention] = []
-    for mention in mentions:
-        if collapsed and collapsed[-1].city_id == mention.city_id:
-            if mention.is_airport and not collapsed[-1].is_airport:
-                collapsed[-1] = mention
-            continue
-        collapsed.append(mention)
-    return collapsed
+    return [
+        _select_endpoint_mention(group)
+        for group in _partition_endpoint_mentions(text, mentions)
+    ]
 
 
 def extract_route_locations(
@@ -421,10 +468,11 @@ def _infer_origin_destination(
     mentions: list[_LocationMention],
     accumulated: SlotBundle,
 ) -> tuple[str | None, str | None]:
-    collapsed = _collapse_location_mentions(mentions)
-    cities = [mention.value for mention in collapsed]
-    origin = _extract_marked_city(text, ORIGIN_MARKERS, mentions)
-    destination = _extract_marked_city(text, DESTINATION_MARKERS, mentions)
+    groups = _partition_endpoint_mentions(text, mentions)
+    endpoints = [_select_endpoint_mention(group) for group in groups]
+    cities = [mention.value for mention in endpoints]
+    origin = _extract_marked_endpoint(text, ORIGIN_MARKERS, groups)
+    destination = _extract_marked_endpoint(text, DESTINATION_MARKERS, groups)
 
     if origin and destination and origin == destination and len(cities) > 1:
         destination = next((city for city in cities if city != origin), destination)
@@ -448,20 +496,15 @@ def _infer_origin_destination(
     return origin, destination
 
 
-def _extract_marked_city(
+def _extract_marked_endpoint(
     text: str,
     markers: tuple[str, ...],
-    mentions: list[_LocationMention],
+    groups: list[list[_LocationMention]],
 ) -> str | None:
-    for index, mention in enumerate(mentions):
-        prefix = text[: mention.start]
+    for group in groups:
+        prefix = text[: group[0].start]
         if any(re.search(rf"{re.escape(marker)}\s*$", prefix) for marker in markers):
-            for candidate in mentions[index + 1 :]:
-                if candidate.city_id != mention.city_id:
-                    break
-                if candidate.is_airport:
-                    return candidate.value
-            return mention.value
+            return _select_endpoint_mention(group).value
     return None
 
 
