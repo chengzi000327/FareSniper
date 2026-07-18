@@ -62,6 +62,24 @@ def test_parser_prefers_current_ticket_price_over_legacy_adult_price():
     assert parse_flyai_payload(payload, _query())[0].total_price == 420
 
 
+def test_parser_falls_back_to_adult_price_when_ticket_price_is_unusable():
+    payload = _payload()
+    item = payload["data"]["itemList"][0]
+    item["ticketPrice"] = "not available"
+    item["adultPrice"] = "¥410.0"
+
+    assert parse_flyai_payload(payload, _query())[0].total_price == 410
+
+
+def test_parser_keeps_zero_ticket_price_ahead_of_adult_price():
+    payload = _payload()
+    item = payload["data"]["itemList"][0]
+    item["ticketPrice"] = "0"
+    item["adultPrice"] = "999.00"
+
+    assert parse_flyai_payload(payload, _query())[0].total_price == 0
+
+
 def test_missing_price_becomes_view_live_price():
     payload = _payload()
     del payload["data"]["itemList"][0]["ticketPrice"]

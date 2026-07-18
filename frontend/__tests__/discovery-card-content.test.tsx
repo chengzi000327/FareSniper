@@ -442,7 +442,7 @@ test("keeps a numeric unknown-freshness row visible without realtime claims", ()
   expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
 });
 
-test("gates realtime copy while retaining a selected booking after inventory expiry", () => {
+test("does not select an expired fresh FlyAI winner", () => {
   render(
     <DiscoveryCardContent
       from="北京"
@@ -468,6 +468,7 @@ test("gates realtime copy while retaining a selected booking after inventory exp
           price_status: "priced",
           url: "https://booking.example.test/expired",
           data_freshness: "fresh",
+          data_provider: "flyai",
         }),
       ]}
     />
@@ -476,11 +477,47 @@ test("gates realtime copy while retaining a selected booking after inventory exp
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
   expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
   expect(screen.queryByText(/最优解/)).not.toBeInTheDocument();
-  expect(screen.getByText("最低")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
-    "href",
-    "https://booking.example.test/expired"
+  expect(screen.queryByText("最低")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+});
+
+test("does not select an expired fresh SerpAPI winner", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2099-08-01"
+      basePrice={580}
+      totalPrice={580}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="Google Flights"
+      bookingUrl="https://booking.example.test/expired-serpapi"
+      winningPriceId="expired-serpapi"
+      inventoryExpiresAt="2099-08-02T00:00:00+00:00"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "expired-serpapi",
+          name: "Google Flights",
+          price: 580,
+          lowest: true,
+          price_status: "priced",
+          url: "https://booking.example.test/expired-serpapi",
+          data_provider: "serpapi_google_flights",
+          data_freshness: "fresh",
+          expires_at: "2000-01-01T00:00:00+00:00",
+        }),
+      ]}
+    />
   );
+
+  expect(screen.queryByText("最低")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
 });
 
 test("rerenders at expiry and gates realtime winner and row links while mounted", () => {
@@ -535,11 +572,9 @@ test("rerenders at expiry and gates realtime winner and row links while mounted"
   });
 
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
-  expect(screen.getByText("最低")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
-    "href",
-    "https://booking.example.test/winner"
-  );
+  expect(screen.queryByText("最低")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "查看实时价" })).not.toBeInTheDocument();
 });
 
@@ -587,10 +622,8 @@ test("rechecks expiry on focus and visibility and cleans lifecycle resources", (
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
 
   fireEvent(document, new Event("visibilitychange"));
-  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
-    "href",
-    "https://booking.example.test/winner"
-  );
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
   expect(vi.getTimerCount()).toBe(0);
 
   unmount();

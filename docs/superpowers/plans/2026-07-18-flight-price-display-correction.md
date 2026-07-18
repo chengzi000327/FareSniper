@@ -60,27 +60,27 @@ to:
 "ticketPrice": "400.00"
 ```
 
-- [ ] **Step 2: Add current-field, fallback, and precedence tests**
+- [ ] **Step 2: Add current-field, usable-fallback, and precedence tests**
 
-Add tests that prove the fixture parses to `400`, that an item with only `adultPrice="¥410.0"` parses to `410`, and that `ticketPrice="420.00"` wins when `adultPrice="999.00"` is also present:
+Add tests that prove the fixture parses to `400`, that an item with an unusable `ticketPrice` and `adultPrice="¥410.0"` parses to `410`, and that valid `ticketPrice` values, including `"0"`, take precedence over `adultPrice`:
 
 ```python
-def test_parser_supports_legacy_adult_price_when_ticket_price_is_absent():
+def test_parser_falls_back_to_adult_price_when_ticket_price_is_unusable():
     payload = _payload()
     item = payload["data"]["itemList"][0]
+    item["ticketPrice"] = "not available"
     item["adultPrice"] = "¥410.0"
-    item.pop("ticketPrice")
 
     assert parse_flyai_payload(payload, _query())[0].total_price == 410
 
 
-def test_parser_prefers_current_ticket_price_over_legacy_adult_price():
+def test_parser_keeps_zero_ticket_price_ahead_of_adult_price():
     payload = _payload()
     item = payload["data"]["itemList"][0]
-    item["ticketPrice"] = "420.00"
+    item["ticketPrice"] = "0"
     item["adultPrice"] = "999.00"
 
-    assert parse_flyai_payload(payload, _query())[0].total_price == 420
+    assert parse_flyai_payload(payload, _query())[0].total_price == 0
 ```
 
 - [ ] **Step 3: Run the focused tests and verify RED**
@@ -92,17 +92,16 @@ DATABASE_URL=postgresql+asyncpg://localhost/faresniper_test \
 pytest -q backend/tests/infra/test_flyai_provider.py
 ```
 
-Expected: fixture/current-field tests fail because `ticketPrice` is not read; the legacy fallback test may already pass.
+Expected: the unusable-`ticketPrice` fallback test fails because `adultPrice` is not parsed after an unusable current value; valid-zero precedence may already pass.
 
-- [ ] **Step 4: Implement explicit field precedence**
+- [ ] **Step 4: Implement explicit parsed-value fallback**
 
-Replace the direct field read with an explicit null-aware fallback so numeric zero is not accidentally skipped:
+Parse `ticketPrice` first and parse `adultPrice` only when the first parse returns `None`, so an unusable current value falls back while numeric zero remains authoritative:
 
 ```python
-raw_price = item.get("ticketPrice")
-if raw_price is None:
-    raw_price = item.get("adultPrice")
-price = _parse_price(raw_price)
+price = _parse_price(item.get("ticketPrice"))
+if price is None:
+    price = _parse_price(item.get("adultPrice"))
 ```
 
 - [ ] **Step 5: Run the provider tests and verify GREEN**
@@ -392,9 +391,21 @@ Require `freshWinner || staleCtripWinner`.
 
 - [ ] **Step 5: Separate selected winner from real-time winner in the card**
 
-Create a selected-winner predicate that checks ID, amount, currency, platform, headline freshness, and one of the two accepted states. Keep expiry-current checks only in the fresh real-time state. Derive:
+Create a selected-winner predicate that checks ID, amount, currency, platform, headline freshness, and one of the two accepted states. A fresh selected winner requires both current inventory expiry and current winning-row expiry; only the explicit stale Ctrip snapshot winner is exempt from those expiry checks. Derive:
 
 ```typescript
+const freshWinner =
+  price.provider_status === "success" &&
+  price.price_status === "priced" &&
+  price.data_freshness === "fresh" &&
+  isExpiryCurrent(inventoryExpiresAt, expiryNow) &&
+  isExpiryCurrent(price.expires_at, expiryNow);
+const staleCtripWinner =
+  price.data_provider === "ctrip_snapshot" &&
+  price.provider_status === "stale" &&
+  price.price_status === "stale" &&
+  price.data_freshness === "stale" &&
+  isCompleteHttpsUrl(price.url);
 const selectedWinner = prices.find(isSelectedWinner);
 const hasSelectedWinner = selectedWinner !== undefined;
 const hasRealtimeWinner =
@@ -402,10 +413,12 @@ const hasRealtimeWinner =
   selectedWinner.provider_status === "success" &&
   selectedWinner.price_status === "priced" &&
   selectedWinner.data_freshness === "fresh" &&
-  dataFreshness === "fresh";
+  dataFreshness === "fresh" &&
+  isExpiryCurrent(inventoryExpiresAt, expiryNow) &&
+  isExpiryCurrent(selectedWinner.expires_at, expiryNow);
 ```
 
-Use `hasSelectedWinner` for the "最低" badge and safe HTTPS booking action. Continue using `hasRealtimeWinner` for "实时底价", "全网多端实时同步", pulsing decoration, and real-time recommendation copy.
+Use `hasSelectedWinner` for the "最低" badge and safe HTTPS booking action only after the fresh selected-winner expiry requirements above are met, or for the explicit stale Ctrip snapshot exception. Continue using `hasRealtimeWinner` for "实时底价", "全网多端实时同步", pulsing decoration, and real-time recommendation copy.
 
 - [ ] **Step 6: Render numeric rows before provider status copy**
 

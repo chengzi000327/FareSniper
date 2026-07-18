@@ -149,7 +149,9 @@ export function DiscoveryCardContent({
     const freshWinner =
       price.provider_status === 'success' &&
       price.price_status === 'priced' &&
-      price.data_freshness === 'fresh'
+      price.data_freshness === 'fresh' &&
+      isExpiryCurrent(inventoryExpiresAt, expiryNow) &&
+      isExpiryCurrent(price.expires_at, expiryNow)
     const staleCtripWinner =
       price.data_provider === 'ctrip_snapshot' &&
       price.provider_status === 'stale' &&
