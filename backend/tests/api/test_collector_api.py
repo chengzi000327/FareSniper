@@ -69,7 +69,10 @@ def _wire_offer(**overrides) -> dict:
         "cabin": "Y",
         "currency": "CNY",
         "display_price": 580,
-        "booking_url": "https://flights.ctrip.com/booking/MU5106",
+        "booking_url": (
+            "https://flights.ctrip.com/online/list/oneway-bjs-sha"
+            "?depdate=2099-08-01"
+        ),
     }
     payload.update(overrides)
     return payload
@@ -574,14 +577,10 @@ async def test_complete_passes_configured_snapshot_ttl(
     ("booking_url", "expected_url"),
     [
         (
-            "HTTPS://FLIGHTS.CTRIP.COM/online/list"
+            "HTTPS://FLIGHTS.CTRIP.COM/online/list/oneway-bjs-sha"
             "?infant=0&adult=2&depdate=2099-08-01&cabin=Y_1&child=1",
-            "https://flights.ctrip.com/online/list"
+            "https://flights.ctrip.com/online/list/oneway-bjs-sha"
             "?depdate=2099-08-01&cabin=Y_1&adult=2&child=1&infant=0",
-        ),
-        (
-            "https://flights.ctrip.com/booking/MU5106?adult=1",
-            "https://flights.ctrip.com/booking/MU5106?adult=1",
         ),
     ],
 )
@@ -622,6 +621,53 @@ async def test_complete_normalizes_functional_ctrip_booking_query(
 
     assert response.status_code == 204
     assert calls[0][0].booking_url == expected_url
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "booking_url",
+    [
+        "https://flights.ctrip.com/",
+        (
+            "https://flights.ctrip.com/online/list/oneway-can-sha"
+            "?depdate=2099-08-01"
+        ),
+        (
+            "https://flights.ctrip.com/online/list/oneway-bjs-sha"
+            "?depdate=2099-08-02"
+        ),
+    ],
+)
+async def test_complete_rejects_nonfunctional_or_wrong_scope_ctrip_url(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+    booking_url,
+):
+    calls = []
+
+    async def complete_job(*args, **kwargs):
+        calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(complete_job=complete_job),
+    )
+
+    response = await collector_client.post(
+        "/internal/collector/jobs/anonymous-job-1/complete",
+        json={
+            "node_id": "mac-1",
+            "offers": [_wire_offer(booking_url=booking_url)],
+        },
+        headers=collector_headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid collector request"}
+    assert calls == []
 
 
 @pytest.mark.asyncio

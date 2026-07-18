@@ -31,6 +31,9 @@ _BOOKING_QUERY_ORDER = ("depdate", "cabin", "adult", "child", "infant")
 _CABIN_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,16}\Z")
 _AIRPORT_CODE_PATTERN = re.compile(r"[A-Z]{3}\Z")
 _DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+_CTRIP_ROUTE_PATH_PATTERN = re.compile(
+    r"/online/list/oneway-([a-z]{3})-([a-z]{3})\Z"
+)
 _RFC3339_PATTERN = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
     r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\Z"
@@ -42,6 +45,8 @@ def normalize_ctrip_booking_url(
     value: str,
     *,
     depart_date: str | None,
+    origin_codes: tuple[str | None, ...],
+    destination_codes: tuple[str | None, ...],
 ) -> str:
     if len(value) > _MAX_BOOKING_URL_LENGTH:
         raise ValueError("invalid booking URL")
@@ -65,6 +70,17 @@ def normalize_ctrip_booking_url(
     ):
         raise ValueError("invalid booking URL")
 
+    route_match = _CTRIP_ROUTE_PATH_PATTERN.fullmatch(parsed.path)
+    if route_match is None:
+        raise ValueError("invalid booking URL")
+    allowed_origins = _normalized_route_codes(origin_codes)
+    allowed_destinations = _normalized_route_codes(destination_codes)
+    if (
+        route_match.group(1).upper() not in allowed_origins
+        or route_match.group(2).upper() not in allowed_destinations
+    ):
+        raise ValueError("invalid booking URL")
+
     query = _normalize_booking_query(
         parsed.query,
         depart_date=depart_date,
@@ -72,6 +88,17 @@ def normalize_ctrip_booking_url(
     return urlunsplit(
         ("https", _CTRIP_BOOKING_HOST, parsed.path, query, "")
     )
+
+
+def _normalized_route_codes(values: tuple[str | None, ...]) -> set[str]:
+    normalized = {
+        value.upper()
+        for value in values
+        if isinstance(value, str) and _AIRPORT_CODE_PATTERN.fullmatch(value)
+    }
+    if not normalized:
+        raise ValueError("invalid booking URL")
+    return normalized
 
 
 def _reject_invalid_percent_encoding(value: str) -> None:
@@ -100,7 +127,7 @@ def _normalize_booking_query(
     depart_date: str | None,
 ) -> str:
     if not query:
-        return ""
+        raise ValueError("invalid booking URL")
     try:
         pairs = parse_qsl(
             query,
@@ -126,6 +153,9 @@ def _normalize_booking_query(
         else:
             minimum = 1 if key == "adult" else 0
             normalized[key] = _validate_passenger_count(value, minimum)
+
+    if "depdate" not in normalized:
+        raise ValueError("invalid booking URL")
 
     return urlencode(
         [(key, normalized[key]) for key in _BOOKING_QUERY_ORDER if key in normalized]
@@ -230,6 +260,14 @@ class CollectorOffer(CollectorRequest):
         return normalize_ctrip_booking_url(
             value,
             depart_date=info.data.get("depart_date"),
+            origin_codes=(
+                info.data.get("origin_code"),
+                info.data.get("origin_airport_code"),
+            ),
+            destination_codes=(
+                info.data.get("destination_code"),
+                info.data.get("destination_airport_code"),
+            ),
         )
 
     def to_internal_offer(self) -> FlightOffer:

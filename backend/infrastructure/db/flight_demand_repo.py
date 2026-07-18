@@ -352,6 +352,7 @@ async def complete_job(
             raise CollectorJobNotFoundError(job_id)
         _verify_offer_scope(row, offers)
         _verify_ctrip_offer_identity(offers)
+        _verify_booking_urls_match_lease(row, offers)
         if row.status == "completed" and row.lease_owner == node_id:
             return False
         _verify_live_lease(row, node_id, now)
@@ -631,6 +632,12 @@ def _verify_offer_scope_values(offers: list[object]) -> None:
     for offer in offers:
         booking_url = _offer_field(offer, "booking_url")
         depart_date = _offer_field(offer, "depart_date")
+        origin_code = _offer_field(offer, "origin_code")
+        origin_airport_code = _offer_field(offer, "origin_airport_code")
+        destination_code = _offer_field(offer, "destination_code")
+        destination_airport_code = _offer_field(
+            offer, "destination_airport_code"
+        )
         if not isinstance(booking_url, str) or not isinstance(depart_date, str):
             raise CollectorOfferValidationError(
                 "collector offers require a Ctrip booking URL"
@@ -639,6 +646,11 @@ def _verify_offer_scope_values(offers: list[object]) -> None:
             normalized = normalize_ctrip_booking_url(
                 booking_url,
                 depart_date=depart_date,
+                origin_codes=(origin_code, origin_airport_code),
+                destination_codes=(
+                    destination_code,
+                    destination_airport_code,
+                ),
             )
         except ValueError as exc:
             raise CollectorOfferValidationError(
@@ -648,6 +660,35 @@ def _verify_offer_scope_values(offers: list[object]) -> None:
             raise CollectorOfferValidationError(
                 "collector offers require a normalized Ctrip booking URL"
             )
+
+
+def _verify_booking_urls_match_lease(
+    row: FlightSearchDemandRow,
+    offers: list[object],
+) -> None:
+    from backend.schemas.collector import normalize_ctrip_booking_url
+
+    expected_origin = row.origin_airport_code or row.origin_code
+    expected_destination = (
+        row.destination_airport_code or row.destination_code
+    )
+    for offer in offers:
+        booking_url = _offer_field(offer, "booking_url")
+        if not isinstance(booking_url, str):
+            raise CollectorOfferValidationError(
+                "collector offers require a Ctrip booking URL"
+            )
+        try:
+            normalize_ctrip_booking_url(
+                booking_url,
+                depart_date=row.depart_date,
+                origin_codes=(expected_origin,),
+                destination_codes=(expected_destination,),
+            )
+        except ValueError as exc:
+            raise CollectorOfferValidationError(
+                "collector offers require a Ctrip booking URL"
+            ) from exc
 
 
 def _offer_field(offer: object, name: str) -> object:

@@ -37,7 +37,11 @@ def _offer(
     origin_code: str = "BJS",
     destination_code: str = "SHA",
     depart_date: str = "2099-08-01",
-    booking_url: str | None = "https://flights.ctrip.com/booking/MU5106",
+    origin_airport_code: str | None = None,
+    booking_url: str | None = (
+        "https://flights.ctrip.com/online/list/oneway-bjs-sha"
+        "?depdate=2099-08-01"
+    ),
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=data_provider,
@@ -46,7 +50,10 @@ def _offer(
         airline="东方航空",
         origin_city="北京",
         origin_code=origin_code,
-        origin_airport_code="PEK" if origin_code == "BJS" else origin_code,
+        origin_airport_code=(
+            origin_airport_code
+            or ("PEK" if origin_code == "BJS" else origin_code)
+        ),
         destination_city="上海",
         destination_code=destination_code,
         destination_airport_code=(
@@ -338,6 +345,45 @@ async def test_complete_job_rejects_offer_without_ctrip_booking_url(seeded_pg):
 
 
 @pytest.mark.asyncio
+async def test_complete_job_binds_booking_route_to_explicit_lease_scope(seeded_pg):
+    job_id = await enqueue_demand(
+        "BJS",
+        "SHA",
+        "2099-08-01",
+        "recent_search",
+        50,
+        origin_airport_code="PKX",
+        destination_airport_code="SHA",
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+
+    with pytest.raises(CollectorOfferValidationError, match="booking URL"):
+        await complete_job(
+            job_id,
+            "mac-1",
+            [
+                _offer(
+                    origin_airport_code="PKX",
+                    booking_url=(
+                        "https://flights.ctrip.com/online/list/oneway-bjs-sha"
+                        "?depdate=2099-08-01"
+                    ),
+                )
+            ],
+        )
+
+    async with seeded_pg.connect() as connection:
+        status = (
+            await connection.execute(
+                select(FlightSearchDemandRow.status).where(
+                    FlightSearchDemandRow.id == job_id
+                )
+            )
+        ).scalar_one()
+    assert status == "leased"
+
+
+@pytest.mark.asyncio
 async def test_complete_job_requires_owner_and_is_idempotent(seeded_pg):
     job_id = await enqueue_demand(
         "BJS", "SHA", "2099-08-01", "recent_search", 50
@@ -383,9 +429,27 @@ async def test_reenqueue_completed_hourly_demand_creates_a_new_claim(seeded_pg):
 @pytest.mark.parametrize(
     "offer",
     [
-        _offer(origin_code="CAN"),
-        _offer(destination_code="SYX"),
-        _offer(depart_date="2099-08-02"),
+        _offer(
+            origin_code="CAN",
+            booking_url=(
+                "https://flights.ctrip.com/online/list/oneway-can-sha"
+                "?depdate=2099-08-01"
+            ),
+        ),
+        _offer(
+            destination_code="SYX",
+            booking_url=(
+                "https://flights.ctrip.com/online/list/oneway-bjs-syx"
+                "?depdate=2099-08-01"
+            ),
+        ),
+        _offer(
+            depart_date="2099-08-02",
+            booking_url=(
+                "https://flights.ctrip.com/online/list/oneway-bjs-sha"
+                "?depdate=2099-08-02"
+            ),
+        ),
     ],
 )
 async def test_completed_job_replay_still_validates_exact_scope(
@@ -579,7 +643,18 @@ async def test_verification_status_reports_exact_scoped_ingestion(seeded_pg):
         destination_airport_code="SHA",
     )
     assert await claim_next("mac-1", lease_seconds=60) is not None
-    await complete_job(job_id, "mac-1", [_offer()])
+    await complete_job(
+        job_id,
+        "mac-1",
+        [
+            _offer(
+                booking_url=(
+                    "https://flights.ctrip.com/online/list/oneway-pek-sha"
+                    "?depdate=2099-08-01"
+                )
+            )
+        ],
+    )
 
     exact = await read_collector_verification_status(
         origin_code="BJS",
