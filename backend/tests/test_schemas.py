@@ -24,7 +24,25 @@ def _deal_payload(**overrides) -> dict:
         "depart_time": "08:00",
         "arrive_time": "13:30",
         "price": 2580,
+        "lowest_price": 2580,
+        "total_price": 2580,
         "currency": "CNY",
+        "winning_price_id": "legacy-ctrip-cny",
+        "data_freshness": "fresh",
+        "prices": [
+            {
+                "id": "legacy-ctrip-cny",
+                "name": "ctrip",
+                "price": 2580,
+                "currency": "CNY",
+                "lowest": True,
+                "price_status": "priced",
+                "provider_status": "success",
+                "url": None,
+                "data_provider": "legacy",
+                "data_freshness": "fresh",
+            }
+        ],
         "original_price": None,
         "discount_rate": None,
         "cabin": "economy",
@@ -76,6 +94,46 @@ def test_deal_card_requires_currency_instead_of_fabricating_one():
 
     with pytest.raises(ValidationError):
         DealCardDto.model_validate(payload)
+
+
+def test_deal_card_rejects_a_winner_that_disagrees_with_the_headline():
+    from backend.schemas.common import DealCardDto
+
+    payload = _deal_payload(
+        platform="other seller",
+        booking_url="https://other.example.test/book",
+    )
+
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(payload)
+
+
+def test_deal_card_rejects_booking_fallback_without_matching_winner():
+    from backend.schemas.common import DealCardDto
+
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(
+            _deal_payload(
+                h5_fallback_url="https://other.example.test/book"
+            )
+        )
+
+    reference_payload = _deal_payload(
+        platform="",
+        price=None,
+        lowest_price=None,
+        total_price=None,
+        winning_price_id=None,
+        prices=[
+            {
+                **_deal_payload()["prices"][0],
+                "lowest": False,
+            }
+        ],
+        h5_fallback_url="https://other.example.test/book",
+    )
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(reference_payload)
 
 
 # ── ApiMeta ───────────────────────────────────────────────────────────────────

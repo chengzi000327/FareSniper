@@ -28,7 +28,14 @@ def _fixture_query() -> FlightQuery:
 
 
 def _fixture_offer(
-    *, provider: str, seller: str, price: int, currency: str, url: str
+    *,
+    provider: str,
+    seller: str,
+    price: int,
+    currency: str,
+    url: str,
+    is_realtime: bool = True,
+    expires_at: str | None = None,
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=provider,
@@ -45,12 +52,29 @@ def _fixture_offer(
         currency=currency,
         total_price=price,
         booking_url=url,
+        expires_at=expires_at,
+        is_realtime=is_realtime,
     )
 
 
 def _fixture_deal() -> dict:
     query = _fixture_query()
     results = {
+        "ctrip": ProviderResult(
+            provider="ctrip",
+            status=ProviderStatus.success,
+            offers=[
+                _fixture_offer(
+                    provider="ctrip_snapshot",
+                    seller="携程",
+                    price=500,
+                    currency="CNY",
+                    url="https://ctrip.example.test/reference",
+                    is_realtime=False,
+                    expires_at="2099-08-01T01:00:00+00:00",
+                )
+            ],
+        ),
         "flyai": ProviderResult(
             provider="flyai",
             status=ProviderStatus.success,

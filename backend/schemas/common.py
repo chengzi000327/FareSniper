@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.application.contracts.flight_provider import (
     PriceStatus,
@@ -13,6 +13,7 @@ from backend.application.contracts.flight_provider import (
 
 
 ApiConfidence = Literal["high", "medium", "low"]
+DataFreshness = Literal["fresh", "stale", "unknown"]
 
 
 class ApiMeta(BaseModel):
@@ -34,6 +35,7 @@ class PriceItemDto(BaseModel):
     provider_status: ProviderStatus
     url: Optional[str] = None
     data_provider: str = ""
+    data_freshness: DataFreshness
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -69,6 +71,7 @@ class DealCardDto(BaseModel):
     total_price: Optional[int] = None
     currency: str
     recommend_score: Optional[str] = None
+    winning_price_id: Optional[str]
     prices: list[PriceItemDto] = Field(default_factory=list)
     original_price: Optional[int] = None
     discount_rate: Optional[float] = None
@@ -78,7 +81,7 @@ class DealCardDto(BaseModel):
     verdict: str = ""
     booking_url: Optional[str] = None
     h5_fallback_url: Optional[str] = None
-    data_freshness: Optional[str] = None
+    data_freshness: DataFreshness
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -89,6 +92,54 @@ class DealCardDto(BaseModel):
     @classmethod
     def keep_only_complete_https_url(cls, value: object) -> str | None:
         return value if is_complete_https_url(value) else None
+
+    @model_validator(mode="after")
+    def validate_winning_price_contract(self) -> DealCardDto:
+        if self.winning_price_id is None:
+            if any(price.lowest is True for price in self.prices):
+                raise ValueError("price row cannot be lowest without a winner")
+            if (
+                self.platform
+                or self.price is not None
+                or self.lowest_price is not None
+                or self.total_price is not None
+                or self.booking_url is not None
+                or self.h5_fallback_url is not None
+            ):
+                raise ValueError("headline and booking require a winning row")
+            return self
+
+        matches = [
+            price
+            for price in self.prices
+            if price.id == self.winning_price_id
+        ]
+        if len(matches) != 1:
+            raise ValueError("winning_price_id must identify exactly one row")
+        winner = matches[0]
+        if (
+            winner.lowest is not True
+            or winner.price is None
+            or winner.price_status is not PriceStatus.priced
+            or winner.provider_status is not ProviderStatus.success
+            or winner.data_freshness != "fresh"
+        ):
+            raise ValueError("winning row must be fresh, priced, and successful")
+        if (
+            self.platform != winner.name
+            or self.currency != winner.currency
+            or self.price != winner.price
+            or self.lowest_price != winner.price
+            or self.total_price != winner.price
+            or self.data_freshness != winner.data_freshness
+        ):
+            raise ValueError("winning row must drive the headline")
+        if (
+            self.booking_url != winner.url
+            or self.h5_fallback_url not in {None, winner.url}
+        ):
+            raise ValueError("winning row must drive the booking action")
+        return self
 
 
 class RecommendationCardDto(BaseModel):

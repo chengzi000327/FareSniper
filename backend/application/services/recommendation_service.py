@@ -22,7 +22,7 @@ from backend.schemas.common import DealCardDto
 # ── 缓存分层 ──────────────────────────────────────────────────────────────────
 # L1:全局未排序卡片池,全用户共享,key=rec:pool:v1,TTL 600s。
 # L2:请求时在内存里做个性化排序(读 frequent_cities),不进 L1 缓存。
-POOL_CACHE_KEY = "rec:pool:v2"
+POOL_CACHE_KEY = "rec:pool:v3"
 POOL_CACHE_TTL = 600  # 10 分钟
 
 DEFAULT_LIMIT = 6
@@ -124,10 +124,17 @@ async def _build_card_pool() -> list[RecCard]:
                 if _deal_currency(deal) == selected_currency
                 and _positive_price(deal.get("lowest_price")) is not None
             ]
-            if comparable_batch:
+            fresh_batch = [
+                deal
+                for deal in comparable_batch
+                if _deal_freshness(deal) == "fresh"
+                and isinstance(deal.get("winning_price_id"), str)
+            ]
+            selection_pool = fresh_batch or comparable_batch
+            if selection_pool:
                 best_deal = dict(
                     min(
-                        comparable_batch,
+                        selection_pool,
                         key=lambda deal: _positive_price(
                             deal.get("lowest_price")
                         ),
@@ -138,7 +145,7 @@ async def _build_card_pool() -> list[RecCard]:
             # 会把均值拉高导致折扣虚高,中位数对离群价更稳健。
             prices = [
                 price
-                for deal in comparable_batch
+                for deal in fresh_batch
                 if (price := _positive_price(deal.get("lowest_price")))
                 is not None
             ]
@@ -203,7 +210,6 @@ def _build_card(
         deal = None
 
     if deal:
-        price = deal.get("lowest_price", 0)
         currency = _deal_currency(deal)
         if not currency:
             return RecCard(
@@ -212,20 +218,42 @@ def _build_card(
                 reason=_build_reason(dest_name, None, None, False),
                 tags=tags,
             )
-        discount_pct = _compute_discount(deal, market_avg, sample_n)
-
-        # "历史低价"信号改用 history_low_90d 判定:价格触及 90 天历史低点
-        hist_low = deal.get("history_low_90d")
-        is_history_low = bool(hist_low and price > 0 and price <= hist_low)
-
-        platform_name, booking_url = _build_booking(deal, origin, dest)
-
         prices = deal.get("prices") or []
         selected_prices = [
             row
             for row in prices
             if str(row.get("currency") or "").upper() == currency
         ]
+        winning_price = _winning_price(deal, selected_prices)
+        price = (
+            _positive_price(winning_price.get("price"))
+            if winning_price is not None
+            else None
+        )
+        if winning_price is not None and price is None:
+            winning_price = None
+        if winning_price is not None:
+            discount_pct = _compute_discount(deal, market_avg, sample_n)
+
+        # "历史低价"信号改用 history_low_90d 判定:价格触及 90 天历史低点
+        hist_low = deal.get("history_low_90d")
+        is_history_low = bool(
+            winning_price is not None
+            and hist_low
+            and price is not None
+            and price <= hist_low
+        )
+
+        platform_name, booking_url = _build_booking(
+            deal, winning_price, origin, dest
+        )
+
+        winning_price_id = (
+            str(winning_price["id"])
+            if winning_price is not None
+            else None
+        )
+        deal_freshness = _deal_freshness(deal)
         preview_deal = {
             "id": f"rec-{origin}-{dest}-{deal.get('depart_date', '')}",
             "system_id": f"{deal.get('flight_no', '')}-{deal.get('depart_date', '')}",
@@ -249,33 +277,58 @@ def _build_card(
             "total_price": price,
             "currency": currency,
             "recommend_score": None,
+            "winning_price_id": winning_price_id,
             "prices": [
                 {
                     "id": _recommendation_price_id(p, currency),
                     "name": p.get("platform", ""),
                     "price": p.get("price"),
                     "currency": currency,
-                    "lowest": p.get("lowest", False),
-                    "price_status": p.get("price_status", "priced"),
-                    "provider_status": "success",
+                    "lowest": (
+                        winning_price_id is not None
+                        and _recommendation_price_id(p, currency)
+                        == winning_price_id
+                    ),
+                    "price_status": (
+                        p.get("price_status", "priced")
+                        if _price_freshness(p) == "fresh"
+                        else "stale"
+                    ),
+                    "provider_status": (
+                        "success"
+                        if _price_freshness(p) == "fresh"
+                        else "stale"
+                    ),
                     "url": (
-                        p.get("url")
-                        if is_complete_https_url(p.get("url"))
+                        booking_url
+                        if winning_price_id is not None
+                        and _recommendation_price_id(p, currency)
+                        == winning_price_id
+                        else p.get("url")
+                        if _price_freshness(p) == "fresh"
+                        and is_complete_https_url(p.get("url"))
                         else None
                     ),
                     "data_provider": p.get("data_provider", "legacy"),
+                    "data_freshness": _price_freshness(p),
                 }
                 for p in selected_prices
             ],
             "signals": (["历史低价"] if is_history_low else []),
             "booking_url": booking_url,
-            "data_freshness": deal.get("data_freshness", "fresh"),
+            "h5_fallback_url": booking_url,
+            "data_freshness": deal_freshness,
         }
         preview_deal = DealCardDto.model_validate(preview_deal).model_dump(
             mode="json"
         )
 
-    reason = _build_reason(dest_name, discount_pct, deal, is_history_low)
+    reason = _build_reason(
+        dest_name,
+        discount_pct,
+        deal if preview_deal and preview_deal["winning_price_id"] else None,
+        is_history_low,
+    )
 
     return RecCard(
         id=str(uuid.uuid4())[:8],
@@ -349,6 +402,41 @@ def _preferred_batch_currency(batch: list[dict[str, Any]]) -> str | None:
     return "CNY" if "CNY" in currencies else currencies[0]
 
 
+def _price_freshness(price: dict[str, Any]) -> str:
+    value = price.get("data_freshness")
+    return value if value in {"fresh", "stale", "unknown"} else "unknown"
+
+
+def _deal_freshness(deal: dict[str, Any]) -> str:
+    value = deal.get("data_freshness")
+    return value if value in {"fresh", "stale", "unknown"} else "unknown"
+
+
+def _winning_price(
+    deal: dict[str, Any], prices: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    if _deal_freshness(deal) != "fresh":
+        return None
+    winning_price_id = deal.get("winning_price_id")
+    if not isinstance(winning_price_id, str) or not winning_price_id:
+        return None
+    matches = [
+        price
+        for price in prices
+        if _recommendation_price_id(price, _deal_currency(deal) or "")
+        == winning_price_id
+    ]
+    if len(matches) != 1:
+        return None
+    winner = matches[0]
+    if (
+        _price_freshness(winner) != "fresh"
+        or winner.get("price_status", "priced") != "priced"
+    ):
+        return None
+    return winner
+
+
 def _positive_price(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         return None
@@ -369,26 +457,21 @@ def _recommendation_price_id(price: dict[str, Any], currency: str) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
 
-def _build_booking(deal: dict[str, Any], origin: str, dest: str) -> tuple[str, str | None]:
-    """为最低价平台生成预订深链。返回 (展示用平台名, booking_url)。"""
-    if not _is_future_departure(deal.get("depart_date")):
+def _build_booking(
+    deal: dict[str, Any],
+    winning_price: dict[str, Any] | None,
+    origin: str,
+    dest: str,
+) -> tuple[str, str | None]:
+    """Generate a booking action from the explicit fresh winning row."""
+    if (
+        winning_price is None
+        or _price_freshness(winning_price) != "fresh"
+        or not _is_future_departure(deal.get("depart_date"))
+    ):
         return "", None
-    prices = deal.get("prices") or []
-    currency = _deal_currency(deal)
-    comparable_prices = [
-        price
-        for price in prices
-        if currency
-        and str(price.get("currency") or "").strip().upper() == currency
-    ]
-    if not comparable_prices:
-        return "", None
-
-    cheapest = min(
-        comparable_prices, key=lambda p: p.get("price", 999999)
-    )
-    platform_name = cheapest.get("platform", "")
-    direct_url = cheapest.get("url")
+    platform_name = winning_price.get("platform", "")
+    direct_url = winning_price.get("url")
     if is_complete_https_url(direct_url):
         return platform_name, direct_url
 

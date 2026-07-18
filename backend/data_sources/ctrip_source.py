@@ -155,33 +155,32 @@ class CtripSource(DataSource):
             raise CtripCollectionError() from None
 
         try:
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(),
-                timeout=self.collection_timeout_seconds,
-            )
-        except asyncio.CancelledError:
-            await self._terminate_worker_group(process)
-            raise
-        except Exception:
-            await self._terminate_worker_group(process)
-            raise CtripCollectionError() from None
+            try:
+                stdout, _ = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.collection_timeout_seconds,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                raise CtripCollectionError() from None
 
-        if process.returncode != 0:
+            if process.returncode != 0:
+                raise CtripCollectionError()
+            try:
+                payload = json.loads(stdout.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError
+                flights = payload.get("flights")
+                if payload.get("ok") is not True or not isinstance(flights, list):
+                    raise ValueError
+                if not all(isinstance(flight, dict) for flight in flights):
+                    raise ValueError
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                raise CtripCollectionError() from None
+            return flights
+        finally:
             await self._terminate_worker_group(process)
-            raise CtripCollectionError()
-        try:
-            payload = json.loads(stdout.decode("utf-8"))
-            if not isinstance(payload, dict):
-                raise ValueError
-            flights = payload.get("flights")
-            if payload.get("ok") is not True or not isinstance(flights, list):
-                raise ValueError
-            if not all(isinstance(flight, dict) for flight in flights):
-                raise ValueError
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
-            await self._terminate_worker_group(process)
-            raise CtripCollectionError() from None
-        return flights
 
     @staticmethod
     async def _terminate_worker_group(

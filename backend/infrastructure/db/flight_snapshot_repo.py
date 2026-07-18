@@ -69,6 +69,19 @@ class PlatformPriceSnapshot(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class ProviderInventoryObservation(Base):
+    __tablename__ = "provider_inventory_observations"
+    __table_args__ = {"extend_existing": True}
+
+    provider = Column(String, primary_key=True)
+    origin_code = Column(String, primary_key=True)
+    destination_code = Column(String, primary_key=True)
+    depart_date = Column(String, primary_key=True)
+    observed_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    item_count = Column(Integer, nullable=False)
+
+
 def _snapshot_id(f: dict[str, Any]) -> str:
     raw = (
         f"{f['origin_code']}|{f['destination_code']}|{f['depart_date']}|"
@@ -152,6 +165,29 @@ def _display_currency(prices: list[PlatformPriceSnapshot]) -> str | None:
     if not currencies:
         return None
     return "CNY" if "CNY" in currencies else currencies[0]
+
+
+def _inventory_freshness(
+    expires_at: datetime | None,
+    *,
+    price_status: str = "priced",
+    now: datetime,
+) -> str:
+    if price_status == "stale":
+        return "stale"
+    if expires_at is None:
+        return "unknown"
+    expiry = expires_at
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return "stale" if expiry <= now else "fresh"
+
+
+def _observation_age_seconds(observed_at: datetime, now: datetime) -> int:
+    observed = observed_at
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    return max(0, int((now - observed).total_seconds()))
 
 
 def _deal_sort_key(deal: dict[str, Any]) -> tuple[int, str, int, str]:
@@ -320,6 +356,33 @@ async def upsert_provider_flights(
                         price_rows
                     )
                 )
+        observation_values = {
+            "provider": provider,
+            "origin_code": scope[0],
+            "destination_code": scope[1],
+            "depart_date": scope[2],
+            "observed_at": now,
+            "expires_at": expires_at,
+            "item_count": len(flights),
+        }
+        observation_stmt = pg_insert(
+            ProviderInventoryObservation.__table__
+        ).values(**observation_values)
+        await s.execute(
+            observation_stmt.on_conflict_do_update(
+                index_elements=[
+                    ProviderInventoryObservation.provider,
+                    ProviderInventoryObservation.origin_code,
+                    ProviderInventoryObservation.destination_code,
+                    ProviderInventoryObservation.depart_date,
+                ],
+                set_={
+                    "observed_at": now,
+                    "expires_at": expires_at,
+                    "item_count": len(flights),
+                },
+            )
+        )
         await s.commit()
 
 
@@ -353,6 +416,7 @@ async def read_deals_latest(
 
 
 async def read_deals(*, origin_code: str, destination_code: str, depart_date: str) -> list[dict[str, Any]]:
+    now = datetime.now(timezone.utc)
     async with get_session() as s:
         snaps = (await s.execute(
             select(FlightSnapshot)
@@ -384,20 +448,40 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
             display_prices = [
                 price for price in prices if price.currency == currency
             ]
-            display_lowest = min(
-                (price.price for price in display_prices), default=0
+            freshness = {
+                price.id: _inventory_freshness(
+                    price.expires_at,
+                    price_status=price.price_status,
+                    now=now,
+                )
+                for price in prices
+            }
+            eligible_prices = [
+                price
+                for price in display_prices
+                if freshness[price.id] == "fresh"
+            ]
+            winning_price = min(
+                eligible_prices,
+                key=lambda price: (price.price, price.platform, price.id),
+                default=None,
+            )
+            reference_price = winning_price or min(
+                display_prices,
+                key=lambda price: (price.price, price.platform, price.id),
+                default=None,
             )
             price_items = [
                 {
+                    "id": p.id,
                     "platform": p.platform,
                     "price": p.price,
                     "currency": p.currency,
                     "url": p.url,
-                    "lowest": (
-                        p.currency == currency and p.price == display_lowest
-                    ),
+                    "lowest": winning_price is not None and p.id == winning_price.id,
                     "price_status": p.price_status,
                     "data_provider": p.data_provider,
+                    "data_freshness": freshness[p.id],
                 }
                 for p in prices
             ]
@@ -405,11 +489,17 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
                 "flight_no": snap.flight_no, "airline": snap.airline,
                 "origin_code": snap.origin_code, "destination_code": snap.destination_code,
                 "depart_date": snap.depart_date, "dep_time": snap.dep_time, "arr_time": snap.arr_time,
-                "duration": snap.duration, "stops": snap.stops, "lowest_price": display_lowest,
+                "duration": snap.duration, "stops": snap.stops,
+                "lowest_price": reference_price.price if reference_price is not None else 0,
                 "currency": currency,
                 "history_avg_90d": snap.history_avg_90d, "history_low_90d": snap.history_low_90d,
                 "prices": price_items,
-                "data_freshness": "stale" if (snap.expires_at and snap.expires_at < datetime.now(timezone.utc)) else "fresh",
+                "winning_price_id": winning_price.id if winning_price is not None else None,
+                "data_freshness": (
+                    freshness[reference_price.id]
+                    if reference_price is not None
+                    else "unknown"
+                ),
             })
         deals.sort(key=_deal_sort_key)
         return deals
@@ -424,6 +514,17 @@ async def read_provider_deals(
 ) -> tuple[list[dict[str, Any]], int | None, bool]:
     now = datetime.now(timezone.utc)
     async with get_session() as s:
+        observation = (
+            await s.execute(
+                select(ProviderInventoryObservation).where(
+                    ProviderInventoryObservation.provider == provider,
+                    ProviderInventoryObservation.origin_code == origin_code,
+                    ProviderInventoryObservation.destination_code
+                    == destination_code,
+                    ProviderInventoryObservation.depart_date == depart_date,
+                )
+            )
+        ).scalar_one_or_none()
         snaps = (
             await s.execute(
                 select(FlightSnapshot)
@@ -442,7 +543,13 @@ async def read_provider_deals(
             )
         ).scalars().all()
         if not snaps:
-            return [], None, False
+            if observation is None:
+                return [], None, False
+            return (
+                [],
+                _observation_age_seconds(observation.observed_at, now),
+                observation.expires_at <= now,
+            )
 
         deals: list[dict[str, Any]] = []
         provider_rows: list[PlatformPriceSnapshot] = []
@@ -500,11 +607,20 @@ async def read_provider_deals(
                 }
             )
 
-    newest_crawl = max(row.crawled_at for row in provider_rows)
-    age = max(0, int((now - newest_crawl).total_seconds()))
-    all_stale = all(
-        row.expires_at is not None and row.expires_at <= now
-        for row in provider_rows
-    )
+    if observation is not None:
+        age = _observation_age_seconds(observation.observed_at, now)
+        all_stale = observation.expires_at <= now
+    else:
+        newest_crawl = max(row.crawled_at for row in provider_rows)
+        age = _observation_age_seconds(newest_crawl, now)
+        all_stale = all(
+            _inventory_freshness(
+                row.expires_at,
+                price_status=row.price_status,
+                now=now,
+            )
+            != "fresh"
+            for row in provider_rows
+        )
     deals.sort(key=_deal_sort_key)
     return deals, age, all_stale

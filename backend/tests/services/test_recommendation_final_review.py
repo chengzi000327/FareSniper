@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from backend.application.contracts.recommendations import RecCard
 import backend.application.services.recommendation_service as svc
 
@@ -28,6 +30,7 @@ def _preview_deal(*, currency: str = "CNY") -> dict:
         "total_price": 580,
         "currency": currency,
         "recommend_score": None,
+        "winning_price_id": "legacy-ctrip-cny",
         "prices": [
             {
                 "id": "legacy-ctrip-cny",
@@ -37,17 +40,23 @@ def _preview_deal(*, currency: str = "CNY") -> dict:
                 "lowest": True,
                 "price_status": "priced",
                 "provider_status": "success",
+                "data_freshness": "fresh",
                 "url": "https://flights.example.test/book?fixture=not-secret",
                 "data_provider": "legacy",
             }
         ],
         "signals": [],
         "booking_url": "https://flights.example.test/book?fixture=not-secret",
+        "data_freshness": "fresh",
     }
 
 
 async def _identity_personalize(user_id: str, pool: list[RecCard]):
     return pool, False
+
+
+def test_recommendation_pool_cache_version_excludes_pre_freshness_cards():
+    assert svc.POOL_CACHE_KEY == "rec:pool:v3"
 
 
 async def test_server_pagination_skips_empty_cards_before_slicing(monkeypatch):
@@ -110,12 +119,17 @@ def test_recommendation_preview_keeps_currency_without_fabricated_score_or_fees(
         "arr_time": "14:00",
         "lowest_price": 80,
         "currency": "USD",
+        "winning_price_id": "legacy-trip-usd",
+        "data_freshness": "fresh",
         "prices": [
             {
+                "id": "legacy-trip-usd",
                 "platform": "Trip.com",
                 "price": 80,
                 "currency": "USD",
                 "url": "https://booking.example.test/checkout",
+                "price_status": "priced",
+                "data_freshness": "fresh",
             }
         ],
     }
@@ -128,6 +142,50 @@ def test_recommendation_preview_keeps_currency_without_fabricated_score_or_fees(
     assert card.preview_deal["tax"] is None
     assert card.preview_deal["baggage_fee"] is None
     assert card.preview_deal["has_baggage"] is None
+    assert card.preview_deal["winning_price_id"] == "legacy-trip-usd"
+    assert card.preview_deal["prices"][0]["url"] == card.preview_deal["booking_url"]
+
+
+@pytest.mark.parametrize("freshness", ["stale", "unknown"])
+def test_expired_or_unknown_inventory_is_reference_only(freshness):
+    deal = {
+        "flight_no": "MU5106",
+        "depart_date": "2099-08-01",
+        "airline": "东方航空",
+        "dep_time": "08:00",
+        "arr_time": "10:00",
+        "lowest_price": 500,
+        "currency": "CNY",
+        "winning_price_id": None,
+        "data_freshness": freshness,
+        "prices": [
+            {
+                "id": f"legacy-{freshness}",
+                "platform": "携程",
+                "price": 500,
+                "currency": "CNY",
+                "url": "https://booking.example.test/expired",
+                "price_status": "priced",
+                "data_freshness": freshness,
+            }
+        ],
+    }
+
+    card = svc._build_card("BJS", "SHA", deal, market_avg=None, sample_n=1)
+
+    assert card.preview_deal is not None
+    preview = card.preview_deal
+    assert preview["winning_price_id"] is None
+    assert preview["platform"] == ""
+    assert preview["price"] is None
+    assert preview["lowest_price"] is None
+    assert preview["total_price"] is None
+    assert preview["booking_url"] is None
+    assert preview["data_freshness"] == freshness
+    assert preview["prices"][0]["provider_status"] == "stale"
+    assert preview["prices"][0]["data_freshness"] == freshness
+    assert preview["prices"][0]["lowest"] is False
+    assert "持续监控" in card.reason
 
 
 async def test_card_pool_selects_and_compares_one_currency_per_route(monkeypatch):
@@ -140,8 +198,17 @@ async def test_card_pool_selects_and_compares_one_currency_per_route(monkeypatch
                 "arr_time": "10:00",
                 "lowest_price": 80,
                 "currency": "USD",
+                "winning_price_id": "global-usd",
+                "data_freshness": "fresh",
                 "prices": [
-                    {"platform": "Global", "price": 80, "currency": "USD"}
+                    {
+                        "id": "global-usd",
+                        "platform": "Global",
+                        "price": 80,
+                        "currency": "USD",
+                        "price_status": "priced",
+                        "data_freshness": "fresh",
+                    }
                 ],
             },
             {
@@ -151,8 +218,17 @@ async def test_card_pool_selects_and_compares_one_currency_per_route(monkeypatch
                 "arr_time": "11:00",
                 "lowest_price": 550,
                 "currency": "CNY",
+                "winning_price_id": "ctrip-cny",
+                "data_freshness": "fresh",
                 "prices": [
-                    {"platform": "携程", "price": 550, "currency": "CNY"}
+                    {
+                        "id": "ctrip-cny",
+                        "platform": "携程",
+                        "price": 550,
+                        "currency": "CNY",
+                        "price_status": "priced",
+                        "data_freshness": "fresh",
+                    }
                 ],
             },
         ]

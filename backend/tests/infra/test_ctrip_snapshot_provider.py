@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
+import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
 from backend.application.contracts.flight_provider import PriceStatus, ProviderStatus
 from backend.application.services.flight_query import build_flight_query
+from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
 from backend.infrastructure.flight_data.providers.ctrip_snapshot import (
     CtripSnapshotProvider,
     ctrip_rows_to_offers,
@@ -43,6 +47,58 @@ async def test_empty_snapshot_queues_demand(monkeypatch):
             "source": "recent_search",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_successful_empty_snapshot_stays_empty_until_its_ttl_expires(
+    seeded_pg,
+    monkeypatch,
+):
+    observed_at = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        current = observed_at
+
+        @classmethod
+        def now(cls, tz=None):
+            current = cls.current
+            return current if tz is not None else current.replace(tzinfo=None)
+
+    queued = []
+
+    async def capture_demand(**kwargs):
+        queued.append(kwargs)
+
+    monkeypatch.setattr(snapshot_repo, "datetime", FrozenDateTime)
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.enqueue_demand",
+        capture_demand,
+    )
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [],
+        ttl_minutes=60,
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+    query = build_flight_query("北京", "上海", "2099-08-01")
+
+    fresh_empty = await CtripSnapshotProvider().search(query)
+
+    assert fresh_empty.status is ProviderStatus.empty
+    assert fresh_empty.offers == []
+    assert fresh_empty.cache_age_seconds == 0
+    assert queued == []
+
+    FrozenDateTime.current = observed_at + timedelta(minutes=61)
+
+    expired_empty = await CtripSnapshotProvider().search(query)
+
+    assert expired_empty.status is ProviderStatus.stale
+    assert expired_empty.offers == []
+    assert expired_empty.cache_age_seconds == 61 * 60
+    assert len(queued) == 1
 
 
 @pytest.mark.asyncio

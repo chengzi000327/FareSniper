@@ -38,6 +38,7 @@ function recommendationCard() {
       total_price: 80,
       currency: "USD",
       recommend_score: null,
+      winning_price_id: "serpapi-global-usd",
       prices: [
         {
           id: "serpapi-global-usd",
@@ -48,9 +49,11 @@ function recommendationCard() {
           price_status: "priced",
           provider_status: "success",
           data_provider: "serpapi_google_flights",
+          data_freshness: "fresh",
         },
       ],
       signals: [],
+      data_freshness: "fresh",
     },
   };
 }

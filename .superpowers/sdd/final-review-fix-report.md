@@ -340,3 +340,256 @@ Per the review instruction, monolithic backend pytest was not rerun against the 
 ## Self-Review
 
 The complete diff from `64a913fbac1635e8222c16d195852913f3061f5a` was reviewed after implementation. Follow-up regressions closed nonzero/malformed process cleanup, Ctrip snapshot and recommendation mixed-currency selection, repository mixed-currency ordering, backend-null frontend parsing, freshest duplicate tie-breaking, embedded secret-key markers, and the Ctrip constructor mock default. No remaining Critical or Important finding was identified.
+
+---
+
+# Round 2 Remediation
+
+Review baseline: `aa4f0cdaa1db61dd91f8ba8abeba52e445e71d58`
+
+Date: 2026-07-18
+
+## Root Causes
+
+1. A successful provider refresh was represented only by child snapshot rows. Replacing a route/date with an empty result deleted those rows and erased the fact that an empty refresh had succeeded, so the online provider treated the state as a cache miss and immediately queued it again.
+2. The normalizer selected a realtime headline offer but independently marked the cheapest fresh numeric row as `lowest`. A cheaper Ctrip reference snapshot could therefore receive the badge while seller, headline amount, and booking action came from a different row.
+3. Repository freshness stopped at the persistence boundary. Recommendation mapping hard-coded row success and defaulted missing freshness to fresh, while the frontend discarded freshness and inferred realtime claims from `lowest` plus a numeric amount.
+4. Ctrip browser-worker cleanup ran only on exceptional exits. A successful worker response returned without explicitly killing/reaping the process group, leaving descendant cleanup dependent on the child behaving perfectly.
+5. Tightening the wire schema exposed a legacy graph renderer that still emitted the old mock deal shape. That path needed an explicit reference-only projection instead of bypassing the winner/freshness contract.
+
+## RED Evidence
+
+All finding regressions were written and run before their production changes.
+
+### Empty observation and TTL
+
+```text
+pytest -q \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_empty_provider_observation_is_scoped_and_expires_by_ttl \
+  backend/tests/infra/test_ctrip_snapshot_provider.py::test_successful_empty_snapshot_stays_empty_until_its_ttl_expires \
+  backend/tests/workers/test_ctrip_refresh.py::test_worker_empty_refresh_is_observed_by_provider_until_ttl_expires
+```
+
+Result: `3 failed in 38.83s`. Empty replacements returned no observation age, and both provider paths queued instead of returning a fresh `empty` result.
+
+### One eligible winning row
+
+```text
+pytest -q \
+  backend/tests/services/test_flight_offer_normalizer.py::test_deduplicates_identity_and_orders_price_rows_stably \
+  backend/tests/services/test_flight_offer_normalizer.py::test_price_rows_keep_currency_and_separate_provider_from_price_status \
+  backend/tests/test_schemas.py::test_deal_card_rejects_a_winner_that_disagrees_with_the_headline \
+  backend/tests/contracts/test_flight_wire_contract.py::test_backend_fixture_preserves_https_deep_link_query_and_currency
+```
+
+Result: `4 failed in 0.07s`. The cheaper snapshot row was marked lowest, winner/freshness fields were absent, and the schema accepted contradictory headline/row data.
+
+### Repository-to-recommendation freshness
+
+```text
+pytest -q \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_read_deals_propagates_expired_and_unknown_price_freshness \
+  backend/tests/services/test_recommendation_final_review.py::test_recommendation_pool_cache_version_excludes_pre_freshness_cards \
+  backend/tests/services/test_recommendation_final_review.py::test_recommendation_preview_keeps_currency_without_fabricated_score_or_fees \
+  backend/tests/services/test_recommendation_final_review.py::test_expired_or_unknown_inventory_is_reference_only
+```
+
+Result: `5 failed in 17.72s` (the final node is parametrized). Expired rows appeared fresh, the cache key was still v2, and recommendation cards lacked winner/freshness truth.
+
+### Successful worker cleanup
+
+```text
+pytest -q \
+  backend/tests/test_ctrip_source.py::test_successful_worker_payload_kills_process_group_and_awaits_cleanup
+```
+
+Result: `1 failed`; successful output returned without a process-group kill or awaited cleanup.
+
+### Frontend runtime contract
+
+```text
+npm run test -- --run \
+  __tests__/backend-wire-contract.test.ts \
+  __tests__/api.test.ts \
+  __tests__/mappers.test.ts \
+  __tests__/discovery-card-content.test.tsx
+```
+
+Result: `9 failed | 75 passed`. Runtime parsing did not require winner/freshness, mapping dropped those fields and authoritative total, and the card inferred badges/copy/CTA independently.
+
+### Legacy graph integration
+
+```text
+pytest -q \
+  backend/tests/graph/test_search_graph.py::test_response_passes_searchresponsedto_validation
+```
+
+Result: `1 failed in 1.80s` with 45 DTO validation errors from the pre-contract mock projection. The regression was strengthened to require unknown freshness, no winner, no successful provider row, and no booking URL before changing the renderer.
+
+## Schema And Persistence
+
+Migration `20260718_provider_inventory` adds `provider_inventory_observations` with a composite primary key of provider, origin, destination, and departure date. Each row records non-null `observed_at`, non-null `expires_at`, and checked nonnegative `item_count`.
+
+The observation upsert shares the same transaction and provider/route/date advisory lock as scoped child-row deletion and insertion. Successful nonempty and empty refreshes therefore replace inventory and observation atomically; a failed scrape never enters this transaction and retains prior inventory. No other provider, route, or date is touched.
+
+The committed wire contract now requires:
+
+- `data_freshness` on each price row and deal: `fresh`, `stale`, or `unknown`;
+- `winning_price_id` on each deal, nullable when no eligible winner exists;
+- exactly one matching fresh, priced, successful row when a winner exists;
+- winner identity, seller, currency, amount, total, badge, and booking URL to agree;
+- no headline amount, seller, lowest badge, or booking action when no winner exists.
+
+Alembic reports exactly one head: `20260718_provider_inventory`.
+
+## Implementation By Finding
+
+### Important 1: observed empty inventory
+
+- Persisted provider refresh observations for every successful replacement, including `[]`.
+- Made fresh empty observations return `ProviderStatus.empty` without enqueueing.
+- Made expired empty observations return stale and enqueue one refresh demand.
+- Used frozen repository time to prove the exact fresh-to-stale TTL transition and provider/route/date isolation.
+- Added worker-to-repository-to-provider coverage for a successful empty scrape.
+
+### Important 2: one winner drives all claims
+
+- Normalizer winner eligibility now requires a realtime, fresh, priced, numeric offer from a successful provider.
+- Ctrip `is_realtime=False` rows remain visible references and can never receive `lowest` or drive the headline/CTA.
+- Added stable row IDs and `winning_price_id`; only the matching row receives `lowest=true`.
+- Added a Pydantic cross-field validator so contradictory backend wire data is rejected.
+- Regenerated the committed progressive NDJSON fixture with a cheaper Ctrip snapshot and a more expensive eligible FlyAI winner; backend and frontend tests consume the same artifact.
+- Frontend parser validates the winner relationship, mapper preserves it, and the card uses that row alone for headline claims, seller, badge, and booking action.
+
+### Important 3: freshness through recommendation and UI
+
+- Repository derives freshness from each child expiry. Missing expiry is `unknown`; elapsed expiry or stale price status is `stale`; neither can win.
+- Recommendation cache advanced to `rec:pool:v3` so older cards cannot bypass the new contract.
+- Recommendation cards preserve row/card freshness and explicit winner identity. Nonfresh rows become reference-only with stale provider/price status, no winner, no generated/direct booking URL, no discount claim, and neutral monitoring copy.
+- Past, invalid, stale, and unknown inventory cannot create booking actions.
+- Frontend displays unknown/stale reference messaging, gates realtime copy and live-price links on fresh status, and gates the CTA on exact card/winner URL agreement.
+- Legacy graph mock results now serialize as unknown, disabled reference rows with no winner or URLs.
+
+### Coupled lifecycle Minor
+
+- Ctrip worker process-group termination and `wait()` now run from `finally` on success, timeout, cancellation, malformed output, nonzero exit, and communication failure.
+- Deterministic success coverage verifies `SIGKILL` of the process group and awaited reaping without launching a browser.
+
+## GREEN Evidence
+
+### Focused backend
+
+- Directly affected contract/provider/normalizer/recommendation/lifecycle/schema set: `64 passed in 15.35s`.
+- Standalone recommendation truthfulness logic: final rerun `7 passed in 0.08s`.
+- Successful-worker cleanup node: included in the 64-test set and full Ctrip source coverage.
+- Legacy graph DTO/reference projection: final focused rerun `1 passed in 2.13s`.
+- Recommendation API authentication boundary: `1 passed, 1 warning in 15.34s`.
+
+### Bounded database and worker evidence
+
+Final six-node Round 2 repository/provider/worker group:
+
+```text
+pytest -q \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_empty_provider_observation_is_scoped_and_expires_by_ttl \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_read_deals_propagates_expired_and_unknown_price_freshness \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_provider_refresh_with_empty_success_clears_route_inventory \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_mixed_provider_rows_keep_legacy_price_and_freshness \
+  backend/tests/infra/test_ctrip_snapshot_provider.py::test_successful_empty_snapshot_stays_empty_until_its_ttl_expires \
+  backend/tests/workers/test_ctrip_refresh.py::test_worker_empty_refresh_is_observed_by_provider_until_ttl_expires
+```
+
+Result: `6 passed in 104.46s`.
+
+Full Ctrip refresh worker file: `15 passed in 31.09s`.
+
+An earlier full snapshot repository discovery run completed with `15 passed, 2 failed in 252.83s`; both failures were obsolete exact-shape expectations for the newly required row fields and empty observation age. After updating those assertions, the exact two nodes passed in `31.00s`. The final six-node group above is the counted Round 2 DB green result.
+
+### Combined backend
+
+The combined command covered provider contracts, committed wire fixture, query validation, normalizer, aggregator, FlyAI, SerpAPI, Ctrip provider/source, tracing, JSON/stream APIs, graph tool/render/search paths, and schemas.
+
+Final post-self-review result: `188 passed, 1 warning in 20.26s`.
+
+The warning is the existing LangGraph pending-deprecation warning.
+
+### Frontend
+
+- Cross-layer wire/parser/mapper/card group: `4 files passed`, `86 tests passed`.
+- Full Vitest: `17 files passed`, `120 tests passed`.
+- `npm run lint`: passed (`tsc --noEmit`).
+- `npm run build`: Next.js 15.5.15 production build passed and generated all 10 routes.
+
+### Migration, static, and safety
+
+- `alembic -c backend/alembic.ini heads`: one head, `20260718_provider_inventory`.
+- Structured `dotenv_values("backend/.env")` check asserted test and production DSNs differ, passed only the test DSN to the Alembic child environment, printed no URL, and upgraded to head successfully.
+- `python3 -m compileall -q backend`: passed.
+- `git diff --check`: passed.
+- Mock-disable contract/default/dependency checks: `20 passed in 0.48s`.
+- Local backend/frontend environment files are not tracked.
+- The credential-pattern scan covered 1,808 tracked files and printed no values. Its only candidates were pre-existing credential-shaped documentation/test examples in tracked Pydantic source and `test_settings_contract.py`; redacted inspection confirmed they are synthetic. There are zero unadjudicated credential candidates.
+
+## Limitations
+
+The previously interrupted combined recommendation command remains inconclusive and is not counted as green. Its PID `51386` produced exactly 15 dots, no traceback, and no pytest summary before termination after a prolonged remote asyncpg wait. Round 2 did not rerun `test_recommendation_feed.py`, `test_recommendation_fallback.py`, and the DB-backed recommendation API group together. Direct recommendation logic (`7 passed`), the bounded DB group (`6 passed`), search API coverage in the 188-test group, and full frontend explore/card coverage provide isolated evidence without repeating the environment stall.
+
+The monolithic backend suite was not run against the remote test database. No paid/live provider, live browser, Docker, Railway, GitHub, LangSmith, or deployment verification was performed or claimed.
+
+## Round 2 Files Changed
+
+### Backend production and migration
+
+- `backend/db/migrations/versions/20260718_provider_inventory_observations.py`
+- `backend/application/graph/nodes/render_response.py`
+- `backend/application/services/flight_offer_normalizer.py`
+- `backend/application/services/recommendation_service.py`
+- `backend/data_sources/ctrip_source.py`
+- `backend/infrastructure/db/flight_snapshot_repo.py`
+- `backend/infrastructure/flight_data/providers/ctrip_snapshot.py`
+- `backend/schemas/common.py`
+- `backend/scripts/generate_flight_wire_fixture.py`
+
+### Backend tests
+
+- `backend/tests/contracts/test_flight_wire_contract.py`
+- `backend/tests/graph/test_search_graph.py`
+- `backend/tests/infra/test_ctrip_snapshot_provider.py`
+- `backend/tests/infra/test_flight_snapshot_repo.py`
+- `backend/tests/services/test_flight_offer_normalizer.py`
+- `backend/tests/services/test_recommendation_final_review.py`
+- `backend/tests/test_ctrip_source.py`
+- `backend/tests/test_schemas.py`
+- `backend/tests/workers/test_ctrip_refresh.py`
+
+### Frontend production, tests, and fixture
+
+- `frontend/components/app-shell.tsx`
+- `frontend/components/discovery-card-content.tsx`
+- `frontend/lib/api.ts`
+- `frontend/lib/mappers.ts`
+- `frontend/__tests__/api.test.ts`
+- `frontend/__tests__/backend-wire-contract.test.ts`
+- `frontend/__tests__/component-chat-page.test.tsx`
+- `frontend/__tests__/discovery-card-content.test.tsx`
+- `frontend/__tests__/explore-page.test.tsx`
+- `frontend/__tests__/fixtures/backend-progressive-search.ndjson`
+- `frontend/__tests__/mappers.test.ts`
+
+### Report
+
+- `.superpowers/sdd/final-review-fix-report.md`
+
+## Self-Review Follow-Ups
+
+The complete diff review found and closed three cross-contract gaps before commit:
+
+1. `h5_fallback_url` could survive without a winner or disagree with the winner. Backend RED: `1 failed in 0.06s`; GREEN: `1 passed in 0.01s`. Frontend RED: `1 failed` with 70 skipped; GREEN: `1 passed` with 70 skipped.
+2. The frontend accepted an omitted card `booking_url` when the winning row exposed one, while Pydantic rejected it. RED: `1 failed` with 71 skipped; GREEN: `1 passed` with 71 skipped.
+3. Unknown reference-only legacy graph deals still received a numeric score. RED: `1 failed in 2.06s`; GREEN: `1 passed in 2.13s`. The first combined rerun then caught an over-broad gate affecting old cache payloads (`1 failed, 187 passed`); narrowing the gate to explicit winner/freshness fields produced `3 passed` focused and the final `188 passed` combined result.
+
+No Critical or Important issue remained after the final diff pass.
+
+## Round 2 Self-Review And Commit
+
+The complete diff from `aa4f0cdaa1db61dd91f8ba8abeba52e445e71d58` was reviewed after implementation and verification. The final commit uses the required message `fix(flights): preserve snapshot truthfulness`. Its exact hash is reported beside this report after Git creates the commit; a commit cannot contain its own final hash because changing this file changes that hash.

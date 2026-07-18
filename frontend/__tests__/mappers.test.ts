@@ -44,6 +44,7 @@ test("preserves null price and baggage fields when mapping a deal", () => {
     total_price: null,
     currency: "CNY",
     recommend_score: "8.6",
+    winning_price_id: null,
     prices: [
       {
         id: "flyai-live-cny",
@@ -54,9 +55,11 @@ test("preserves null price and baggage fields when mapping a deal", () => {
         provider_status: "success",
         url: "https://example.com/book",
         data_provider: "flyai",
+        data_freshness: "fresh",
       },
     ],
     signals: [],
+    data_freshness: "fresh",
   });
 
   expect(card.basePrice).toBeNull();
@@ -92,6 +95,7 @@ test("preserves a nullable score and per-row currencies", () => {
     total_price: 80,
     currency: "USD",
     recommend_score: null,
+    winning_price_id: "serpapi-global-usd",
     prices: [
       {
         id: "serpapi-global-usd",
@@ -101,13 +105,20 @@ test("preserves a nullable score and per-row currencies", () => {
         lowest: true,
         price_status: "priced",
         provider_status: "success",
+        url: "https://global.example.test/book",
         data_provider: "serpapi_google_flights",
+        data_freshness: "fresh",
       },
     ],
     signals: [],
+    booking_url: "https://global.example.test/book",
+    data_freshness: "fresh",
   });
 
   expect(card.currency).toBe("USD");
   expect(card.prices[0].currency).toBe("USD");
   expect(card.recommendScore).toBeUndefined();
+  expect(card.totalPrice).toBe(80);
+  expect(card.winningPriceId).toBe("serpapi-global-usd");
+  expect(card.dataFreshness).toBe("fresh");
 });

@@ -1,7 +1,7 @@
 import React from 'react'
 import { ArrowRight, Bell, Briefcase, Equal, ExternalLink, Plane, Plus, ShieldCheck } from 'lucide-react'
 import { formatCurrency } from '@/lib/currency'
-import type { PriceItem, ProviderStatus } from '@/lib/api'
+import type { DataFreshness, PriceItem, ProviderStatus } from '@/lib/api'
 
 export type DiscoveryCardContentProps = {
   from: string
@@ -16,6 +16,8 @@ export type DiscoveryCardContentProps = {
   originalPrice?: number
   platform: string
   recommendScore?: string
+  winningPriceId?: string | null
+  dataFreshness?: DataFreshness
   prices: PriceItem[]
   compact?: boolean
   onMonitorPrice?: () => void
@@ -35,6 +37,8 @@ export function DiscoveryCardContent({
   currency,
   platform,
   recommendScore,
+  winningPriceId,
+  dataFreshness,
   prices,
   compact,
   onMonitorPrice,
@@ -57,14 +61,25 @@ export function DiscoveryCardContent({
     empty: '暂无结果',
   }
   const hasFreeBaggage = hasBaggage === true && baggageFee === 0
-  const isRealtimeLowest = (price: PriceItem) =>
-    price.lowest === true &&
+  const isRealtimeWinner = (price: PriceItem) =>
+    price.id === winningPriceId &&
     price.provider_status === 'success' &&
     price.price_status === 'priced' &&
+    price.data_freshness === 'fresh' &&
+    dataFreshness === 'fresh' &&
     price.price !== null &&
-    computedTotal !== null
-  const hasVerifiedLowestPrice = prices.some(isRealtimeLowest)
-  const safeBookingUrl = isHttpsUrl(bookingUrl) ? bookingUrl : null
+    computedTotal !== null &&
+    price.price === computedTotal &&
+    price.currency === currency &&
+    price.name === platform
+  const winningPrice = prices.find(isRealtimeWinner)
+  const hasVerifiedLowestPrice = winningPrice !== undefined
+  const safeBookingUrl =
+    winningPrice &&
+    isHttpsUrl(bookingUrl) &&
+    bookingUrl === winningPrice.url
+      ? bookingUrl
+      : null
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
   const sectionGap = compact ? 'mb-3.5' : 'mb-5'
 
@@ -84,7 +99,11 @@ export function DiscoveryCardContent({
               <h3 className={`font-black leading-none ${compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{to}</h3>
             </div>
             <p className={`font-medium text-brand-muted ${compact ? 'text-xs' : 'text-sm'}`}>
-              {placeholder ? '待查询 · 正在获取数据' : `直飞特惠 · ${date || '实时价格'}`}
+              {placeholder
+                ? '待查询 · 正在获取数据'
+                : hasVerifiedLowestPrice
+                  ? `直飞特惠 · ${date || '实时价格'}`
+                  : `航班价格参考${date ? ` · ${date}` : ''}`}
             </p>
           </div>
         </div>
@@ -184,8 +203,17 @@ export function DiscoveryCardContent({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {prices.map((price) => {
-            const lowest = isRealtimeLowest(price)
-            const providerMessage = statusText[price.provider_status]
+            const lowest = isRealtimeWinner(price)
+            const freshnessMessage =
+              price.data_freshness === 'unknown'
+                ? '更新时间未知'
+                : price.data_freshness === 'stale'
+                  ? '价格可能已更新'
+                  : undefined
+            const providerMessage =
+              price.provider_status === 'success'
+                ? freshnessMessage
+                : statusText[price.provider_status] ?? freshnessMessage
             const rowPrice = formatCurrency(price.price, price.currency)
 
             return (
@@ -193,7 +221,7 @@ export function DiscoveryCardContent({
               <span className="text-sm font-medium text-brand-text">{price.name}</span>
               <div className="flex items-center gap-2">
                 {lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
-                {price.provider_status === 'success' && price.price_status === 'view_live_price' && isHttpsUrl(price.url) ? (
+                {price.provider_status === 'success' && price.data_freshness === 'fresh' && price.price_status === 'view_live_price' && isHttpsUrl(price.url) ? (
                   <a
                     href={price.url}
                     target="_blank"

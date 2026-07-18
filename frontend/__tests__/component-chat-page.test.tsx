@@ -39,6 +39,7 @@ function priceRow(overrides: Partial<PriceItem> = {}): PriceItem {
     price_status: null,
     provider_status: "success",
     data_provider: "fixture",
+    data_freshness: "fresh",
     ...overrides,
   };
 }
@@ -64,14 +65,16 @@ function deal(overrides: Partial<DealCardDto> = {}): DealCardDto {
     tax: null,
     baggage_fee: null,
     has_baggage: null,
-    total_price: null,
+    total_price: 580,
     currency: "CNY",
     recommend_score: "9.5",
+    winning_price_id: "row-飞猪",
     prices: [
       priceRow({ name: "飞猪", price: 580, price_status: "priced", lowest: true, data_provider: "flyai" }),
       priceRow({ name: "携程", provider_status: "loading", data_provider: "ctrip_snapshot" }),
     ],
     signals: [],
+    data_freshness: "fresh",
     ...overrides,
   };
 }

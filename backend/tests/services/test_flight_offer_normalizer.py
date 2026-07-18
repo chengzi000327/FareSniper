@@ -118,15 +118,20 @@ def test_deduplicates_identity_and_orders_price_rows_stably():
         "Live Link",
     ]
     assert [row["lowest"] for row in deal["prices"]] == [
+        False,
+        False,
+        False,
         True,
-        False,
-        False,
-        False,
         False,
     ]
     assert deal["price"] == 530
     assert deal["total_price"] == 530
     assert deal["platform"] == "Fresh Air"
+    winner = next(row for row in deal["prices"] if row["name"] == "Fresh Air")
+    snapshot = next(row for row in deal["prices"] if row["name"] == "携程")
+    assert deal["winning_price_id"] == winner["id"]
+    assert deal["booking_url"] == winner["url"]
+    assert snapshot["lowest"] is False
     assert deal["tax"] is None
     assert deal["baggage_fee"] is None
     assert deal["has_baggage"] is None
@@ -157,6 +162,7 @@ def test_status_rows_cover_provider_without_offers():
         "lowest": False,
         "price_status": None,
         "provider_status": "timeout",
+        "data_freshness": "unknown",
         "url": None,
         "data_provider": "ctrip_snapshot",
     }
@@ -228,6 +234,9 @@ def test_price_rows_keep_currency_and_separate_provider_from_price_status():
     assert deal["prices"][0]["currency"] == "CNY"
     assert deal["prices"][0]["price_status"] == "priced"
     assert deal["prices"][0]["provider_status"] == "success"
+    assert deal["prices"][0]["data_freshness"] == "fresh"
+    assert deal["data_freshness"] == "fresh"
+    assert deal["winning_price_id"] == deal["prices"][0]["id"]
     assert deal["prices"][0]["id"]
     assert "status" not in deal["prices"][0]
 

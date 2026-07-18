@@ -103,8 +103,8 @@ export function AppShell() {
                     compact
                     placeholder
                     prices={[
-                      { id: 'landing-flyai', name: '飞猪旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'loading', data_provider: 'flyai' },
-                      { id: 'landing-ctrip', name: '携程旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'queued', data_provider: 'ctrip_snapshot' },
+                      { id: 'landing-flyai', name: '飞猪旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'loading', data_provider: 'flyai', data_freshness: 'unknown' },
+                      { id: 'landing-ctrip', name: '携程旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'queued', data_provider: 'ctrip_snapshot', data_freshness: 'unknown' },
                     ]}
                   />
                 </motion.div>
@@ -136,8 +136,9 @@ export function AppShell() {
                         price_status: null,
                         provider_status: 'loading',
                         data_provider: 'serpapi_google_flights',
+                        data_freshness: 'unknown',
                       },
-                      { id: 'landing-flyai-global', name: '飞猪旅行', price: null, currency: 'USD', price_status: null, provider_status: 'empty', data_provider: 'flyai' },
+                      { id: 'landing-flyai-global', name: '飞猪旅行', price: null, currency: 'USD', price_status: null, provider_status: 'empty', data_provider: 'flyai', data_freshness: 'unknown' },
                     ]}
                   />
                 </motion.div>

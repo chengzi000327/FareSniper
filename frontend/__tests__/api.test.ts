@@ -45,6 +45,7 @@ function validPriceItem(overrides: Record<string, unknown> = {}) {
     provider_status: "success",
     url: "https://example.com/book",
     data_provider: "flyai",
+    data_freshness: "fresh",
     ...overrides,
   };
 }
@@ -67,14 +68,17 @@ function validDeal(overrides: Record<string, unknown> = {}) {
     stops: 0,
     price: 580,
     lowest_price: 580,
-    tax: 50,
+    tax: null,
     baggage_fee: null,
     has_baggage: null,
-    total_price: 630,
+    total_price: 580,
     currency: "CNY",
     recommend_score: "8.8",
+    winning_price_id: "flyai-cny",
     prices: [validPriceItem()],
     signals: ["历史低价"],
+    booking_url: "https://example.com/book",
+    data_freshness: "fresh",
     ...overrides,
   };
 }
@@ -522,6 +526,7 @@ test.each([
 test.each([
   ["a null deal", [null]],
   ["a deal missing id", [validDeal({ id: undefined })]],
+  ["a deal missing winning_price_id", [validDeal({ winning_price_id: undefined })]],
   ["a deal with non-string required fields", [validDeal({ origin_city: 1 })]],
   ["a deal with non-array prices", [validDeal({ prices: {} })]],
   ["a deal with non-string signals", [validDeal({ signals: [1] })]],
@@ -535,6 +540,12 @@ test.each([
   ["a price item with invalid lowest", [validDeal({ prices: [validPriceItem({ lowest: "true" })] })]],
   ["a price item with invalid url", [validDeal({ prices: [validPriceItem({ url: 1 })] })]],
   ["a price item with invalid data provider", [validDeal({ prices: [validPriceItem({ data_provider: 1 })] })]],
+  ["a price item missing data freshness", [validDeal({ prices: [validPriceItem({ data_freshness: undefined })] })]],
+  ["a price item with invalid data freshness", [validDeal({ prices: [validPriceItem({ data_freshness: "recent" })] })]],
+  ["a winner id that is absent from prices", [validDeal({ winning_price_id: "missing-row" })]],
+  ["a winner URL without a card booking URL", [validDeal({ booking_url: undefined })]],
+  ["a booking fallback that disagrees with the winner", [validDeal({ h5_fallback_url: "https://other.example.com/book" })]],
+  ["a deal with invalid data freshness", [validDeal({ data_freshness: "recent" })]],
   ["a deal with invalid optional fields", [validDeal({ original_price: "650", discount_rate: "0.1", cabin: 1, booking_url: 1, data_freshness: 1 })]],
 ])("stream rejects complete with %s before invoking onEvent", async (_description, deals) => {
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -580,7 +591,24 @@ test("stream accepts a complete response with fully validated nested DTOs", asyn
 
 test("stream accepts backend-valid null lowest state", async () => {
   const response = completeResponse({
-    deals: [validDeal({ prices: [validPriceItem({ lowest: null })] })],
+    deals: [
+      validDeal({
+        prices: [
+          validPriceItem(),
+          validPriceItem({
+            id: "ctrip-status-cny",
+            name: "携程",
+            price: null,
+            lowest: null,
+            price_status: null,
+            provider_status: "queued",
+            url: null,
+            data_provider: "ctrip_snapshot",
+            data_freshness: "unknown",
+          }),
+        ],
+      }),
+    ],
   });
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     streamEvents(completeEvent(response))

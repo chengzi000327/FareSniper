@@ -36,7 +36,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 deal = c.model_dump()
                 deal["id"] = f"deal-{c.flight_no}-{c.depart_date}"
                 deal["system_id"] = f"{c.flight_no}-{c.depart_date}"
-                deal["platform"] = next((p.platform for p in c.prices if p.lowest), "")
+                deal["platform"] = ""
                 deal["origin_city"] = c.origin_city or (
                     intent.origin.city if intent and intent.origin else ""
                 )
@@ -45,10 +45,28 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 )
                 deal["depart_time"] = c.depart_time
                 deal["arrive_time"] = c.arrive_time
-                deal["price"] = c.lowest_price
+                deal["price"] = None
+                deal["lowest_price"] = None
+                deal["total_price"] = None
+                deal["currency"] = "CNY"
+                deal["winning_price_id"] = None
+                deal["data_freshness"] = "unknown"
+                deal["booking_url"] = None
+                deal["h5_fallback_url"] = None
                 deal["prices"] = [
-                    {"name": p["platform"], "price": p["price"], "lowest": p.get("lowest", False)}
-                    for p in deal.get("prices", [])
+                    {
+                        "id": f"mock-{c.flight_no}-{index}",
+                        "name": price.platform,
+                        "price": price.price,
+                        "currency": "CNY",
+                        "lowest": False,
+                        "price_status": "stale",
+                        "provider_status": "disabled",
+                        "url": None,
+                        "data_provider": "mock_reference",
+                        "data_freshness": "unknown",
+                    }
+                    for index, price in enumerate(c.prices)
                 ]
                 deals.append(deal)
 
@@ -73,6 +91,18 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 )
         else:
             deals = sort_deals(deals, pref_results)
+        for deal in deals:
+            if (
+                (
+                    "winning_price_id" in deal
+                    and deal.get("winning_price_id") is None
+                )
+                or (
+                    "data_freshness" in deal
+                    and deal.get("data_freshness") != "fresh"
+                )
+            ):
+                deal["recommend_score"] = None
 
     primary_currency = _primary_currency(deals)
     prices = _extract_prices(search_result, deals, primary_currency)

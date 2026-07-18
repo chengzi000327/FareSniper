@@ -34,11 +34,11 @@ def _duration_minutes(value: object) -> int | None:
 
 def _price_status(expires_at: object) -> PriceStatus:
     if not isinstance(expires_at, str) or not expires_at:
-        return PriceStatus.priced
+        return PriceStatus.stale
     try:
         expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
     except ValueError:
-        return PriceStatus.priced
+        return PriceStatus.stale
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
     return (
@@ -98,7 +98,11 @@ def ctrip_rows_to_offers(
                 baggage_fee=None,
                 total_price=int(price["price"]),
                 has_baggage=None,
-                price_status=_price_status(price.get("expires_at")),
+                price_status=(
+                    PriceStatus.stale
+                    if stale
+                    else _price_status(price.get("expires_at"))
+                ),
                 booking_url=price.get("url") or None,
                 fetched_at=price.get("crawled_at"),
                 expires_at=price.get("expires_at"),
@@ -123,6 +127,13 @@ class CtripSnapshotProvider:
             depart_date=query.depart_date,
         )
         if not rows:
+            if age is not None and not stale:
+                return ProviderResult(
+                    provider=self.name,
+                    status=ProviderStatus.empty,
+                    message="本次刷新暂无结果",
+                    cache_age_seconds=age,
+                )
             await enqueue_demand(
                 origin_code=query.origin_code,
                 destination_code=query.destination_code,
@@ -132,8 +143,17 @@ class CtripSnapshotProvider:
             )
             return ProviderResult(
                 provider=self.name,
-                status=ProviderStatus.queued,
-                message="等待下次刷新",
+                status=(
+                    ProviderStatus.stale
+                    if age is not None and stale
+                    else ProviderStatus.queued
+                ),
+                message=(
+                    "空结果已过期，等待刷新"
+                    if age is not None and stale
+                    else "等待下次刷新"
+                ),
+                cache_age_seconds=age,
             )
         offers = ctrip_rows_to_offers(rows, query, stale=stale)
         return ProviderResult(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -10,10 +10,16 @@ import pytest
 from langsmith import Client, tracing_context
 
 import backend.infrastructure.observability.provider_tracing as tracing
+import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
+from backend.application.contracts.flight_provider import ProviderStatus
+from backend.application.services.flight_query import build_flight_query
 from backend.data_sources.ctrip_source import CtripCollectionError
 from backend.infrastructure.db.flight_demand_repo import (
     claim_due_demands,
     enqueue_demand,
+)
+from backend.infrastructure.flight_data.providers.ctrip_snapshot import (
+    CtripSnapshotProvider,
 )
 from backend.workers.ctrip_refresh import (
     refresh_ctrip_once,
@@ -134,6 +140,67 @@ async def test_successful_empty_refresh_replaces_the_route_inventory(monkeypatch
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_worker_empty_refresh_is_observed_by_provider_until_ttl_expires(
+    seeded_pg,
+    monkeypatch,
+):
+    observed_at = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        current = observed_at
+
+        @classmethod
+        def now(cls, tz=None):
+            current = cls.current
+            return current if tz is not None else current.replace(tzinfo=None)
+
+    class EmptySource:
+        async def search_flights(self, *args):
+            return []
+
+    queued = []
+
+    async def capture_demand(**kwargs):
+        queued.append(kwargs)
+
+    monkeypatch.setattr(snapshot_repo, "datetime", FrozenDateTime)
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.try_ctrip_worker_lease", _acquired_lease
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.seed_ctrip_demands", _async_none
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.claim_due_demands",
+        lambda limit: _async_value([_demand()]),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.CtripSource", lambda **kwargs: EmptySource()
+    )
+    monkeypatch.setattr("backend.workers.ctrip_refresh.asyncio.sleep", _async_none)
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.enqueue_demand",
+        capture_demand,
+    )
+
+    summary = await refresh_ctrip_once()
+    query = build_flight_query("北京", "上海", "2099-08-01")
+    fresh_empty = await CtripSnapshotProvider().search(query)
+
+    assert summary.succeeded == 1
+    assert fresh_empty.status is ProviderStatus.empty
+    assert fresh_empty.cache_age_seconds == 0
+    assert queued == []
+
+    FrozenDateTime.current = observed_at + timedelta(minutes=76)
+    expired_empty = await CtripSnapshotProvider().search(query)
+
+    assert expired_empty.status is ProviderStatus.stale
+    assert expired_empty.cache_age_seconds == 76 * 60
+    assert len(queued) == 1
 
 
 @pytest.mark.asyncio

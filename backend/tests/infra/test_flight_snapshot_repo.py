@@ -1,11 +1,13 @@
 import asyncio
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select, update
 
+import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
 from backend.infrastructure.db.flight_snapshot_repo import (
     FlightSnapshot,
+    PlatformPriceSnapshot,
     _deal_sort_key,
     read_deals,
     read_deals_latest,
@@ -302,17 +304,19 @@ async def test_mixed_provider_rows_keep_legacy_price_and_freshness(seeded_pg):
     assert len(rows) == 1
     assert rows[0]["lowest_price"] == 600
     assert rows[0]["currency"] == "CNY"
-    assert rows[0]["prices"] == [
-        {
-            "platform": "legacy",
-            "price": 600,
-            "currency": "CNY",
-            "url": "https://legacy.test",
-            "lowest": True,
-            "price_status": "priced",
-            "data_provider": "legacy",
-        }
-    ]
+    assert len(rows[0]["prices"]) == 1
+    assert rows[0]["prices"][0] == {
+        "id": rows[0]["prices"][0]["id"],
+        "platform": "legacy",
+        "price": 600,
+        "currency": "CNY",
+        "url": "https://legacy.test",
+        "lowest": True,
+        "price_status": "priced",
+        "data_provider": "legacy",
+        "data_freshness": "fresh",
+    }
+    assert rows[0]["winning_price_id"] == rows[0]["prices"][0]["id"]
     assert rows[0]["data_freshness"] == "fresh"
 
 
@@ -356,6 +360,104 @@ async def test_read_deals_latest_ignores_newer_provider_only_snapshot(seeded_pg)
     assert len(rows) == 1
     assert rows[0]["depart_date"] == "2099-08-01"
     assert rows[0]["prices"][0]["platform"] == "legacy"
+
+
+@pytest.mark.asyncio
+async def test_read_deals_propagates_expired_and_unknown_price_freshness(
+    seeded_pg,
+    monkeypatch,
+):
+    now = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is not None else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(snapshot_repo, "datetime", FrozenDateTime)
+    base = {
+        "airline": "东方航空",
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+        "arr_time": "10:00",
+        "duration": "120分钟",
+        "stops": 0,
+    }
+    await upsert_flights(
+        [
+            {
+                **base,
+                "flight_no": "EXPIRED",
+                "dep_time": "08:00",
+                "lowest_price": 500,
+                "prices": [
+                    {
+                        "platform": "Expired Seller",
+                        "price": 500,
+                        "currency": "CNY",
+                        "url": "https://expired.example.test/book",
+                    }
+                ],
+            },
+            {
+                **base,
+                "flight_no": "UNKNOWN",
+                "dep_time": "09:00",
+                "lowest_price": 520,
+                "prices": [
+                    {
+                        "platform": "Unknown Seller",
+                        "price": 520,
+                        "currency": "CNY",
+                        "url": "https://unknown.example.test/book",
+                    }
+                ],
+            },
+        ]
+    )
+    async with seeded_pg.begin() as connection:
+        snapshot_ids = dict(
+            (
+                await connection.execute(
+                    select(FlightSnapshot.flight_no, FlightSnapshot.id).where(
+                        FlightSnapshot.flight_no.in_(["EXPIRED", "UNKNOWN"])
+                    )
+                )
+            ).all()
+        )
+        await connection.execute(
+            update(PlatformPriceSnapshot)
+            .where(
+                PlatformPriceSnapshot.flight_snapshot_id
+                == snapshot_ids["EXPIRED"]
+            )
+            .values(expires_at=now - timedelta(seconds=1))
+        )
+        await connection.execute(
+            update(PlatformPriceSnapshot)
+            .where(
+                PlatformPriceSnapshot.flight_snapshot_id
+                == snapshot_ids["UNKNOWN"]
+            )
+            .values(expires_at=None)
+        )
+
+    deals = await read_deals(
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+    )
+    by_flight = {deal["flight_no"]: deal for deal in deals}
+
+    assert by_flight["EXPIRED"]["data_freshness"] == "stale"
+    assert by_flight["EXPIRED"]["winning_price_id"] is None
+    assert by_flight["EXPIRED"]["prices"][0]["data_freshness"] == "stale"
+    assert by_flight["EXPIRED"]["prices"][0]["lowest"] is False
+    assert by_flight["UNKNOWN"]["data_freshness"] == "unknown"
+    assert by_flight["UNKNOWN"]["winning_price_id"] is None
+    assert by_flight["UNKNOWN"]["prices"][0]["data_freshness"] == "unknown"
+    assert by_flight["UNKNOWN"]["prices"][0]["lowest"] is False
 
 
 @pytest.mark.asyncio
@@ -548,8 +650,92 @@ async def test_provider_refresh_with_empty_success_clears_route_inventory(
     )
 
     assert rows == []
-    assert age is None
+    assert age is not None
     assert stale is False
+
+
+@pytest.mark.asyncio
+async def test_empty_provider_observation_is_scoped_and_expires_by_ttl(
+    seeded_pg,
+    monkeypatch,
+):
+    observed_at = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        current = observed_at
+
+        @classmethod
+        def now(cls, tz=None):
+            current = cls.current
+            return current if tz is not None else current.replace(tzinfo=None)
+
+    monkeypatch.setattr(snapshot_repo, "datetime", FrozenDateTime)
+    target = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    other_route = {
+        "origin_code": "BJS",
+        "destination_code": "CAN",
+        "depart_date": "2099-08-01",
+    }
+    other_date = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-02",
+    }
+
+    await upsert_provider_flights(
+        "legacy", [], ttl_minutes=120, **target
+    )
+    await upsert_provider_flights(
+        "ctrip_snapshot", [], ttl_minutes=120, **other_route
+    )
+    await upsert_provider_flights(
+        "ctrip_snapshot", [], ttl_minutes=120, **other_date
+    )
+    await upsert_provider_flights(
+        "ctrip_snapshot", [], ttl_minutes=60, **target
+    )
+
+    rows, age, stale = await read_provider_deals(
+        provider="ctrip_snapshot", **target
+    )
+    assert rows == []
+    assert age == 0
+    assert stale is False
+
+    for provider, scope in (
+        ("legacy", target),
+        ("ctrip_snapshot", other_route),
+        ("ctrip_snapshot", other_date),
+    ):
+        other_rows, other_age, other_stale = await read_provider_deals(
+            provider=provider, **scope
+        )
+        assert other_rows == []
+        assert other_age == 0
+        assert other_stale is False
+
+    FrozenDateTime.current = observed_at + timedelta(minutes=61)
+
+    rows, age, stale = await read_provider_deals(
+        provider="ctrip_snapshot", **target
+    )
+    assert rows == []
+    assert age == 61 * 60
+    assert stale is True
+
+    for provider, scope in (
+        ("legacy", target),
+        ("ctrip_snapshot", other_route),
+        ("ctrip_snapshot", other_date),
+    ):
+        _, _, other_stale = await read_provider_deals(
+            provider=provider, **scope
+        )
+        assert other_stale is False
 
 
 @pytest.mark.asyncio

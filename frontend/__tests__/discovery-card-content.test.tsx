@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { DiscoveryCardContent } from "@/components/discovery-card-content";
 import type { PriceItem } from "@/lib/api";
 
@@ -14,6 +14,7 @@ function priceRow(overrides: Partial<PriceItem> = {}): PriceItem {
     price_status: null,
     provider_status: "success",
     data_provider: "fixture",
+    data_freshness: "fresh",
     ...overrides,
   };
 }
@@ -207,6 +208,8 @@ test("limits lowest-price claims to a known realtime lowest offer", () => {
       hasBaggage
       currency="CNY"
       platform="飞猪"
+      winningPriceId="row-飞猪"
+      dataFreshness="fresh"
       prices={[priceRow({ name: "飞猪", price: 580, price_status: "priced", lowest: true })]}
     />
   );
@@ -215,6 +218,102 @@ test("limits lowest-price claims to a known realtime lowest offer", () => {
   expect(
     screen.getByText((_, element) => element?.tagName === "P" && element.textContent?.includes("最优解") === true)
   ).toBeInTheDocument();
+});
+
+test("uses the backend winning row for badge, seller copy, and booking action", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2099-08-01"
+      basePrice={580}
+      totalPrice={580}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      bookingUrl="https://fly.example.test/book"
+      winningPriceId="live-flyai"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "snapshot-ctrip",
+          name: "携程",
+          price: 500,
+          lowest: true,
+          data_provider: "ctrip_snapshot",
+        }),
+        priceRow({
+          id: "live-flyai",
+          name: "飞猪",
+          price: 580,
+          lowest: false,
+          price_status: "priced",
+          url: "https://fly.example.test/book",
+          data_provider: "flyai",
+        }),
+      ]}
+    />
+  );
+
+  const liveSeller = screen
+    .getAllByText("飞猪")
+    .find((element) => element.classList.contains("text-sm"));
+  const liveRow = liveSeller?.parentElement ?? null;
+  const snapshotRow = screen.getByText("携程").parentElement;
+  expect(liveRow).not.toBeNull();
+  expect(snapshotRow).not.toBeNull();
+  expect(within(liveRow!).getByText("最低")).toBeInTheDocument();
+  expect(within(snapshotRow!).queryByText("最低")).not.toBeInTheDocument();
+  expect(
+    screen.getByText((_, element) =>
+      element?.tagName === "P" && element.textContent?.includes("飞猪") === true
+    )
+  ).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
+    "href",
+    "https://fly.example.test/book"
+  );
+});
+
+test("gates realtime copy and booking when inventory freshness is unknown", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2099-08-01"
+      basePrice={500}
+      totalPrice={500}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="携程"
+      bookingUrl="https://booking.example.test/unknown"
+      winningPriceId="unknown-row"
+      dataFreshness="unknown"
+      prices={[
+        priceRow({
+          id: "unknown-row",
+          name: "携程",
+          price: 500,
+          lowest: true,
+          url: "https://booking.example.test/unknown",
+          data_freshness: "unknown",
+          data_provider: "legacy",
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("更新时间未知")).toBeInTheDocument();
+  expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
+  expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
+  expect(screen.queryByText(/最优解/)).not.toBeInTheDocument();
+  expect(screen.queryByText("最低")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
 });
 
 test("formats each currency with Intl and does not fabricate a score", () => {
@@ -246,6 +345,7 @@ test("formats each currency with Intl and does not fabricate a score", () => {
           price_status: "priced",
           provider_status: "success",
           data_provider: "serpapi_google_flights",
+          data_freshness: "fresh",
         },
       ]}
     />

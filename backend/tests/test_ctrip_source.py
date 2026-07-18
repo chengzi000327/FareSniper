@@ -311,6 +311,42 @@ async def test_malformed_worker_payload_kills_process_group_and_awaits_cleanup(
     assert waited.is_set()
 
 
+@pytest.mark.asyncio
+async def test_successful_worker_payload_kills_process_group_and_awaits_cleanup(
+    monkeypatch,
+):
+    waited = asyncio.Event()
+    killed: list[tuple[int, signal.Signals]] = []
+
+    class SuccessfulProcess:
+        pid = 42003
+        returncode = 0
+
+        async def communicate(self):
+            return b'{"ok":true,"flights":[]}', b""
+
+        async def wait(self):
+            waited.set()
+            return self.returncode
+
+    async def fake_create(*args, **kwargs):
+        return SuccessfulProcess()
+
+    def fake_killpg(process_group: int, sig: signal.Signals) -> None:
+        killed.append((process_group, sig))
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    monkeypatch.setattr(os, "killpg", fake_killpg)
+
+    flights = await CtripSource(enable_mock_fallback=False)._run_worker_once(
+        "BJS", "SHA", "2099-08-01", "2099-08-01"
+    )
+
+    assert flights == []
+    assert killed == [(42003, signal.SIGKILL)]
+    assert waited.is_set()
+
+
 def test_ctrip_client_sets_a_page_load_timeout(monkeypatch):
     ctrip_api = _load_ctrip_api(monkeypatch)
     driver = _FakeDriver("[]")

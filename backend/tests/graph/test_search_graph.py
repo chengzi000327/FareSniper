@@ -96,5 +96,14 @@ async def test_response_passes_searchresponsedto_validation():
     assert result["response"] is not None
     dto = SearchResponseDto.model_validate(result["response"].model_dump())
     assert len(dto.deals) > 0
+    assert all(deal.winning_price_id is None for deal in dto.deals)
+    assert all(deal.data_freshness == "unknown" for deal in dto.deals)
+    assert all(deal.recommend_score is None for deal in dto.deals)
+    assert all(deal.booking_url is None for deal in dto.deals)
+    assert all(
+        price.provider_status.value != "success"
+        for deal in dto.deals
+        for price in deal.prices
+    )
     assert dto.query.raw_text == "北京到三亚五一直飞"
     assert dto.recommendation.action in ("buy_now", "watch", "skip")

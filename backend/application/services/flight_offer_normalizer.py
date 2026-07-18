@@ -59,8 +59,39 @@ def _is_fresh_numeric(offer: FlightOffer) -> bool:
     )
 
 
-def _is_ranked_offer(offer: FlightOffer) -> bool:
-    return offer.is_realtime and _is_fresh_numeric(offer)
+def _offer_freshness(
+    offer: FlightOffer, provider_status: ProviderStatus
+) -> str:
+    if (
+        provider_status is ProviderStatus.stale
+        or offer.price_status is PriceStatus.stale
+    ):
+        return "stale"
+    if provider_status is not ProviderStatus.success:
+        return "unknown"
+    if offer.is_realtime:
+        return "fresh"
+    if not offer.expires_at:
+        return "unknown"
+    try:
+        expiry = datetime.fromisoformat(
+            offer.expires_at.replace("Z", "+00:00")
+        )
+    except ValueError:
+        return "unknown"
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return "stale" if expiry <= datetime.now(timezone.utc) else "fresh"
+
+
+def _is_ranked_offer(
+    offer: FlightOffer, provider_status: ProviderStatus
+) -> bool:
+    return (
+        offer.is_realtime
+        and _is_fresh_numeric(offer)
+        and _offer_freshness(offer, provider_status) == "fresh"
+    )
 
 
 def _price_row(
@@ -78,6 +109,7 @@ def _price_row(
         "provider_status": provider_status.value,
         "url": offer.booking_url,
         "data_provider": offer.data_provider,
+        "data_freshness": _offer_freshness(offer, provider_status),
     }
 
 
@@ -95,6 +127,11 @@ def _status_row(
         "provider_status": result.status.value,
         "url": None,
         "data_provider": data_provider,
+        "data_freshness": (
+            "stale"
+            if result.status is ProviderStatus.stale
+            else "unknown"
+        ),
     }
 
 
@@ -122,14 +159,19 @@ def _fetched_at_rank(value: str | None) -> float:
     return -fetched_at.timestamp()
 
 
-def _offer_dedupe_key(offer: FlightOffer) -> tuple[int, float, float, str]:
+def _offer_dedupe_key(
+    offer: FlightOffer, provider_status: ProviderStatus
+) -> tuple[int, float, float, str]:
     numeric_price = (
         float(offer.total_price)
         if isinstance(offer.total_price, int)
         else inf
     )
     return (
-        0 if _is_fresh_numeric(offer) else 1,
+        0
+        if _is_fresh_numeric(offer)
+        and _offer_freshness(offer, provider_status) == "fresh"
+        else 1,
         numeric_price,
         _fetched_at_rank(offer.fetched_at),
         offer.booking_url or "",
@@ -145,48 +187,87 @@ def _deduplicate_rows(
     for offer, provider_status in offers:
         key = (offer.data_provider, offer.seller_name, offer.currency)
         current = grouped.get(key)
-        if current is None or _offer_dedupe_key(offer) < _offer_dedupe_key(
-            current[0]
+        if current is None or _offer_dedupe_key(
+            offer, provider_status
+        ) < _offer_dedupe_key(
+            current[0], current[1]
         ):
             grouped[key] = (offer, provider_status)
     return list(grouped.values())
 
 
 def _select_ranked_offer(
-    offers: list[FlightOffer], preferred_currency: str
-) -> FlightOffer | None:
-    ranked = [offer for offer in offers if _is_ranked_offer(offer)]
+    offers: list[tuple[FlightOffer, ProviderStatus]], preferred_currency: str
+) -> tuple[FlightOffer, ProviderStatus] | None:
+    ranked = [
+        (offer, provider_status)
+        for offer, provider_status in offers
+        if _is_ranked_offer(offer, provider_status)
+    ]
     if not ranked:
         return None
     preferred = [
-        offer for offer in ranked if offer.currency == preferred_currency
+        item for item in ranked if item[0].currency == preferred_currency
     ]
     if preferred:
         candidates = preferred
     else:
         selected_currency = min(
-            {offer.currency for offer in ranked},
+            {offer.currency for offer, _ in ranked},
             key=lambda currency: (
                 min(
                     _PROVIDER_PRIORITY.get(offer.data_provider, 2)
-                    for offer in ranked
+                    for offer, _ in ranked
                     if offer.currency == currency
                 ),
                 currency,
             ),
         )
         candidates = [
-            offer for offer in ranked if offer.currency == selected_currency
+            item for item in ranked if item[0].currency == selected_currency
         ]
     return min(
         candidates,
-        key=lambda offer: (
-            offer.total_price
-            if isinstance(offer.total_price, int)
+        key=lambda item: (
+            item[0].total_price
+            if isinstance(item[0].total_price, int)
             else inf,
-            _PROVIDER_PRIORITY.get(offer.data_provider, 2),
-            offer.seller_name,
+            _PROVIDER_PRIORITY.get(item[0].data_provider, 2),
+            item[0].seller_name,
         ),
+    )
+
+
+def _winning_row_id(offer: FlightOffer) -> str:
+    return _row_id(offer.data_provider, offer.seller_name, offer.currency)
+
+
+def _apply_ranked_offer(
+    card: dict[str, Any],
+    offer: FlightOffer,
+    provider_status: ProviderStatus,
+) -> None:
+    card.update(
+        {
+            "airline": offer.airline,
+            "platform": offer.seller_name,
+            "depart_time": offer.depart_time,
+            "arrive_time": offer.arrive_time,
+            "duration_minutes": offer.duration_minutes,
+            "stops": offer.stops,
+            "price": offer.total_price,
+            "lowest_price": offer.total_price,
+            "tax": offer.tax,
+            "baggage_fee": offer.baggage_fee,
+            "has_baggage": offer.has_baggage,
+            "total_price": offer.total_price,
+            "currency": offer.currency,
+            "cabin": offer.cabin,
+            "booking_url": offer.booking_url,
+            "h5_fallback_url": offer.booking_url,
+            "winning_price_id": _winning_row_id(offer),
+            "data_freshness": _offer_freshness(offer, provider_status),
+        }
     )
 
 
@@ -220,34 +301,13 @@ def _new_card(offer: FlightOffer) -> dict[str, Any]:
         "cabin": offer.cabin,
         "booking_url": None,
         "h5_fallback_url": None,
+        "winning_price_id": None,
+        "data_freshness": "unknown",
         "prices": [],
         "signals": [],
         "confidence": "medium",
         "verdict": "",
     }
-
-
-def _apply_ranked_offer(card: dict[str, Any], offer: FlightOffer) -> None:
-    card.update(
-        {
-            "airline": offer.airline,
-            "platform": offer.seller_name,
-            "depart_time": offer.depart_time,
-            "arrive_time": offer.arrive_time,
-            "duration_minutes": offer.duration_minutes,
-            "stops": offer.stops,
-            "price": offer.total_price,
-            "lowest_price": offer.total_price,
-            "tax": offer.tax,
-            "baggage_fee": offer.baggage_fee,
-            "has_baggage": offer.has_baggage,
-            "total_price": offer.total_price,
-            "currency": offer.currency,
-            "cabin": offer.cabin,
-            "booking_url": offer.booking_url,
-            "h5_fallback_url": offer.booking_url,
-        }
-    )
 
 
 def offers_to_deals(
@@ -275,25 +335,17 @@ def offers_to_deals(
     ]
     for identity, card in cards.items():
         deduplicated = _deduplicate_rows(card_offers[identity])
-        offers = [offer for offer, _ in deduplicated]
-        ranked_offer = _select_ranked_offer(offers, query.currency)
+        ranked_offer = _select_ranked_offer(deduplicated, query.currency)
         if ranked_offer is not None:
-            _apply_ranked_offer(card, ranked_offer)
+            _apply_ranked_offer(card, *ranked_offer)
 
         rows = [
             _price_row(offer, provider_status)
             for offer, provider_status in deduplicated
         ]
         rows.extend(dict(row) for row in status_rows)
-        eligible_rows = [
-            row
-            for row in rows
-            if isinstance(row.get("price"), int)
-            and row.get("currency") == card["currency"]
-            and row.get("price_status") != PriceStatus.stale.value
-        ]
-        if eligible_rows:
-            min(eligible_rows, key=lambda row: row["price"])["lowest"] = True
+        for row in rows:
+            row["lowest"] = row["id"] == card["winning_price_id"]
         rows.sort(key=_row_sort_key)
         card["prices"] = rows
 

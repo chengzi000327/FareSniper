@@ -31,8 +31,32 @@ test("parses the committed backend progressive payload without contract drift", 
   expect(deal?.prices.map((row) => row.price_status)).toEqual([
     "priced",
     "priced",
+    "priced",
   ]);
-  expect(deal?.prices.map((row) => row.currency)).toEqual(["CNY", "USD"]);
+  expect(deal?.prices.map((row) => row.currency)).toEqual([
+    "CNY",
+    "CNY",
+    "USD",
+  ]);
+  const winner = deal?.prices.find((row) => row.id === deal.winning_price_id);
+  const snapshot = deal?.prices.find(
+    (row) => row.data_provider === "ctrip_snapshot"
+  );
+  expect(winner).toMatchObject({
+    name: "飞猪",
+    price: 580,
+    lowest: true,
+    data_freshness: "fresh",
+  });
+  expect(snapshot).toMatchObject({
+    name: "携程",
+    price: 500,
+    lowest: false,
+  });
+  expect(deal?.platform).toBe(winner?.name);
+  expect(deal?.total_price).toBe(winner?.price);
+  expect(deal?.booking_url).toBe(winner?.url);
+  expect(deal?.data_freshness).toBe("fresh");
   expect(deal?.booking_url).toContain(
     "?offer=fixture-token-not-secret&channel=web"
   );

@@ -67,6 +67,7 @@ export type ProviderStatus =
   | "error";
 
 export type PriceStatus = "priced" | "view_live_price" | "stale";
+export type DataFreshness = "fresh" | "stale" | "unknown";
 
 export interface PriceItem {
   id: string;
@@ -78,6 +79,7 @@ export interface PriceItem {
   provider_status: ProviderStatus;
   url?: string | null;
   data_provider: string;
+  data_freshness: DataFreshness;
 }
 
 export interface DealCardDto {
@@ -103,6 +105,7 @@ export interface DealCardDto {
   total_price: number | null;
   currency: string;
   recommend_score: string | null;
+  winning_price_id: string | null;
   prices: PriceItem[];
   original_price?: number | null;
   discount_rate?: number | null;
@@ -110,7 +113,7 @@ export interface DealCardDto {
   signals: string[];
   booking_url?: string | null;
   h5_fallback_url?: string | null;
-  data_freshness?: string | null;
+  data_freshness: DataFreshness;
   confidence?: "high" | "medium" | "low";
   verdict?: string;
 }
@@ -181,6 +184,10 @@ function isCurrency(value: unknown): value is string {
   return typeof value === "string" && /^[A-Z]{3}$/.test(value);
 }
 
+function isDataFreshness(value: unknown): value is DataFreshness {
+  return value === "fresh" || value === "stale" || value === "unknown";
+}
+
 function isCompleteHttpsUrl(value: unknown): value is string {
   if (typeof value !== "string") return false;
   try {
@@ -220,7 +227,8 @@ function isPriceItem(value: unknown): value is PriceItem {
     !isCurrency(value.currency) ||
     (value.price_status !== null && !isPriceStatus(value.price_status)) ||
     !isProviderStatus(value.provider_status) ||
-    typeof value.data_provider !== "string"
+    typeof value.data_provider !== "string" ||
+    !isDataFreshness(value.data_freshness)
   ) {
     return false;
   }
@@ -252,6 +260,8 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   if (
     !isCurrency(value.currency) ||
     (value.recommend_score !== null && typeof value.recommend_score !== "string") ||
+    (value.winning_price_id !== null && typeof value.winning_price_id !== "string") ||
+    !isDataFreshness(value.data_freshness) ||
     !isNullableFiniteNumber(value.price) ||
     !isNullableFiniteNumber(value.lowest_price) ||
     !isNullableFiniteNumber(value.duration_minutes) ||
@@ -266,15 +276,49 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   ) {
     return false;
   }
-  return (
+  const optionalFieldsAreValid = (
     hasOptionalField(value, "original_price", isNullableFiniteNumber) &&
     hasOptionalField(value, "discount_rate", isNullableFiniteNumber) &&
     hasOptionalField(value, "cabin", (item) => item === null || typeof item === "string") &&
     hasOptionalField(value, "booking_url", (item) => item === null || isCompleteHttpsUrl(item)) &&
     hasOptionalField(value, "h5_fallback_url", (item) => item === null || isCompleteHttpsUrl(item)) &&
-    hasOptionalField(value, "data_freshness", (item) => item === null || typeof item === "string") &&
     hasOptionalField(value, "confidence", (item) => item === "high" || item === "medium" || item === "low") &&
     hasOptionalField(value, "verdict", (item) => typeof item === "string")
+  );
+  if (!optionalFieldsAreValid) return false;
+
+  const prices = value.prices as PriceItem[];
+  if (value.winning_price_id === null) {
+    return (
+      prices.every((price) => price.lowest !== true) &&
+      value.platform === "" &&
+      value.price === null &&
+      value.lowest_price === null &&
+      value.total_price === null &&
+      (!hasOwn(value, "booking_url") || value.booking_url === null) &&
+      (!hasOwn(value, "h5_fallback_url") || value.h5_fallback_url === null)
+    );
+  }
+
+  const winners = prices.filter((price) => price.id === value.winning_price_id);
+  if (winners.length !== 1) return false;
+  const winner = winners[0];
+  return (
+    winner.lowest === true &&
+    winner.price !== null &&
+    winner.price_status === "priced" &&
+    winner.provider_status === "success" &&
+    winner.data_freshness === "fresh" &&
+    value.platform === winner.name &&
+    value.currency === winner.currency &&
+    value.price === winner.price &&
+    value.lowest_price === winner.price &&
+    value.total_price === winner.price &&
+    value.data_freshness === winner.data_freshness &&
+    (value.booking_url ?? null) === (winner.url ?? null) &&
+    (!hasOwn(value, "h5_fallback_url") ||
+      value.h5_fallback_url === null ||
+      value.h5_fallback_url === winner.url)
   );
 }
 
