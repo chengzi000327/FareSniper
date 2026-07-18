@@ -60,6 +60,7 @@ def _fake_backend(
         "search_count": 0,
         "status_count": 0,
         "status_queries": [],
+        "search_messages": [],
         "requests": [],
     }
 
@@ -112,8 +113,7 @@ def _fake_backend(
             state["search_count"] += 1
             length = int(self.headers.get("Content-Length", "0"))
             request_payload = json.loads(self.rfile.read(length))
-            assert "阿勒泰" in request_payload["message"]
-            assert "三亚" in request_payload["message"]
+            state["search_messages"].append(request_payload["message"])
 
             query = {
                 "origin_code": "AAT",
@@ -194,14 +194,20 @@ def _fake_backend(
         server.server_close()
 
 
-def _live_args(base_url: str, *, timeout: str = "2") -> tuple[str, ...]:
+def _live_args(
+    base_url: str,
+    *,
+    timeout: str = "2",
+    origin: str = "阿勒泰",
+    destination: str = "三亚",
+) -> tuple[str, ...]:
     return (
         "--base-url",
         base_url,
         "--origin",
-        "阿勒泰",
+        origin,
         "--destination",
-        "三亚",
+        destination,
         "--depart-date",
         "2099-08-01",
         "--timeout-seconds",
@@ -279,6 +285,29 @@ def test_live_verifier_searches_only_to_trigger_and_verify_after_polling():
     assert SECRET_JWT not in result.stdout + result.stderr
     assert SECRET_COLLECTOR not in result.stdout + result.stderr
     assert "https://flights.ctrip.com" not in result.stdout
+
+
+def test_live_verifier_trigger_preserves_explicit_multi_airport_scope():
+    with _fake_backend(
+        query_overrides={"origin_code": "BJS"},
+        deal_overrides={
+            "origin_code": "BJS",
+            "origin_airport_code": "PKX",
+        },
+    ) as (base_url, state):
+        result = _run(
+            *_live_args(base_url, origin="北京大兴机场"),
+            env=_secret_env(),
+        )
+
+    assert result.returncode == 0, result.stderr
+    assert state["search_messages"]
+    assert all("PKX" in message for message in state["search_messages"])
+    assert all("北京到" not in message for message in state["search_messages"])
+    assert all(
+        query.get("origin_airport_code") == ["PKX"]
+        for query in state["status_queries"]
+    )
 
 
 def test_live_verifier_rejects_unchanged_completed_job_and_snapshot():

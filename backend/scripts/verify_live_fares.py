@@ -407,10 +407,9 @@ async def verify(
         status_params[
             "destination_airport_code"
         ] = query.destination_airport_scope
-    message = (
-        f"{query.depart_date} {query.origin_city}到"
-        f"{query.destination_city}的机票"
-    )
+    origin = query.origin_airport_scope or query.origin_city
+    destination = query.destination_airport_scope or query.destination_city
+    message = f"{query.depart_date} {origin}到{destination}的机票"
 
     try:
         async with asyncio.timeout(timeout_seconds):
