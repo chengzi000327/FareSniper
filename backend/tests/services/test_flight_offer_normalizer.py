@@ -165,6 +165,7 @@ def test_status_rows_cover_provider_without_offers():
         "data_freshness": "unknown",
         "url": None,
         "data_provider": "ctrip_snapshot",
+        "expires_at": None,
     }
 
 

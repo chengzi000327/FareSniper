@@ -593,3 +593,225 @@ No Critical or Important issue remained after the final diff pass.
 ## Round 2 Self-Review And Commit
 
 The complete diff from `aa4f0cdaa1db61dd91f8ba8abeba52e445e71d58` was reviewed after implementation and verification. The final commit uses the required message `fix(flights): preserve snapshot truthfulness`. Its exact hash is reported beside this report after Git creates the commit; a commit cannot contain its own final hash because changing this file changes that hash.
+
+---
+
+# Round 3 Remediation
+
+Review baseline: `12f18b8706a48970affda9d8beeba03e9c4f9a4c`
+
+Date: 2026-07-18
+
+## Root Causes
+
+1. `CtripSnapshotProvider.search` renewed demand only in the no-row branch. A nonempty stale snapshot returned reference offers and stopped, even though the existing `enqueue_demand` repository operation already provided route/date uniqueness, priority coalescing, expired-demand reactivation, and seven-day renewal.
+2. `read_deals` calculated row freshness from `PlatformPriceSnapshot.expires_at` but omitted that expiry from the returned row. Recommendation projection therefore cached only the already-calculated `fresh` label in a list-shaped Redis value with a fixed 600-second TTL.
+3. Cache reads validated only the stored Pydantic shape. They did not compare inventory expiry with the current clock, so a winner, booking URLs, discount copy, and realtime labels could survive after the underlying row expired.
+4. Backend and frontend winner validators required the identified winner to have `lowest=true`, but did not require every other row to have the explicit value `false`. A second `true` or nullable nonwinner could pass.
+5. Initial cache-build time was captured before the storage query. A sufficiently slow rebuild could cross the inventory deadline and still cache the just-expired winner.
+
+## RED Evidence
+
+Every Round 3 behavior change was first exercised against the unfixed production path.
+
+### Stale Ctrip demand renewal
+
+```text
+pytest -q +  backend/tests/infra/test_ctrip_snapshot_provider.py::test_stale_nonempty_snapshot_returns_reference_offers_and_renews_demand
+```
+
+Result: `1 failed in 0.28s`. The stale reference offer was returned, but the captured demand list was empty.
+
+```text
+pytest -q +  backend/tests/infra/test_ctrip_snapshot_provider.py::test_stale_nonempty_snapshot_reactivates_expired_demand_without_duplicates +  backend/tests/infra/test_flight_snapshot_repo.py::test_read_deals_propagates_expired_and_unknown_price_freshness
+```
+
+Result: `2 failed in 34.10s`. The prior demand remained inactive/expired, and repository recommendation rows had no `expires_at`.
+
+### Recommendation cache lifecycle
+
+```text
+pytest -q +  backend/tests/services/test_recommendation_final_review.py::test_recommendation_preview_keeps_currency_without_fabricated_score_or_fees +  backend/tests/services/test_recommendation_final_review.py::test_pool_cache_ttl_is_bounded_by_earliest_inventory_expiry +  backend/tests/services/test_recommendation_final_review.py::test_cache_hit_after_inventory_expiry_downgrades_winner +  backend/tests/services/test_recommendation_final_review.py::test_old_cache_payload_with_missing_or_invalid_expiry_downgrades
+```
+
+Result: `5 failed in 0.35s`. Expiry disappeared during card mapping, Redis received TTL 600 and a bare list, expired cache hits retained the winner, and legacy missing/invalid expiry remained fresh.
+
+The post-query clock self-review regression also failed before its fix:
+
+```text
+pytest -q +  backend/tests/services/test_recommendation_final_review.py::test_pool_build_revalidates_against_the_post_query_clock
+```
+
+Result: `1 failed in 0.15s`; the build advanced exactly to expiry while the returned card retained its winning row.
+
+### Exactly-one-lowest validation
+
+```text
+pytest -q +  backend/tests/test_schemas.py::test_deal_card_requires_every_nonwinner_to_have_lowest_false
+```
+
+Result: `2 failed in 0.23s`; both a second `true` and a nullable nonwinner were accepted.
+
+```text
+npm run test -- --run __tests__/api.test.ts -t "invalid expiry|nonwinner"
+```
+
+Result: `3 failed`; the frontend accepted invalid expiry, a second lowest row, and a nullable nonwinner.
+
+The no-winner interpretation was then tested explicitly:
+
+- Backend: `1 failed in 0.08s`; a no-winner row with `lowest=null` was accepted.
+- Frontend: `1 failed`; the same wire payload was accepted.
+
+### Frontend expiry defense
+
+```text
+npm run test -- --run +  __tests__/discovery-card-content.test.tsx +  -t "after the winning inventory expiry"
+```
+
+Result: `1 failed`; the expired card still rendered the realtime badge and booking action.
+
+## Wire And Cache Schema
+
+No durable database migration was needed in Round 3. `platform_price_snapshots.expires_at` already exists and remains the source of truth; Alembic still has the single `20260718_provider_inventory` head from Round 2.
+
+The shared backend/frontend deal contract now adds optional normalized UTC fields:
+
+- `prices[].expires_at`: effective inventory-row expiry;
+- `inventory_expires_at`: the winning row's expiry, equal to `prices[winning_price_id].expires_at` when present.
+
+Optionality preserves realtime provider compatibility where no explicit expiry is supplied. Recommendation eligibility is stricter: missing, malformed, elapsed, or already-stale expiry is fail-closed and cannot produce a winner.
+
+Redis `rec:pool:v3` now stores envelope version 1:
+
+```json
+{
+  "version": 1,
+  "cached_at": "<UTC instant>",
+  "inventory_expires_at": "<earliest fresh row expiry or null>",
+  "cards": []
+}
+```
+
+The write TTL is `min(600, positive whole seconds until the earliest fresh inventory expiry)`. Cache reads ignore previously trusted freshness labels and recompute every row against the injected current time. Bare-list legacy payloads remain readable; missing or invalid expiry downgrades them to reference-only cards instead of raising.
+
+## Implementation
+
+### Important 1: stale nonempty Ctrip inventory
+
+- Stale nonempty snapshots still return their Ctrip reference offers and stale provider status.
+- The same branch now calls the existing `recent_search` demand upsert with priority 50.
+- The route/date unique constraint coalesces repeated searches into one row.
+- Repeated stale searches reactivate an inactive expired demand, raise priority, renew `last_requested_at` and `expires_at`, and do not create duplicate rows.
+- Existing fresh nonempty, fresh empty, expired empty, provider/route/date scoping, and atomic replacement behavior is unchanged.
+
+### Important 2: recommendation expiry and cache lifetime
+
+- Repository recommendation rows now retain each child expiry.
+- Recommendation mapping derives effective freshness from both the declared state and current time, propagates row/winner expiry, and rejects missing or malformed expiry as unknown.
+- Cache writes use the versioned envelope and earliest-expiry TTL bound.
+- Cache hits revalidate rows at the exact `expiry <= now` boundary.
+- Expired or unknown rows lose `lowest`, URL, success/priced realtime state, and winner eligibility.
+- A downgraded card loses headline amount/seller, booking and fallback URLs, discount, score, historical-low signals, and realtime reason copy while retaining safe reference amounts.
+- Time is captured again after a storage rebuild before revalidation and cache write.
+- Frontend parser validates optional expiry fields, mapper carries the winning expiry, and the card independently suppresses realtime copy and booking after that expiry.
+
+### Coupled validator
+
+- With a winner, exactly one row has `lowest=true` and every other row must be `false`.
+- Without a winner, every row must be `false`.
+- Backend Pydantic and frontend runtime parsing enforce the same rule.
+- The generated progressive fixture carries row and winner expiry and proves backend/frontend parity.
+
+## GREEN Evidence
+
+### Focused
+
+- Stale provider renewal unit node: `1 passed in 0.30s`.
+- Backend duplicate/null nonwinner validator: `2 passed in 0.02s`.
+- Initial recommendation expiry/cache group: `5 passed in 0.32s`.
+- Frontend expiry/unique-lowest parser nodes: `3 passed`.
+- Frontend expired-card node: `1 passed`.
+- Initial bounded DB pair: `2 passed in 37.60s`.
+- Explicit no-winner `lowest=false` boundary: backend `1 passed in 0.02s`; frontend `1 passed`.
+- Final standalone recommendation lifecycle file, including post-query clock crossing: `12 passed in 0.10s`.
+- Final normalizer plus recommendation rerun: `22 passed in 0.20s`.
+- Backend generated fixture contract: `2 passed in 0.05s`.
+- Frontend generated fixture contract: `1 passed`.
+
+### Bounded database/provider group
+
+```text
+pytest -q +  backend/tests/infra/test_flight_demand_repo.py::test_enqueue_is_idempotent_and_raises_priority +  backend/tests/infra/test_ctrip_snapshot_provider.py::test_stale_nonempty_snapshot_reactivates_expired_demand_without_duplicates +  backend/tests/infra/test_ctrip_snapshot_provider.py::test_successful_empty_snapshot_stays_empty_until_its_ttl_expires +  backend/tests/infra/test_flight_snapshot_repo.py::test_read_deals_propagates_expired_and_unknown_price_freshness +  backend/tests/infra/test_flight_snapshot_repo.py::test_empty_provider_observation_is_scoped_and_expires_by_ttl +  backend/tests/infra/test_flight_snapshot_repo.py::test_read_provider_deals_marks_expired_rows_stale
+```
+
+Result: `6 passed in 104.71s`.
+
+### Combined backend
+
+The combined group covered provider and wire contracts, flight query/normalizer/aggregator, standalone recommendation lifecycle, FlyAI, SerpAPI, supervised Ctrip source, schemas, JSON and streaming search APIs, graph render/tool/search paths, dependency manifest, and settings contracts.
+
+Final result: `196 passed, 1 warning in 7.84s`. The warning is the existing LangGraph pending-deprecation warning.
+
+### Frontend
+
+- `npm run lint`: passed.
+- Full Vitest: `17 files passed`, `125 tests passed`.
+- `npm run build`: Next.js 15.5.15 production build passed and generated all 10 routes.
+
+### Migration, static, mock, and safety
+
+- `alembic -c backend/alembic.ini heads`: one head, `20260718_provider_inventory`.
+- Structured `dotenv_values("backend/.env")` verification asserted test/production DSNs differ, passed only the test DSN to the Alembic child, printed no URL, and upgraded to head.
+- `python3 -m compileall -q backend`: passed.
+- `git diff --check`: passed.
+- Settings/default/dependency/provider mock checks: `64 passed in 1.21s`.
+- `backend/.env` and frontend local environment files are not tracked.
+- The path-only scan covered 1,809 tracked files. Credential-shaped URL candidates were limited to three tracked vendor parser/example files and the synthetic settings contract test; no values were printed. Private-key and known live-token-prefix scans returned no matches.
+- Changed-file keyword candidates were only API/parser identifiers and explicit `fixture-token-not-secret` test artifacts. No secret values were introduced.
+
+## Limitations
+
+The known stalled combined recommendation DB group remains intentionally omitted and is not counted as green. Its prior PID `51386` evidence remains unchanged: 15 dots, no traceback or summary, followed by termination after a prolonged remote asyncpg wait. Round 3 instead provides standalone frozen-time cache evidence and the six-node bounded database/provider result above.
+
+The monolithic backend suite was not run against the remote test database. No paid/live provider, live browser, Docker, Railway, GitHub, LangSmith, deployment, or external-service operation was performed or claimed.
+
+## Round 3 Files Changed
+
+### Backend production and contract artifact
+
+- `backend/application/services/flight_offer_normalizer.py`
+- `backend/application/services/recommendation_service.py`
+- `backend/infrastructure/db/flight_snapshot_repo.py`
+- `backend/infrastructure/flight_data/providers/ctrip_snapshot.py`
+- `backend/schemas/common.py`
+- `backend/scripts/generate_flight_wire_fixture.py`
+
+### Backend tests
+
+- `backend/tests/contracts/test_flight_wire_contract.py`
+- `backend/tests/infra/test_ctrip_snapshot_provider.py`
+- `backend/tests/infra/test_flight_snapshot_repo.py`
+- `backend/tests/services/test_flight_offer_normalizer.py`
+- `backend/tests/services/test_recommendation_final_review.py`
+- `backend/tests/test_schemas.py`
+
+### Frontend production, tests, and generated fixture
+
+- `frontend/components/discovery-card-content.tsx`
+- `frontend/lib/api.ts`
+- `frontend/lib/mappers.ts`
+- `frontend/__tests__/api.test.ts`
+- `frontend/__tests__/backend-wire-contract.test.ts`
+- `frontend/__tests__/discovery-card-content.test.tsx`
+- `frontend/__tests__/fixtures/backend-progressive-search.ndjson`
+
+### Report
+
+- `.superpowers/sdd/final-review-fix-report.md`
+
+## Round 3 Self-Review And Commit
+
+The complete diff from `12f18b8706a48970affda9d8beeba03e9c4f9a4c` was reviewed after implementation and verification. Self-review added the exact no-winner `lowest=false` boundary and the post-storage-query expiry race regression; both were observed RED before their production fixes. No remaining Critical or Important issue was found.
+
+The final commit uses the required message `fix(flights): refresh stale cached inventory`. Its exact hash is reported beside this report after Git creates the commit; a commit cannot contain its own final hash because changing this report changes that hash.

@@ -156,6 +156,14 @@ class CtripSnapshotProvider:
                 cache_age_seconds=age,
             )
         offers = ctrip_rows_to_offers(rows, query, stale=stale)
+        if stale:
+            await enqueue_demand(
+                origin_code=query.origin_code,
+                destination_code=query.destination_code,
+                depart_date=query.depart_date,
+                priority=50,
+                source="recent_search",
+            )
         return ProviderResult(
             provider=self.name,
             status=(

@@ -57,6 +57,12 @@ test("parses the committed backend progressive payload without contract drift", 
   expect(deal?.total_price).toBe(winner?.price);
   expect(deal?.booking_url).toBe(winner?.url);
   expect(deal?.data_freshness).toBe("fresh");
+  expect(deal?.inventory_expires_at).toBe(winner?.expires_at);
+  expect(
+    deal?.prices
+      .filter((row) => row.id !== deal.winning_price_id)
+      .every((row) => row.lowest === false)
+  ).toBe(true);
   expect(deal?.booking_url).toContain(
     "?offer=fixture-token-not-secret&channel=web"
   );

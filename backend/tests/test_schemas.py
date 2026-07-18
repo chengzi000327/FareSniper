@@ -108,6 +108,56 @@ def test_deal_card_rejects_a_winner_that_disagrees_with_the_headline():
         DealCardDto.model_validate(payload)
 
 
+@pytest.mark.parametrize("nonwinner_lowest", [True, None])
+def test_deal_card_requires_every_nonwinner_to_have_lowest_false(
+    nonwinner_lowest,
+):
+    from backend.schemas.common import DealCardDto
+
+    payload = _deal_payload()
+    payload["prices"].append(
+        {
+            **payload["prices"][0],
+            "id": "legacy-other-cny",
+            "name": "other",
+            "price": 2680,
+            "lowest": nonwinner_lowest,
+            "url": None,
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(payload)
+
+
+def test_deal_card_without_a_winner_requires_lowest_false():
+    from backend.schemas.common import DealCardDto
+
+    payload = _deal_payload(
+        platform="",
+        price=None,
+        lowest_price=None,
+        total_price=None,
+        winning_price_id=None,
+        data_freshness="unknown",
+        prices=[
+            {
+                **_deal_payload()["prices"][0],
+                "lowest": None,
+                "price_status": "stale",
+                "provider_status": "stale",
+                "url": None,
+                "data_freshness": "unknown",
+            }
+        ],
+        booking_url=None,
+        inventory_expires_at=None,
+    )
+
+    with pytest.raises(ValidationError):
+        DealCardDto.model_validate(payload)
+
+
 def test_deal_card_rejects_booking_fallback_without_matching_winner():
     from backend.schemas.common import DealCardDto
 

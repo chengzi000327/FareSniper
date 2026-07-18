@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -14,6 +15,20 @@ from backend.application.contracts.flight_provider import (
 
 ApiConfidence = Literal["high", "medium", "low"]
 DataFreshness = Literal["fresh", "stale", "unknown"]
+
+
+def _normalize_inventory_expiry(value: object) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("inventory expiry must be an ISO datetime")
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("inventory expiry must be an ISO datetime") from exc
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry.astimezone(timezone.utc).isoformat()
 
 
 class ApiMeta(BaseModel):
@@ -36,6 +51,7 @@ class PriceItemDto(BaseModel):
     url: Optional[str] = None
     data_provider: str = ""
     data_freshness: DataFreshness
+    expires_at: Optional[str] = None
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -46,6 +62,11 @@ class PriceItemDto(BaseModel):
     @classmethod
     def keep_only_complete_https_url(cls, value: object) -> str | None:
         return value if is_complete_https_url(value) else None
+
+    @field_validator("expires_at", mode="before")
+    @classmethod
+    def normalize_expires_at(cls, value: object) -> str | None:
+        return _normalize_inventory_expiry(value)
 
 
 class DealCardDto(BaseModel):
@@ -82,6 +103,7 @@ class DealCardDto(BaseModel):
     booking_url: Optional[str] = None
     h5_fallback_url: Optional[str] = None
     data_freshness: DataFreshness
+    inventory_expires_at: Optional[str] = None
 
     @field_validator("currency", mode="before")
     @classmethod
@@ -93,11 +115,16 @@ class DealCardDto(BaseModel):
     def keep_only_complete_https_url(cls, value: object) -> str | None:
         return value if is_complete_https_url(value) else None
 
+    @field_validator("inventory_expires_at", mode="before")
+    @classmethod
+    def normalize_inventory_expires_at(cls, value: object) -> str | None:
+        return _normalize_inventory_expiry(value)
+
     @model_validator(mode="after")
     def validate_winning_price_contract(self) -> DealCardDto:
         if self.winning_price_id is None:
-            if any(price.lowest is True for price in self.prices):
-                raise ValueError("price row cannot be lowest without a winner")
+            if any(price.lowest is not False for price in self.prices):
+                raise ValueError("every row must have lowest=false without a winner")
             if (
                 self.platform
                 or self.price is not None
@@ -105,6 +132,7 @@ class DealCardDto(BaseModel):
                 or self.total_price is not None
                 or self.booking_url is not None
                 or self.h5_fallback_url is not None
+                or self.inventory_expires_at is not None
             ):
                 raise ValueError("headline and booking require a winning row")
             return self
@@ -117,6 +145,12 @@ class DealCardDto(BaseModel):
         if len(matches) != 1:
             raise ValueError("winning_price_id must identify exactly one row")
         winner = matches[0]
+        if any(
+            price.lowest is not False
+            for price in self.prices
+            if price.id != self.winning_price_id
+        ):
+            raise ValueError("every nonwinning row must have lowest=false")
         if (
             winner.lowest is not True
             or winner.price is None
@@ -132,6 +166,7 @@ class DealCardDto(BaseModel):
             or self.lowest_price != winner.price
             or self.total_price != winner.price
             or self.data_freshness != winner.data_freshness
+            or self.inventory_expires_at != winner.expires_at
         ):
             raise ValueError("winning row must drive the headline")
         if (

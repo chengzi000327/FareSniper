@@ -88,6 +88,7 @@ def _fixture_deal() -> dict:
                         "https://book.example.test/flight"
                         "?offer=fixture-token-not-secret&channel=web"
                     ),
+                    expires_at="2099-08-01T00:45:00+00:00",
                 )
             ],
         ),

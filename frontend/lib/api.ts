@@ -80,6 +80,7 @@ export interface PriceItem {
   url?: string | null;
   data_provider: string;
   data_freshness: DataFreshness;
+  expires_at?: string | null;
 }
 
 export interface DealCardDto {
@@ -114,6 +115,7 @@ export interface DealCardDto {
   booking_url?: string | null;
   h5_fallback_url?: string | null;
   data_freshness: DataFreshness;
+  inventory_expires_at?: string | null;
   confidence?: "high" | "medium" | "low";
   verdict?: string;
 }
@@ -198,6 +200,10 @@ function isCompleteHttpsUrl(value: unknown): value is string {
   }
 }
 
+function isInventoryExpiry(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -234,7 +240,8 @@ function isPriceItem(value: unknown): value is PriceItem {
   }
   return (
     hasOptionalField(value, "lowest", (item) => item === null || typeof item === "boolean") &&
-    hasOptionalField(value, "url", (item) => item === null || isCompleteHttpsUrl(item))
+    hasOptionalField(value, "url", (item) => item === null || isCompleteHttpsUrl(item)) &&
+    hasOptionalField(value, "expires_at", (item) => item === null || isInventoryExpiry(item))
   );
 }
 
@@ -282,6 +289,7 @@ function isDealCardDto(value: unknown): value is DealCardDto {
     hasOptionalField(value, "cabin", (item) => item === null || typeof item === "string") &&
     hasOptionalField(value, "booking_url", (item) => item === null || isCompleteHttpsUrl(item)) &&
     hasOptionalField(value, "h5_fallback_url", (item) => item === null || isCompleteHttpsUrl(item)) &&
+    hasOptionalField(value, "inventory_expires_at", (item) => item === null || isInventoryExpiry(item)) &&
     hasOptionalField(value, "confidence", (item) => item === "high" || item === "medium" || item === "low") &&
     hasOptionalField(value, "verdict", (item) => typeof item === "string")
   );
@@ -290,20 +298,25 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   const prices = value.prices as PriceItem[];
   if (value.winning_price_id === null) {
     return (
-      prices.every((price) => price.lowest !== true) &&
+      prices.every((price) => price.lowest === false) &&
       value.platform === "" &&
       value.price === null &&
       value.lowest_price === null &&
       value.total_price === null &&
       (!hasOwn(value, "booking_url") || value.booking_url === null) &&
-      (!hasOwn(value, "h5_fallback_url") || value.h5_fallback_url === null)
+      (!hasOwn(value, "h5_fallback_url") || value.h5_fallback_url === null) &&
+      (!hasOwn(value, "inventory_expires_at") || value.inventory_expires_at === null)
     );
   }
 
   const winners = prices.filter((price) => price.id === value.winning_price_id);
   if (winners.length !== 1) return false;
   const winner = winners[0];
+  const nonwinnersHaveExplicitFalse = prices.every(
+    (price) => price.id === value.winning_price_id || price.lowest === false
+  );
   return (
+    nonwinnersHaveExplicitFalse &&
     winner.lowest === true &&
     winner.price !== null &&
     winner.price_status === "priced" &&
@@ -315,6 +328,7 @@ function isDealCardDto(value: unknown): value is DealCardDto {
     value.lowest_price === winner.price &&
     value.total_price === winner.price &&
     value.data_freshness === winner.data_freshness &&
+    (value.inventory_expires_at ?? null) === (winner.expires_at ?? null) &&
     (value.booking_url ?? null) === (winner.url ?? null) &&
     (!hasOwn(value, "h5_fallback_url") ||
       value.h5_fallback_url === null ||

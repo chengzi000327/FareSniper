@@ -316,6 +316,45 @@ test("gates realtime copy and booking when inventory freshness is unknown", () =
   expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
 });
 
+test("gates realtime copy and booking after the winning inventory expiry", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2099-08-01"
+      basePrice={580}
+      totalPrice={580}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      bookingUrl="https://booking.example.test/expired"
+      winningPriceId="expired-row"
+      inventoryExpiresAt="2000-01-01T00:00:00+00:00"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "expired-row",
+          name: "飞猪",
+          price: 580,
+          lowest: true,
+          price_status: "priced",
+          url: "https://booking.example.test/expired",
+          data_freshness: "fresh",
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
+  expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
+  expect(screen.queryByText(/最优解/)).not.toBeInTheDocument();
+  expect(screen.queryByText("最低")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+});
+
 test("formats each currency with Intl and does not fabricate a score", () => {
   const usd = new Intl.NumberFormat("zh-CN", {
     style: "currency",

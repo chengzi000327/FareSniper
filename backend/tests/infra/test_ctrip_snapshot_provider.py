@@ -3,10 +3,17 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select, update
 
+import backend.infrastructure.db.flight_demand_repo as demand_repo
 import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
 from backend.application.contracts.flight_provider import PriceStatus, ProviderStatus
 from backend.application.services.flight_query import build_flight_query
+from backend.infrastructure.db.base import get_session
+from backend.infrastructure.db.flight_demand_repo import (
+    FlightSearchDemandRow,
+    enqueue_demand,
+)
 from backend.infrastructure.db.flight_snapshot_repo import upsert_provider_flights
 from backend.infrastructure.flight_data.providers.ctrip_snapshot import (
     CtripSnapshotProvider,
@@ -164,6 +171,154 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
     assert offer.has_baggage is None
     assert offer.is_realtime is False
     assert offer.price_status is expected_price_status
+
+
+@pytest.mark.asyncio
+async def test_stale_nonempty_snapshot_returns_reference_offers_and_renews_demand(
+    monkeypatch,
+):
+    queued = []
+
+    async def read_stale_rows(**kwargs):
+        return [
+            {
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [
+                    {
+                        "id": "snapshot-row",
+                        "platform": "携程",
+                        "price": 580,
+                        "currency": "CNY",
+                        "url": "https://ctrip.test/reference",
+                        "expires_at": "2000-01-01T00:00:00+00:00",
+                    }
+                ],
+            }
+        ], 3601, True
+
+    async def capture_demand(**kwargs):
+        queued.append(kwargs)
+
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.read_provider_deals",
+        read_stale_rows,
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.enqueue_demand",
+        capture_demand,
+    )
+
+    result = await CtripSnapshotProvider().search(
+        build_flight_query("北京", "上海", "2099-08-01")
+    )
+
+    assert result.status is ProviderStatus.stale
+    assert len(result.offers) == 1
+    assert result.offers[0].price_status is PriceStatus.stale
+    assert queued == [
+        {
+            "origin_code": "BJS",
+            "destination_code": "SHA",
+            "depart_date": "2099-08-01",
+            "priority": 50,
+            "source": "recent_search",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stale_nonempty_snapshot_reactivates_expired_demand_without_duplicates(
+    seeded_pg,
+    monkeypatch,
+):
+    observed_at = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+
+    class FrozenDateTime(datetime):
+        current = observed_at
+
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return cls.current.replace(tzinfo=None)
+            return cls.current.astimezone(tz)
+
+    monkeypatch.setattr(snapshot_repo, "datetime", FrozenDateTime)
+    monkeypatch.setattr(demand_repo, "datetime", FrozenDateTime)
+    scope = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **scope,
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [
+                    {
+                        "platform": "携程",
+                        "price": 580,
+                        "currency": "CNY",
+                        "url": "https://ctrip.test/reference",
+                    }
+                ],
+            }
+        ],
+        ttl_minutes=60,
+        **scope,
+    )
+    await enqueue_demand(
+        **scope,
+        priority=10,
+        source="recent_search",
+    )
+    async with get_session() as session:
+        await session.execute(
+            update(FlightSearchDemandRow)
+            .where(
+                FlightSearchDemandRow.origin_code == "BJS",
+                FlightSearchDemandRow.destination_code == "SHA",
+                FlightSearchDemandRow.depart_date == "2099-08-01",
+            )
+            .values(
+                active=False,
+                expires_at=observed_at - timedelta(days=1),
+                next_run_at=observed_at - timedelta(days=1),
+            )
+        )
+        await session.commit()
+
+    FrozenDateTime.current = observed_at + timedelta(minutes=61)
+    query = build_flight_query("北京", "上海", "2099-08-01")
+
+    first = await CtripSnapshotProvider().search(query)
+    second = await CtripSnapshotProvider().search(query)
+
+    async with get_session() as session:
+        demands = (
+            await session.execute(select(FlightSearchDemandRow))
+        ).scalars().all()
+
+    assert first.status is ProviderStatus.stale
+    assert second.status is ProviderStatus.stale
+    assert len(first.offers) == 1
+    assert len(demands) == 1
+    assert demands[0].active is True
+    assert demands[0].source == "recent_search"
+    assert demands[0].priority == 50
+    assert demands[0].last_requested_at == FrozenDateTime.current
+    assert demands[0].expires_at == FrozenDateTime.current + timedelta(days=7)
 
 
 @pytest.mark.asyncio

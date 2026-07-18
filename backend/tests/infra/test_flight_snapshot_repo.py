@@ -453,10 +453,14 @@ async def test_read_deals_propagates_expired_and_unknown_price_freshness(
     assert by_flight["EXPIRED"]["data_freshness"] == "stale"
     assert by_flight["EXPIRED"]["winning_price_id"] is None
     assert by_flight["EXPIRED"]["prices"][0]["data_freshness"] == "stale"
+    assert by_flight["EXPIRED"]["prices"][0]["expires_at"] == (
+        now - timedelta(seconds=1)
+    ).isoformat()
     assert by_flight["EXPIRED"]["prices"][0]["lowest"] is False
     assert by_flight["UNKNOWN"]["data_freshness"] == "unknown"
     assert by_flight["UNKNOWN"]["winning_price_id"] is None
     assert by_flight["UNKNOWN"]["prices"][0]["data_freshness"] == "unknown"
+    assert by_flight["UNKNOWN"]["prices"][0]["expires_at"] is None
     assert by_flight["UNKNOWN"]["prices"][0]["lowest"] is False
 
 

@@ -110,6 +110,7 @@ def _price_row(
         "url": offer.booking_url,
         "data_provider": offer.data_provider,
         "data_freshness": _offer_freshness(offer, provider_status),
+        "expires_at": offer.expires_at,
     }
 
 
@@ -132,6 +133,7 @@ def _status_row(
             if result.status is ProviderStatus.stale
             else "unknown"
         ),
+        "expires_at": None,
     }
 
 
@@ -267,6 +269,7 @@ def _apply_ranked_offer(
             "h5_fallback_url": offer.booking_url,
             "winning_price_id": _winning_row_id(offer),
             "data_freshness": _offer_freshness(offer, provider_status),
+            "inventory_expires_at": offer.expires_at,
         }
     )
 
@@ -303,6 +306,7 @@ def _new_card(offer: FlightOffer) -> dict[str, Any]:
         "h5_fallback_url": None,
         "winning_price_id": None,
         "data_freshness": "unknown",
+        "inventory_expires_at": None,
         "prices": [],
         "signals": [],
         "confidence": "medium",

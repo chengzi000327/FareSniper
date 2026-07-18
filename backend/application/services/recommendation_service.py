@@ -4,7 +4,7 @@ import json
 import hashlib
 import statistics
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,10 +20,11 @@ from backend.services.booking_url_builder import Platform, build_booking_url
 from backend.schemas.common import DealCardDto
 
 # ── 缓存分层 ──────────────────────────────────────────────────────────────────
-# L1:全局未排序卡片池,全用户共享,key=rec:pool:v1,TTL 600s。
+# L1:全局未排序卡片池,全用户共享,key=rec:pool:v3,TTL 受库存到期时间约束。
 # L2:请求时在内存里做个性化排序(读 frequent_cities),不进 L1 缓存。
 POOL_CACHE_KEY = "rec:pool:v3"
 POOL_CACHE_TTL = 600  # 10 分钟
+POOL_CACHE_ENVELOPE_VERSION = 1
 
 DEFAULT_LIMIT = 6
 
@@ -72,20 +73,211 @@ async def build_recommendations(
     )
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_inventory_expiry(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry.astimezone(timezone.utc)
+
+
+def _effective_price_freshness(
+    price: dict[str, Any], *, now: datetime
+) -> str:
+    declared = _price_freshness(price)
+    if declared == "stale":
+        return "stale"
+    expiry = _parse_inventory_expiry(price.get("expires_at"))
+    if expiry is None:
+        return "unknown"
+    if expiry <= now:
+        return "stale"
+    return declared
+
+
+def _revalidate_preview(
+    value: object, *, now: datetime
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    raw_prices = value.get("prices")
+    if not isinstance(raw_prices, list) or any(
+        not isinstance(row, dict) for row in raw_prices
+    ):
+        return None
+
+    preview = dict(value)
+    prices: list[dict[str, Any]] = []
+    for raw_price in raw_prices:
+        price = dict(raw_price)
+        expiry = _parse_inventory_expiry(price.get("expires_at"))
+        freshness = _effective_price_freshness(price, now=now)
+        price["expires_at"] = expiry.isoformat() if expiry is not None else None
+        price["data_freshness"] = freshness
+        if freshness != "fresh":
+            price["lowest"] = False
+            price["price_status"] = "stale"
+            price["provider_status"] = "stale"
+            price["url"] = None
+        prices.append(price)
+    preview["prices"] = prices
+
+    winning_price_id = preview.get("winning_price_id")
+    matches = [
+        price
+        for price in prices
+        if isinstance(winning_price_id, str)
+        and price.get("id") == winning_price_id
+    ]
+    winner = matches[0] if len(matches) == 1 else None
+    winner_is_valid = bool(
+        winner is not None
+        and winner.get("lowest") is True
+        and winner.get("price") is not None
+        and winner.get("price_status") == "priced"
+        and winner.get("provider_status") == "success"
+        and winner.get("data_freshness") == "fresh"
+        and all(
+            price.get("lowest") is False
+            for price in prices
+            if price.get("id") != winning_price_id
+        )
+    )
+    if winner_is_valid and winner is not None:
+        preview["inventory_expires_at"] = winner["expires_at"]
+        preview["data_freshness"] = "fresh"
+        try:
+            return DealCardDto.model_validate(preview).model_dump(mode="json")
+        except Exception:
+            pass
+
+    for price in prices:
+        price["lowest"] = False
+    freshness = (
+        "stale"
+        if any(price.get("data_freshness") == "stale" for price in prices)
+        else "unknown"
+    )
+    preview.update(
+        {
+            "platform": "",
+            "price": None,
+            "lowest_price": None,
+            "tax": None,
+            "baggage_fee": None,
+            "has_baggage": None,
+            "total_price": None,
+            "recommend_score": None,
+            "winning_price_id": None,
+            "signals": [],
+            "booking_url": None,
+            "h5_fallback_url": None,
+            "data_freshness": freshness,
+            "inventory_expires_at": None,
+        }
+    )
+    try:
+        return DealCardDto.model_validate(preview).model_dump(mode="json")
+    except Exception:
+        return None
+
+
+def _revalidate_card(card: RecCard, *, now: datetime) -> RecCard:
+    if card.preview_deal is None:
+        return card
+    refreshed = card.model_copy(deep=True)
+    refreshed.preview_deal = _revalidate_preview(card.preview_deal, now=now)
+    if (
+        refreshed.preview_deal is None
+        or refreshed.preview_deal.get("winning_price_id") is None
+    ):
+        refreshed.discount_pct = None
+        destination = refreshed.title.split("→")[-1]
+        refreshed.reason = _build_reason(destination, None, None, False)
+    return refreshed
+
+
+def _decode_cached_pool(raw: str, *, now: datetime) -> list[RecCard]:
+    decoded = json.loads(raw)
+    if isinstance(decoded, list):
+        records = decoded
+    elif isinstance(decoded, dict) and isinstance(decoded.get("cards"), list):
+        records = decoded["cards"]
+    else:
+        raise ValueError("invalid recommendation cache payload")
+    return [
+        _revalidate_card(RecCard.model_validate(record), now=now)
+        for record in records
+    ]
+
+
+def _earliest_inventory_expiry(
+    pool: list[RecCard], *, now: datetime
+) -> datetime | None:
+    expiries: list[datetime] = []
+    for card in pool:
+        preview = card.preview_deal
+        if not isinstance(preview, dict):
+            continue
+        for price in preview.get("prices") or []:
+            if not isinstance(price, dict):
+                continue
+            if _effective_price_freshness(price, now=now) != "fresh":
+                continue
+            expiry = _parse_inventory_expiry(price.get("expires_at"))
+            if expiry is not None and expiry > now:
+                expiries.append(expiry)
+    return min(expiries, default=None)
+
+
+def _bounded_cache_ttl(expiry: datetime | None, *, now: datetime) -> int:
+    if expiry is None:
+        return POOL_CACHE_TTL
+    remaining = int((expiry - now).total_seconds())
+    return min(POOL_CACHE_TTL, max(1, remaining))
+
+
 async def _get_card_pool() -> list[RecCard]:
-    """L1:返回全局未排序卡片池,优先读 rec:pool:v1 缓存。"""
+    """Return a clock-revalidated global card pool from cache or storage."""
+    now = _utc_now()
     try:
         raw = await _redis().get(POOL_CACHE_KEY)
         if raw:
-            return [RecCard.model_validate(c) for c in json.loads(raw)]
+            return _decode_cached_pool(raw, now=now)
     except Exception:
         pass
 
-    pool = await _build_card_pool()
+    built_pool = await _build_card_pool()
+    now = _utc_now()
+    pool = [_revalidate_card(card, now=now) for card in built_pool]
+    earliest_expiry = _earliest_inventory_expiry(pool, now=now)
 
     try:
-        payload = json.dumps([c.model_dump() for c in pool])
-        await _redis().setex(POOL_CACHE_KEY, POOL_CACHE_TTL, payload)
+        payload = json.dumps(
+            {
+                "version": POOL_CACHE_ENVELOPE_VERSION,
+                "cached_at": now.isoformat(),
+                "inventory_expires_at": (
+                    earliest_expiry.isoformat()
+                    if earliest_expiry is not None
+                    else None
+                ),
+                "cards": [card.model_dump() for card in pool],
+            }
+        )
+        await _redis().setex(
+            POOL_CACHE_KEY,
+            _bounded_cache_ttl(earliest_expiry, now=now),
+            payload,
+        )
     except Exception:
         pass
     return pool
@@ -198,6 +390,7 @@ def _build_card(
     market_avg: int | None,
     sample_n: int,
 ) -> RecCard:
+    now = _utc_now()
     origin_name = CITY_NAMES.get(origin, origin)
     dest_name = CITY_NAMES.get(dest, dest)
     tags = list(ROUTE_TAGS.get((origin, dest), []))
@@ -224,7 +417,7 @@ def _build_card(
             for row in prices
             if str(row.get("currency") or "").upper() == currency
         ]
-        winning_price = _winning_price(deal, selected_prices)
+        winning_price = _winning_price(deal, selected_prices, now=now)
         price = (
             _positive_price(winning_price.get("price"))
             if winning_price is not None
@@ -253,7 +446,16 @@ def _build_card(
             if winning_price is not None
             else None
         )
-        deal_freshness = _deal_freshness(deal)
+        deal_freshness = (
+            "fresh"
+            if winning_price is not None
+            else _reference_freshness(deal, selected_prices, now=now)
+        )
+        winner_expiry = (
+            _parse_inventory_expiry(winning_price.get("expires_at"))
+            if winning_price is not None
+            else None
+        )
         preview_deal = {
             "id": f"rec-{origin}-{dest}-{deal.get('depart_date', '')}",
             "system_id": f"{deal.get('flight_no', '')}-{deal.get('depart_date', '')}",
@@ -291,12 +493,12 @@ def _build_card(
                     ),
                     "price_status": (
                         p.get("price_status", "priced")
-                        if _price_freshness(p) == "fresh"
+                        if _effective_price_freshness(p, now=now) == "fresh"
                         else "stale"
                     ),
                     "provider_status": (
                         "success"
-                        if _price_freshness(p) == "fresh"
+                        if _effective_price_freshness(p, now=now) == "fresh"
                         else "stale"
                     ),
                     "url": (
@@ -305,12 +507,22 @@ def _build_card(
                         and _recommendation_price_id(p, currency)
                         == winning_price_id
                         else p.get("url")
-                        if _price_freshness(p) == "fresh"
+                        if _effective_price_freshness(p, now=now) == "fresh"
                         and is_complete_https_url(p.get("url"))
                         else None
                     ),
                     "data_provider": p.get("data_provider", "legacy"),
-                    "data_freshness": _price_freshness(p),
+                    "data_freshness": _effective_price_freshness(p, now=now),
+                    "expires_at": (
+                        expiry.isoformat()
+                        if (
+                            expiry := _parse_inventory_expiry(
+                                p.get("expires_at")
+                            )
+                        )
+                        is not None
+                        else None
+                    ),
                 }
                 for p in selected_prices
             ],
@@ -318,6 +530,11 @@ def _build_card(
             "booking_url": booking_url,
             "h5_fallback_url": booking_url,
             "data_freshness": deal_freshness,
+            "inventory_expires_at": (
+                winner_expiry.isoformat()
+                if winner_expiry is not None
+                else None
+            ),
         }
         preview_deal = DealCardDto.model_validate(preview_deal).model_dump(
             mode="json"
@@ -412,8 +629,28 @@ def _deal_freshness(deal: dict[str, Any]) -> str:
     return value if value in {"fresh", "stale", "unknown"} else "unknown"
 
 
+def _reference_freshness(
+    deal: dict[str, Any],
+    prices: list[dict[str, Any]],
+    *,
+    now: datetime,
+) -> str:
+    declared = _deal_freshness(deal)
+    if declared == "stale":
+        return "stale"
+    effective = [
+        _effective_price_freshness(price, now=now) for price in prices
+    ]
+    if "stale" in effective:
+        return "stale"
+    return "unknown"
+
+
 def _winning_price(
-    deal: dict[str, Any], prices: list[dict[str, Any]]
+    deal: dict[str, Any],
+    prices: list[dict[str, Any]],
+    *,
+    now: datetime,
 ) -> dict[str, Any] | None:
     if _deal_freshness(deal) != "fresh":
         return None
@@ -430,7 +667,7 @@ def _winning_price(
         return None
     winner = matches[0]
     if (
-        _price_freshness(winner) != "fresh"
+        _effective_price_freshness(winner, now=now) != "fresh"
         or winner.get("price_status", "priced") != "priced"
     ):
         return None

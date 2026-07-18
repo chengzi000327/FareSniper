@@ -46,6 +46,7 @@ function validPriceItem(overrides: Record<string, unknown> = {}) {
     url: "https://example.com/book",
     data_provider: "flyai",
     data_freshness: "fresh",
+    expires_at: "2099-08-01T01:00:00+00:00",
     ...overrides,
   };
 }
@@ -79,6 +80,7 @@ function validDeal(overrides: Record<string, unknown> = {}) {
     signals: ["历史低价"],
     booking_url: "https://example.com/book",
     data_freshness: "fresh",
+    inventory_expires_at: "2099-08-01T01:00:00+00:00",
     ...overrides,
   };
 }
@@ -542,7 +544,11 @@ test.each([
   ["a price item with invalid data provider", [validDeal({ prices: [validPriceItem({ data_provider: 1 })] })]],
   ["a price item missing data freshness", [validDeal({ prices: [validPriceItem({ data_freshness: undefined })] })]],
   ["a price item with invalid data freshness", [validDeal({ prices: [validPriceItem({ data_freshness: "recent" })] })]],
+  ["a price item with invalid expiry", [validDeal({ prices: [validPriceItem({ expires_at: "eventually" })] })]],
   ["a winner id that is absent from prices", [validDeal({ winning_price_id: "missing-row" })]],
+  ["a nonwinner also marked lowest", [validDeal({ prices: [validPriceItem(), validPriceItem({ id: "other-row", name: "其他", price: 600, lowest: true, url: null })] })]],
+  ["a nonwinner with null lowest", [validDeal({ prices: [validPriceItem(), validPriceItem({ id: "other-row", name: "其他", price: 600, lowest: null, url: null })] })]],
+  ["a no-winner row with null lowest", [validDeal({ platform: "", price: null, lowest_price: null, total_price: null, winning_price_id: null, booking_url: null, data_freshness: "unknown", inventory_expires_at: null, prices: [validPriceItem({ lowest: null, price_status: "stale", provider_status: "stale", url: null, data_freshness: "unknown", expires_at: null })] })]],
   ["a winner URL without a card booking URL", [validDeal({ booking_url: undefined })]],
   ["a booking fallback that disagrees with the winner", [validDeal({ h5_fallback_url: "https://other.example.com/book" })]],
   ["a deal with invalid data freshness", [validDeal({ data_freshness: "recent" })]],
@@ -589,7 +595,7 @@ test("stream accepts a complete response with fully validated nested DTOs", asyn
   expect(onEvent).toHaveBeenCalledTimes(1);
 });
 
-test("stream accepts backend-valid null lowest state", async () => {
+test("stream accepts an explicit false lowest state for a nonwinner", async () => {
   const response = completeResponse({
     deals: [
       validDeal({
@@ -599,7 +605,7 @@ test("stream accepts backend-valid null lowest state", async () => {
             id: "ctrip-status-cny",
             name: "携程",
             price: null,
-            lowest: null,
+            lowest: false,
             price_status: null,
             provider_status: "queued",
             url: null,

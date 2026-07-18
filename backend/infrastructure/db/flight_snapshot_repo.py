@@ -482,6 +482,11 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
                     "price_status": p.price_status,
                     "data_provider": p.data_provider,
                     "data_freshness": freshness[p.id],
+                    "expires_at": (
+                        p.expires_at.isoformat()
+                        if p.expires_at is not None
+                        else None
+                    ),
                 }
                 for p in prices
             ]

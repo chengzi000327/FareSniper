@@ -28,6 +28,7 @@ export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
     recommendScore: deal.recommend_score ?? undefined,
     winningPriceId: deal.winning_price_id,
     dataFreshness: deal.data_freshness,
+    inventoryExpiresAt: deal.inventory_expires_at,
     prices: deal.prices,
     bookingUrl: deal.booking_url ?? null,
   }

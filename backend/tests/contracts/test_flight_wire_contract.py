@@ -60,5 +60,11 @@ def test_backend_fixture_preserves_https_deep_link_query_and_currency() -> None:
     assert winner["url"] == result_deal["booking_url"]
     assert winner["lowest"] is True
     assert winner["data_freshness"] == result_deal["data_freshness"] == "fresh"
+    assert winner["expires_at"] == result_deal["inventory_expires_at"]
+    assert all(
+        row["lowest"] is False
+        for row in result_deal["prices"]
+        if row["id"] != result_deal["winning_price_id"]
+    )
     assert snapshot["price"] == 500
     assert snapshot["lowest"] is False

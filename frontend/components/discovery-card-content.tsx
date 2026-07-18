@@ -18,6 +18,7 @@ export type DiscoveryCardContentProps = {
   recommendScore?: string
   winningPriceId?: string | null
   dataFreshness?: DataFreshness
+  inventoryExpiresAt?: string | null
   prices: PriceItem[]
   compact?: boolean
   onMonitorPrice?: () => void
@@ -39,6 +40,7 @@ export function DiscoveryCardContent({
   recommendScore,
   winningPriceId,
   dataFreshness,
+  inventoryExpiresAt,
   prices,
   compact,
   onMonitorPrice,
@@ -61,12 +63,19 @@ export function DiscoveryCardContent({
     empty: '暂无结果',
   }
   const hasFreeBaggage = hasBaggage === true && baggageFee === 0
+  const inventoryExpiry = inventoryExpiresAt
+    ? Date.parse(inventoryExpiresAt)
+    : null
+  const inventoryIsCurrent =
+    inventoryExpiry === null ||
+    (Number.isFinite(inventoryExpiry) && inventoryExpiry > Date.now())
   const isRealtimeWinner = (price: PriceItem) =>
     price.id === winningPriceId &&
     price.provider_status === 'success' &&
     price.price_status === 'priced' &&
     price.data_freshness === 'fresh' &&
     dataFreshness === 'fresh' &&
+    inventoryIsCurrent &&
     price.price !== null &&
     computedTotal !== null &&
     price.price === computedTotal &&
