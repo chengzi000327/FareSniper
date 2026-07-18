@@ -117,7 +117,7 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE flight_search_demands
-        SET demand_hour = date_trunc('hour', last_requested_at),
+        SET demand_hour = '1970-01-01 00:00:00+00'::timestamptz,
             next_attempt_at = next_run_at,
             created_at = last_requested_at,
             updated_at = last_requested_at

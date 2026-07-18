@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import os
 import subprocess
 import sys
@@ -140,10 +141,12 @@ def test_demand_metadata_matches_migration_keys():
 
 
 @pytest.mark.asyncio
-async def test_old_route_date_insert_and_named_conflict_survive_upgrade(
+async def test_preupgrade_route_date_row_accepts_old_binary_conflict_after_upgrade(
     seeded_pg,
 ):
-    now = datetime(2099, 7, 1, 12, 45, tzinfo=timezone.utc)
+    seeded_at = datetime(2099, 7, 1, 12, 45, tzinfo=timezone.utc)
+    updated_at = seeded_at + timedelta(hours=2)
+    demand_id = hashlib.sha1(b"BJS|SHA|2099-08-01").hexdigest()[:24]
     old_binary_upsert = text(
         """
         INSERT INTO flight_search_demands (
@@ -168,41 +171,102 @@ async def test_old_route_date_insert_and_named_conflict_survive_upgrade(
         """
     )
     params = {
-        "id": "old-binary-route-date-id",
+        "id": demand_id,
         "origin_code": "BJS",
         "destination_code": "SHA",
         "depart_date": "2099-08-01",
         "priority": 10,
         "source": "recent_search",
-        "requested_at": now,
-        "expires_at": now + timedelta(days=7),
+        "requested_at": seeded_at,
+        "expires_at": seeded_at + timedelta(days=7),
     }
 
-    async with seeded_pg.begin() as connection:
-        await connection.execute(old_binary_upsert, params)
-        await connection.execute(
-            old_binary_upsert,
-            {
-                **params,
-                "priority": 90,
-                "source": "price_alert",
-                "requested_at": now + timedelta(hours=2),
-            },
+    await seeded_pg.dispose()
+    try:
+        await asyncio.to_thread(
+            subprocess.run,
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "backend/alembic.ini",
+                "downgrade",
+                "20260718_provider_inventory",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_test_database_env(),
+            timeout=30,
         )
-        row = (
+        await seeded_pg.dispose()
+        async with seeded_pg.begin() as connection:
+            await connection.execute(old_binary_upsert, params)
+
+        await seeded_pg.dispose()
+        await asyncio.to_thread(
+            subprocess.run,
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "backend/alembic.ini",
+                "upgrade",
+                "head",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_test_database_env(),
+            timeout=30,
+        )
+        await seeded_pg.dispose()
+        async with seeded_pg.begin() as connection:
             await connection.execute(
-                text(
-                    """
-                    SELECT origin_airport_code, destination_airport_code,
-                           demand_hour, status, attempts, next_attempt_at,
-                           created_at, updated_at, priority, source
-                    FROM flight_search_demands
-                    WHERE id = :id
-                    """
-                ),
-                {"id": params["id"]},
+                old_binary_upsert,
+                {
+                    **params,
+                    "priority": 90,
+                    "source": "price_alert",
+                    "requested_at": updated_at,
+                },
             )
-        ).one()
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT origin_airport_code, destination_airport_code,
+                               demand_hour, status, attempts, next_attempt_at,
+                               created_at, updated_at, priority, source
+                        FROM flight_search_demands
+                        WHERE id = :id
+                        """
+                    ),
+                    {"id": demand_id},
+                )
+            ).one()
+    finally:
+        await seeded_pg.dispose()
+        await asyncio.to_thread(
+            subprocess.run,
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "backend/alembic.ini",
+                "upgrade",
+                "head",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_test_database_env(),
+            timeout=30,
+        )
+        await seeded_pg.dispose()
 
     assert row.origin_airport_code == ""
     assert row.destination_airport_code == ""
