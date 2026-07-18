@@ -166,23 +166,80 @@ def downgrade() -> None:
     )
     op.execute(
         """
+        WITH ranked AS (
+            SELECT
+                origin_code,
+                destination_code,
+                depart_date,
+                first_value(id) OVER current_demand AS keeper_id,
+                bool_or(active) OVER route_date AS merged_active,
+                max(expires_at) OVER route_date AS merged_expires_at,
+                min(next_run_at) OVER route_date AS merged_next_run_at,
+                max(last_requested_at)
+                    OVER route_date AS merged_last_requested_at,
+                max(priority) OVER route_date AS merged_priority,
+                first_value(source) OVER priority_source AS merged_source
+            FROM flight_search_demands
+            WINDOW
+                route_date AS (
+                    PARTITION BY origin_code, destination_code, depart_date
+                ),
+                current_demand AS (
+                    PARTITION BY origin_code, destination_code, depart_date
+                    ORDER BY last_requested_at DESC, demand_hour DESC, id ASC
+                ),
+                priority_source AS (
+                    PARTITION BY origin_code, destination_code, depart_date
+                    ORDER BY priority DESC, last_requested_at DESC, id ASC
+                )
+        ),
+        consolidated AS (
+            SELECT DISTINCT
+                keeper_id,
+                merged_active,
+                merged_expires_at,
+                merged_next_run_at,
+                merged_last_requested_at,
+                merged_priority,
+                merged_source
+            FROM ranked
+        )
+        UPDATE flight_search_demands AS keeper
+        SET active = consolidated.merged_active,
+            expires_at = consolidated.merged_expires_at,
+            next_run_at = consolidated.merged_next_run_at,
+            last_requested_at = consolidated.merged_last_requested_at,
+            priority = consolidated.merged_priority,
+            source = consolidated.merged_source
+        FROM consolidated
+        WHERE keeper.id = consolidated.keeper_id
+        """
+    )
+    op.execute(
+        """
+        WITH keepers AS (
+            SELECT DISTINCT ON (
+                origin_code, destination_code, depart_date
+            )
+                id,
+                origin_code,
+                destination_code,
+                depart_date
+            FROM flight_search_demands
+            ORDER BY
+                origin_code,
+                destination_code,
+                depart_date,
+                last_requested_at DESC,
+                demand_hour DESC,
+                id ASC
+        )
         DELETE FROM flight_search_demands AS duplicate
-        USING flight_search_demands AS keeper
-        WHERE duplicate.origin_code = keeper.origin_code
-          AND duplicate.destination_code = keeper.destination_code
-          AND duplicate.depart_date = keeper.depart_date
-          AND (
-              duplicate.priority < keeper.priority
-              OR (
-                  duplicate.priority = keeper.priority
-                  AND duplicate.last_requested_at < keeper.last_requested_at
-              )
-              OR (
-                  duplicate.priority = keeper.priority
-                  AND duplicate.last_requested_at = keeper.last_requested_at
-                  AND duplicate.id > keeper.id
-              )
-          )
+        USING keepers
+        WHERE duplicate.origin_code = keepers.origin_code
+          AND duplicate.destination_code = keepers.destination_code
+          AND duplicate.depart_date = keepers.depart_date
+          AND duplicate.id <> keepers.id
         """
     )
     op.create_unique_constraint(

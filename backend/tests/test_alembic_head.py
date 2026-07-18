@@ -6,10 +6,15 @@ which matches how the CI / Railway image actually invokes Alembic.
 from __future__ import annotations
 
 import ast
+import asyncio
 import os
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
+from sqlalchemy import insert, text
 
 from backend.config import settings
 from backend.infrastructure.db.flight_demand_repo import (
@@ -35,6 +40,7 @@ def test_alembic_history_lists_init():
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     assert "20260505_init" in proc.stdout
     assert "a1b2c3d4e5f6" in proc.stdout
@@ -47,6 +53,7 @@ def test_alembic_current_is_at_head():
         text=True,
         check=True,
         env=_test_database_env(),
+        timeout=30,
     )
     assert "(head)" in proc.stdout
 
@@ -57,6 +64,7 @@ def test_alembic_has_exactly_one_head():
         capture_output=True,
         text=True,
         check=True,
+        timeout=30,
     )
     heads = [line for line in proc.stdout.splitlines() if "(head)" in line]
     assert heads == ["20260718_ctrip_collector (head)"]
@@ -149,3 +157,121 @@ def test_platform_price_metadata_matches_provider_index():
         "data_provider",
         "platform",
     ]
+
+
+@pytest.mark.asyncio
+async def test_collector_downgrade_consolidates_hourly_route_state(seeded_pg):
+    current_request = datetime(2099, 7, 1, 12, 45, tzinfo=timezone.utc)
+    older_request = current_request - timedelta(hours=1)
+    common = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+        "attempts": 0,
+        "lease_owner": None,
+        "lease_expires_at": None,
+        "last_error": None,
+        "status": "pending",
+    }
+    async with seeded_pg.begin() as connection:
+        await connection.execute(
+            insert(FlightSearchDemandRow),
+            [
+                {
+                    **common,
+                    "id": "older-high-priority",
+                    "demand_hour": older_request.replace(
+                        minute=0, second=0, microsecond=0
+                    ),
+                    "priority": 100,
+                    "source": "price_alert",
+                    "last_requested_at": older_request,
+                    "next_run_at": current_request + timedelta(hours=3),
+                    "next_attempt_at": current_request + timedelta(hours=3),
+                    "expires_at": current_request + timedelta(days=2),
+                    "active": False,
+                    "created_at": older_request,
+                    "updated_at": older_request,
+                },
+                {
+                    **common,
+                    "id": "current-low-priority",
+                    "demand_hour": current_request.replace(
+                        minute=0, second=0, microsecond=0
+                    ),
+                    "priority": 5,
+                    "source": "hot_route",
+                    "last_requested_at": current_request,
+                    "next_run_at": current_request + timedelta(hours=1),
+                    "next_attempt_at": current_request + timedelta(hours=1),
+                    "expires_at": current_request + timedelta(days=5),
+                    "active": True,
+                    "created_at": current_request,
+                    "updated_at": current_request,
+                },
+            ],
+        )
+
+    await seeded_pg.dispose()
+    try:
+        await asyncio.to_thread(
+            subprocess.run,
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "backend/alembic.ini",
+                "downgrade",
+                "20260718_provider_inventory",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_test_database_env(),
+            timeout=30,
+        )
+        await seeded_pg.dispose()
+        async with seeded_pg.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT id, priority, source, active, expires_at,
+                               next_run_at, last_requested_at
+                        FROM flight_search_demands
+                        WHERE origin_code = 'BJS'
+                          AND destination_code = 'SHA'
+                          AND depart_date = '2099-08-01'
+                        """
+                    )
+                )
+            ).one()
+
+        assert row.id == "current-low-priority"
+        assert row.priority == 100
+        assert row.source == "price_alert"
+        assert row.active is True
+        assert row.expires_at == current_request + timedelta(days=5)
+        assert row.next_run_at == current_request + timedelta(hours=1)
+        assert row.last_requested_at == current_request
+    finally:
+        await seeded_pg.dispose()
+        await asyncio.to_thread(
+            subprocess.run,
+            [
+                sys.executable,
+                "-m",
+                "alembic",
+                "-c",
+                "backend/alembic.ini",
+                "upgrade",
+                "head",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_test_database_env(),
+            timeout=30,
+        )
+        await seeded_pg.dispose()

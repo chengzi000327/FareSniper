@@ -2,33 +2,40 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select, update
 
 from backend.application.contracts.flight_provider import FlightOffer
+import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
 
 from backend.infrastructure.db.flight_demand_repo import (
     CollectorNodeRow,
     FlightSearchDemandRow,
     LeaseOwnershipError,
     claim_next,
-    claim_due_demands,
     complete_job,
     enqueue_demand,
     fail_job,
     record_heartbeat,
 )
 from backend.infrastructure.db.flight_snapshot_repo import (
+    PlatformPriceSnapshot,
     read_provider_deals,
     upsert_provider_offers,
 )
 
 
-def _offer(*, price: int = 580) -> FlightOffer:
+def _offer(
+    *,
+    price: int = 580,
+    data_provider: str = "ctrip",
+    seller_name: str = "携程",
+) -> FlightOffer:
     return FlightOffer(
-        data_provider="ctrip",
-        seller_name="携程",
+        data_provider=data_provider,
+        seller_name=seller_name,
         flight_no="MU5106",
         airline="东方航空",
         origin_city="北京",
@@ -62,29 +69,94 @@ async def test_enqueue_is_idempotent_and_raises_priority(seeded_pg):
         source="price_alert",
     )
 
-    rows = await claim_due_demands(limit=10)
+    claimed = await claim_next("mac-1", lease_seconds=60)
 
     assert first_id == second_id
-    assert len(rows) == 1
-    assert rows[0].priority == 100
-    assert rows[0].source == "price_alert"
+    assert claimed is not None
+    assert claimed.priority == 100
+    assert claimed.source == "price_alert"
 
 
 @pytest.mark.asyncio
-async def test_claim_schedules_next_collection_one_hour_later(seeded_pg):
-    await enqueue_demand(
+async def test_lower_priority_collision_preserves_higher_priority_provenance(
+    seeded_pg,
+):
+    job_id = await enqueue_demand(
         origin_code="BJS",
         destination_code="SHA",
         depart_date="2099-08-01",
-        priority=50,
-        source="recent_search",
+        priority=100,
+        source="price_alert",
+    )
+    duplicate_id = await enqueue_demand(
+        origin_code="BJS",
+        destination_code="SHA",
+        depart_date="2099-08-01",
+        priority=5,
+        source="hot_route",
     )
 
-    first_claim = await claim_due_demands(limit=10)
-    second_claim = await claim_due_demands(limit=10)
+    claimed = await claim_next("mac-1", lease_seconds=60)
 
-    assert len(first_claim) == 1
-    assert second_claim == []
+    assert duplicate_id == job_id
+    assert claimed is not None
+    assert claimed.priority == 100
+    assert claimed.source == "price_alert"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_rejects_unapproved_source(seeded_pg):
+    with pytest.raises(ValueError, match="approved demand source"):
+        await enqueue_demand(
+            "BJS", "SHA", "2099-08-01", "browser_worker", 50
+        )
+
+    assert await claim_next("mac-1", lease_seconds=60) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "depart_date",
+    [
+        datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat(),
+        "2000-01-01",
+    ],
+)
+async def test_enqueue_rejects_non_future_shanghai_date(
+    seeded_pg,
+    depart_date,
+):
+    with pytest.raises(ValueError, match="future depart_date"):
+        await enqueue_demand(
+            "BJS", "SHA", depart_date, "recent_search", 50
+        )
+
+    assert await claim_next("mac-1", lease_seconds=60) is None
+
+
+@pytest.mark.asyncio
+async def test_claim_next_deactivates_legacy_same_day_demand(seeded_pg):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    async with seeded_pg.begin() as connection:
+        await connection.execute(
+            update(FlightSearchDemandRow)
+            .where(FlightSearchDemandRow.id == job_id)
+            .values(depart_date=today)
+        )
+
+    assert await claim_next("mac-1", lease_seconds=60) is None
+    async with seeded_pg.connect() as connection:
+        active = (
+            await connection.execute(
+                select(FlightSearchDemandRow.active).where(
+                    FlightSearchDemandRow.id == job_id
+                )
+            )
+        ).scalar_one()
+    assert active is False
 
 
 @pytest.mark.asyncio
@@ -109,7 +181,7 @@ async def test_enqueue_rejects_noncanonical_or_invalid_date(
         )
 
     assert depart_date not in str(exc_info.value)
-    assert await claim_due_demands(limit=10) == []
+    assert await claim_next("mac-1", lease_seconds=60) is None
 
 
 @pytest.mark.asyncio
@@ -247,6 +319,106 @@ async def test_complete_job_requires_owner_and_is_idempotent(seeded_pg):
         depart_date="2099-08-01",
     )
     assert rows[0]["lowest_price"] == 580
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data_provider", "seller_name"),
+    [("serpapi", "携程"), ("ctrip", "Other Seller")],
+)
+async def test_complete_job_rejects_non_ctrip_offer_identity(
+    seeded_pg,
+    data_provider,
+    seller_name,
+):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+
+    with pytest.raises(ValueError, match="Ctrip identity"):
+        await complete_job(
+            job_id,
+            "mac-1",
+            [
+                _offer(
+                    data_provider=data_provider,
+                    seller_name=seller_name,
+                )
+            ],
+        )
+
+    rows, _, _ = await read_provider_deals(
+        "ctrip_snapshot", "BJS", "SHA", "2099-08-01"
+    )
+    assert rows == []
+    async with seeded_pg.connect() as connection:
+        status = (
+            await connection.execute(
+                select(FlightSearchDemandRow.status).where(
+                    FlightSearchDemandRow.id == job_id
+                )
+            )
+        ).scalar_one()
+    assert status == "leased"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_failure_rolls_back_job_and_existing_snapshot(
+    seeded_pg,
+    monkeypatch,
+):
+    await upsert_provider_offers("ctrip_snapshot", [_offer()], ttl_minutes=75)
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+
+    async def fail_after_snapshot_write(
+        session,
+        provider,
+        offers,
+        ttl_minutes,
+    ):
+        await session.execute(
+            update(PlatformPriceSnapshot)
+            .where(PlatformPriceSnapshot.data_provider == "ctrip_snapshot")
+            .values(price=1)
+        )
+        raise RuntimeError("injected snapshot failure")
+
+    monkeypatch.setattr(
+        snapshot_repo,
+        "_upsert_provider_offers_in_session",
+        fail_after_snapshot_write,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="injected snapshot failure"):
+        await complete_job(job_id, "mac-1", [_offer(price=560)])
+
+    async with seeded_pg.connect() as connection:
+        job = (
+            await connection.execute(
+                select(
+                    FlightSearchDemandRow.status,
+                    FlightSearchDemandRow.lease_owner,
+                    FlightSearchDemandRow.lease_expires_at,
+                ).where(FlightSearchDemandRow.id == job_id)
+            )
+        ).one()
+        price = (
+            await connection.execute(
+                select(PlatformPriceSnapshot.price).where(
+                    PlatformPriceSnapshot.data_provider == "ctrip_snapshot"
+                )
+            )
+        ).scalar_one()
+
+    assert job.status == "leased"
+    assert job.lease_owner == "mac-1"
+    assert job.lease_expires_at is not None
+    assert price == 580
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
     Boolean,
+    case,
     Column,
     DateTime,
     Index,
@@ -25,6 +26,10 @@ from backend.application.services.flight_dates import (
     validate_canonical_depart_date,
 )
 from backend.infrastructure.db.base import Base, get_session
+
+APPROVED_DEMAND_SOURCES = frozenset(
+    {"recent_search", "price_alert", "hot_route"}
+)
 
 
 class FlightSearchDemandRow(Base):
@@ -80,35 +85,6 @@ class CollectorNodeRow(Base):
 
 
 @dataclass(frozen=True)
-class FlightSearchDemand:
-    id: str
-    origin_code: str
-    destination_code: str
-    depart_date: str
-    priority: int
-    source: str
-    last_requested_at: datetime
-    next_run_at: datetime
-    expires_at: datetime
-    active: bool
-
-    @classmethod
-    def from_row(cls, row: FlightSearchDemandRow) -> FlightSearchDemand:
-        return cls(
-            id=row.id,
-            origin_code=row.origin_code,
-            destination_code=row.destination_code,
-            depart_date=row.depart_date,
-            priority=row.priority,
-            source=row.source,
-            last_requested_at=row.last_requested_at,
-            next_run_at=row.next_run_at,
-            expires_at=row.expires_at,
-            active=row.active,
-        )
-
-
-@dataclass(frozen=True)
 class CollectorJob:
     job_id: str
     origin_code: str
@@ -153,6 +129,13 @@ async def enqueue_demand(
     priority: int,
 ) -> str:
     validate_canonical_depart_date(depart_date)
+    if source not in APPROVED_DEMAND_SOURCES:
+        raise ValueError("source must be an approved demand source")
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    if depart_date <= today:
+        raise ValueError(
+            "collector demand requires a future depart_date in Asia/Shanghai"
+        )
 
     now = datetime.now(timezone.utc)
     demand_hour = now.replace(minute=0, second=0, microsecond=0)
@@ -191,7 +174,14 @@ async def enqueue_demand(
                 "priority": func.greatest(
                     FlightSearchDemandRow.priority, stmt.excluded.priority
                 ),
-                "source": stmt.excluded.source,
+                "source": case(
+                    (
+                        stmt.excluded.priority
+                        > FlightSearchDemandRow.priority,
+                        stmt.excluded.source,
+                    ),
+                    else_=FlightSearchDemandRow.source,
+                ),
                 "last_requested_at": now,
                 "next_run_at": func.least(
                     FlightSearchDemandRow.next_run_at, now
@@ -209,39 +199,6 @@ async def enqueue_demand(
     return demand_id
 
 
-async def claim_due_demands(limit: int) -> list[FlightSearchDemand]:
-    now = datetime.now(timezone.utc)
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
-    async with get_session() as session:
-        await session.execute(
-            update(FlightSearchDemandRow)
-            .where(
-                FlightSearchDemandRow.depart_date < today
-            )
-            .values(active=False)
-        )
-        rows = (
-            await session.execute(
-                select(FlightSearchDemandRow)
-                .where(
-                    FlightSearchDemandRow.active.is_(True),
-                    FlightSearchDemandRow.expires_at > now,
-                    FlightSearchDemandRow.next_run_at <= now,
-                )
-                .order_by(
-                    FlightSearchDemandRow.priority.desc(),
-                    FlightSearchDemandRow.last_requested_at.desc(),
-                )
-                .limit(limit)
-                .with_for_update(skip_locked=True)
-            )
-        ).scalars().all()
-        for row in rows:
-            row.next_run_at = now + timedelta(hours=1)
-        await session.commit()
-        return [FlightSearchDemand.from_row(row) for row in rows]
-
-
 async def claim_next(
     node_id: str, lease_seconds: int
 ) -> CollectorJob | None:
@@ -253,7 +210,7 @@ async def claim_next(
     async with get_session() as session:
         await session.execute(
             update(FlightSearchDemandRow)
-            .where(FlightSearchDemandRow.depart_date < today)
+            .where(FlightSearchDemandRow.depart_date <= today)
             .values(active=False, updated_at=now)
         )
         row = (
@@ -279,6 +236,7 @@ async def claim_next(
                 .order_by(
                     FlightSearchDemandRow.priority.desc(),
                     FlightSearchDemandRow.last_requested_at.desc(),
+                    FlightSearchDemandRow.id.asc(),
                 )
                 .limit(1)
                 .with_for_update(skip_locked=True)
@@ -302,9 +260,7 @@ async def complete_job(
     node_id: str,
     offers: list[object],
 ) -> bool:
-    from backend.infrastructure.db.flight_snapshot_repo import (
-        upsert_provider_offers,
-    )
+    from backend.infrastructure.db import flight_snapshot_repo
 
     now = datetime.now(timezone.utc)
     async with get_session() as session:
@@ -323,11 +279,12 @@ async def complete_job(
 
         if offers:
             _verify_offer_scope(row, offers)
-            await upsert_provider_offers(
+            _verify_ctrip_offer_identity(offers)
+            await flight_snapshot_repo._upsert_provider_offers_in_session(
+                session,
                 "ctrip_snapshot",
                 offers,
                 ttl_minutes=75,
-                _session=session,
             )
 
         row.status = "completed"
@@ -446,6 +403,15 @@ def _verify_offer_scope(
             row.depart_date,
         ):
             raise ValueError("collector offers do not match the leased job")
+
+
+def _verify_ctrip_offer_identity(offers: list[object]) -> None:
+    for offer in offers:
+        if (
+            _offer_field(offer, "data_provider") != "ctrip"
+            or _offer_field(offer, "seller_name") != "携程"
+        ):
+            raise ValueError("collector offers must have Ctrip identity")
 
 
 def _offer_field(offer: object, name: str) -> object:

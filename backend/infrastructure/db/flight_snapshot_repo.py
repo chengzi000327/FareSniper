@@ -19,6 +19,7 @@ from sqlalchemy import (
     select,
 )
 from sqlalchemy.dialects.postgresql import JSONB, insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.infrastructure.db.base import Base, get_session
 
@@ -189,7 +190,6 @@ def _offer_to_provider_flight(offer: object) -> dict[str, Any]:
         raise ValueError("provider offers require a positive total_price")
 
     duration_minutes = values.get("duration_minutes")
-    raw_reference = values.get("raw_reference")
     return {
         "flight_no": values["flight_no"],
         "airline": values.get("airline") or "",
@@ -211,11 +211,7 @@ def _offer_to_provider_flight(offer: object) -> dict[str, Any]:
                 "price": total_price,
                 "currency": values.get("currency") or "CNY",
                 "url": values.get("booking_url") or "",
-                "raw_payload": (
-                    {"raw_reference": raw_reference}
-                    if raw_reference is not None
-                    else None
-                ),
+                "raw_payload": None,
                 "price_status": values.get("price_status") or "priced",
             }
         ],
@@ -338,20 +334,31 @@ async def upsert_provider_flights(
     origin_code: str | None = None,
     destination_code: str | None = None,
     depart_date: str | None = None,
-    _session: Any = None,
 ) -> None:
-    if _session is None:
-        async with get_session() as session:
-            await upsert_provider_flights(
-                provider,
-                flights,
-                ttl_minutes,
-                origin_code=origin_code,
-                destination_code=destination_code,
-                depart_date=depart_date,
-                _session=session,
-            )
-            await session.commit()
+    async with get_session() as session:
+        await _upsert_provider_flights_in_session(
+            session,
+            provider,
+            flights,
+            ttl_minutes,
+            origin_code=origin_code,
+            destination_code=destination_code,
+            depart_date=depart_date,
+        )
+        await session.commit()
+
+
+async def _upsert_provider_flights_in_session(
+    session: AsyncSession,
+    provider: str,
+    flights: list[dict[str, Any]],
+    ttl_minutes: int,
+    *,
+    origin_code: str | None = None,
+    destination_code: str | None = None,
+    depart_date: str | None = None,
+) -> None:
+    if provider == "ctrip_snapshot" and not flights:
         return
 
     scope = _provider_refresh_scope(
@@ -362,7 +369,7 @@ async def upsert_provider_flights(
     )
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=ttl_minutes)
-    s = _session
+    s = session
     route_lock = _advisory_lock_key("|".join((provider, *scope)))
     await s.execute(select(func.pg_advisory_xact_lock(route_lock)))
     scoped_snapshot_ids = select(FlightSnapshot.id).where(
@@ -420,7 +427,11 @@ async def upsert_provider_flights(
                 "platform": p["platform"],
                 "price": int(p["price"]),
                 "url": p.get("url", ""),
-                "raw_payload": p.get("raw_payload"),
+                "raw_payload": (
+                    None
+                    if provider == "ctrip_snapshot"
+                    else p.get("raw_payload")
+                ),
                 "crawled_at": now,
                 "data_provider": provider,
                 "currency": p["currency"],
@@ -480,17 +491,31 @@ async def upsert_provider_offers(
     provider: str,
     offers: list[object],
     ttl_minutes: int,
-    *,
-    _session: Any = None,
+) -> None:
+    async with get_session() as session:
+        await _upsert_provider_offers_in_session(
+            session,
+            provider,
+            offers,
+            ttl_minutes,
+        )
+        await session.commit()
+
+
+async def _upsert_provider_offers_in_session(
+    session: AsyncSession,
+    provider: str,
+    offers: list[object],
+    ttl_minutes: int,
 ) -> None:
     if not offers:
         return
     flights = [_offer_to_provider_flight(offer) for offer in offers]
-    await upsert_provider_flights(
+    await _upsert_provider_flights_in_session(
+        session,
         provider,
         flights,
         ttl_minutes,
-        _session=_session,
     )
 
 
@@ -654,19 +679,34 @@ async def read_provider_deals(
             )
         ).scalars().all()
         deals: list[dict[str, Any]] = []
-        provider_rows: list[PlatformPriceSnapshot] = []
-        for snap in snaps:
-            prices = (
+        provider_rows = (
+            (
                 await s.execute(
                     select(PlatformPriceSnapshot)
                     .where(
-                        PlatformPriceSnapshot.flight_snapshot_id == snap.id,
+                        PlatformPriceSnapshot.flight_snapshot_id.in_(
+                            [snap.id for snap in snaps]
+                        ),
                         PlatformPriceSnapshot.data_provider == provider,
                     )
-                    .order_by(PlatformPriceSnapshot.price.asc())
+                    .order_by(
+                        PlatformPriceSnapshot.flight_snapshot_id.asc(),
+                        PlatformPriceSnapshot.price.asc(),
+                    )
                 )
-            ).scalars().all()
-            provider_rows.extend(prices)
+            )
+            .scalars()
+            .all()
+            if snaps
+            else []
+        )
+        prices_by_snapshot: dict[str, list[PlatformPriceSnapshot]] = {}
+        for price in provider_rows:
+            prices_by_snapshot.setdefault(
+                price.flight_snapshot_id, []
+            ).append(price)
+        for snap in snaps:
+            prices = prices_by_snapshot.get(snap.id, [])
             currency = _display_currency(prices)
             display_prices = [
                 price for price in prices if price.currency == currency

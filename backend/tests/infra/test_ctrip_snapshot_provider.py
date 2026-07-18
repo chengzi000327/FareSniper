@@ -58,7 +58,7 @@ async def test_empty_snapshot_queues_demand(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_successful_empty_snapshot_stays_empty_until_its_ttl_expires(
+async def test_empty_ctrip_refresh_is_not_observed_as_success(
     seeded_pg,
     monkeypatch,
 ):
@@ -92,20 +92,11 @@ async def test_successful_empty_snapshot_stays_empty_until_its_ttl_expires(
     )
     query = build_flight_query("北京", "上海", "2099-08-01")
 
-    fresh_empty = await CtripSnapshotProvider().search(query)
+    result = await CtripSnapshotProvider().search(query)
 
-    assert fresh_empty.status is ProviderStatus.empty
-    assert fresh_empty.offers == []
-    assert fresh_empty.cache_age_seconds == 0
-    assert queued == []
-
-    FrozenDateTime.current = observed_at + timedelta(minutes=61)
-
-    expired_empty = await CtripSnapshotProvider().search(query)
-
-    assert expired_empty.status is ProviderStatus.stale
-    assert expired_empty.offers == []
-    assert expired_empty.cache_age_seconds == 61 * 60
+    assert result.status is ProviderStatus.queued
+    assert result.offers == []
+    assert result.cache_age_seconds is None
     assert len(queued) == 1
 
 
