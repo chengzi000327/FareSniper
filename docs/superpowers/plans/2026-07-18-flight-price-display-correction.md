@@ -405,7 +405,7 @@ const staleCtripWinner =
   price.provider_status === "stale" &&
   price.price_status === "stale" &&
   price.data_freshness === "stale" &&
-  isCompleteHttpsUrl(price.url);
+  isHttpsUrl(price.url);
 const selectedWinner = prices.find(isSelectedWinner);
 const hasSelectedWinner = selectedWinner !== undefined;
 const hasRealtimeWinner =
