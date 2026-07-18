@@ -153,7 +153,7 @@ async def test_collector_trace_reraises_with_safe_error_summary(trace_records):
 
     outputs = trace_records[0].outputs
     assert outputs["status"] == "error"
-    assert outputs["result_count"] == 0
+    assert outputs["result_count"] == 4
     assert secret not in repr(trace_records[0].inputs) + repr(outputs)
 
 

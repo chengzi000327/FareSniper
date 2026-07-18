@@ -121,6 +121,10 @@ class CollectorJobNotFoundError(LookupError):
     pass
 
 
+class CollectorOfferValidationError(ValueError):
+    pass
+
+
 async def enqueue_demand(
     origin_code: str,
     destination_code: str,
@@ -273,13 +277,14 @@ async def complete_job(
         ).scalar_one_or_none()
         if row is None:
             raise CollectorJobNotFoundError(job_id)
+        if offers:
+            _verify_offer_scope(row, offers)
+            _verify_ctrip_offer_identity(offers)
         if row.status == "completed" and row.lease_owner == node_id:
             return False
         _verify_live_lease(row, node_id, now)
 
         if offers:
-            _verify_offer_scope(row, offers)
-            _verify_ctrip_offer_identity(offers)
             await flight_snapshot_repo._upsert_provider_offers_in_session(
                 session,
                 "ctrip_snapshot",
@@ -402,7 +407,9 @@ def _verify_offer_scope(
             row.destination_code,
             row.depart_date,
         ):
-            raise ValueError("collector offers do not match the leased job")
+            raise CollectorOfferValidationError(
+                "collector offers do not match the leased job"
+            )
 
 
 def _verify_ctrip_offer_identity(offers: list[object]) -> None:
@@ -411,7 +418,9 @@ def _verify_ctrip_offer_identity(offers: list[object]) -> None:
             _offer_field(offer, "data_provider") != "ctrip"
             or _offer_field(offer, "seller_name") != "携程"
         ):
-            raise ValueError("collector offers must have Ctrip identity")
+            raise CollectorOfferValidationError(
+                "collector offers must have Ctrip identity"
+            )
 
 
 def _offer_field(offer: object, name: str) -> object:

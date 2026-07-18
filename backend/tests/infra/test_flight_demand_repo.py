@@ -12,6 +12,7 @@ import backend.infrastructure.db.flight_snapshot_repo as snapshot_repo
 
 from backend.infrastructure.db.flight_demand_repo import (
     CollectorNodeRow,
+    CollectorOfferValidationError,
     FlightSearchDemandRow,
     LeaseOwnershipError,
     claim_next,
@@ -32,6 +33,9 @@ def _offer(
     price: int = 580,
     data_provider: str = "ctrip",
     seller_name: str = "携程",
+    origin_code: str = "BJS",
+    destination_code: str = "SHA",
+    depart_date: str = "2099-08-01",
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=data_provider,
@@ -39,10 +43,10 @@ def _offer(
         flight_no="MU5106",
         airline="东方航空",
         origin_city="北京",
-        origin_code="BJS",
+        origin_code=origin_code,
         destination_city="上海",
-        destination_code="SHA",
-        depart_date="2099-08-01",
+        destination_code=destination_code,
+        depart_date=depart_date,
         depart_time="08:00",
         arrive_time="10:00",
         duration_minutes=120,
@@ -319,6 +323,45 @@ async def test_complete_job_requires_owner_and_is_idempotent(seeded_pg):
         depart_date="2099-08-01",
     )
     assert rows[0]["lowest_price"] == 580
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "offer",
+    [
+        _offer(origin_code="CAN"),
+        _offer(destination_code="SYX"),
+        _offer(depart_date="2099-08-02"),
+    ],
+)
+async def test_completed_job_replay_still_validates_exact_scope(
+    seeded_pg,
+    offer,
+):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+    assert await complete_job(job_id, "mac-1", [_offer()]) is True
+
+    with pytest.raises(CollectorOfferValidationError, match="leased job"):
+        await complete_job(job_id, "mac-1", [offer])
+
+
+@pytest.mark.asyncio
+async def test_completed_job_replay_still_validates_ctrip_identity(seeded_pg):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+    assert await complete_job(job_id, "mac-1", [_offer()]) is True
+
+    with pytest.raises(CollectorOfferValidationError, match="Ctrip identity"):
+        await complete_job(
+            job_id,
+            "mac-1",
+            [_offer(data_provider="ctrip_snapshot")],
+        )
 
 
 @pytest.mark.asyncio

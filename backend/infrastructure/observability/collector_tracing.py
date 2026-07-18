@@ -118,7 +118,7 @@ async def trace_collector_ingest(
                 run.end(
                     outputs=_summary(
                         job_id=job_id,
-                        result_count=0,
+                        result_count=result_count,
                         status=_exception_status(exc),
                         started_at=started_at,
                     )

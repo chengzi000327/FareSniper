@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from collections.abc import Awaitable, Callable
 from typing import Annotated
@@ -14,6 +15,7 @@ from backend.config import settings
 from backend.infrastructure.db import flight_demand_repo
 from backend.infrastructure.db.flight_demand_repo import (
     CollectorJobNotFoundError,
+    CollectorOfferValidationError,
     LeaseOwnershipError,
 )
 from backend.infrastructure.observability.collector_tracing import (
@@ -28,6 +30,9 @@ from backend.schemas.collector import (
     FailRequest,
     HeartbeatRequest,
 )
+
+
+_BEARER_PATTERN = re.compile(r"(?i:bearer)[ \t]+([^ \t]+)\Z")
 
 
 class CollectorRoute(APIRoute):
@@ -59,8 +64,9 @@ def require_collector_token(
     authorization: Annotated[str | None, Header()] = None,
 ) -> None:
     expected = settings.ctrip_collector_token
-    scheme, separator, candidate = (authorization or "").partition(" ")
-    supplied = candidate if separator and scheme == "Bearer" else ""
+    header = (authorization or "").strip(" \t")
+    match = _BEARER_PATTERN.fullmatch(header)
+    supplied = match.group(1) if match is not None else ""
     matches = secrets.compare_digest(
         supplied.encode("utf-8"), expected.encode("utf-8")
     )
@@ -131,7 +137,11 @@ async def complete(job_id: str, request: CompleteRequest) -> Response:
                 offers,
             ),
         )
-    except (CollectorJobNotFoundError, LeaseOwnershipError, ValueError):
+    except (
+        CollectorJobNotFoundError,
+        CollectorOfferValidationError,
+        LeaseOwnershipError,
+    ):
         _raise_job_unavailable()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -149,7 +159,7 @@ async def fail(job_id: str, request: FailRequest) -> Response:
             request.error_code.value,
             request.retry_at,
         )
-    except (CollectorJobNotFoundError, LeaseOwnershipError, ValueError):
+    except (CollectorJobNotFoundError, LeaseOwnershipError):
         _raise_job_unavailable()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

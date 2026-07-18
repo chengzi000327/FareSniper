@@ -13,6 +13,7 @@ from backend.config import settings
 from backend.infrastructure.db.flight_demand_repo import (
     CollectorJob,
     CollectorJobNotFoundError,
+    CollectorOfferValidationError,
     LeaseOwnershipError,
 )
 from backend.main import create_app
@@ -128,6 +129,57 @@ def test_collector_rejects_matching_whitespace_only_configured_token():
         object.__setattr__(settings, "ctrip_collector_token", original_token)
 
     assert getattr(exc_info.value, "status_code", None) == 401
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        "bearer collector-secret",
+        "BEARER   collector-secret",
+        "BeArEr\tcollector-secret",
+        " \tBearer collector-secret\t ",
+    ],
+)
+def test_collector_accepts_case_insensitive_bearer_with_horizontal_whitespace(
+    configured_collector_token,
+    authorization,
+):
+    collector_api.require_collector_token(authorization)
+
+
+@pytest.mark.parametrize(
+    "authorization",
+    [
+        None,
+        "",
+        "Basic collector-secret",
+        "Bearer",
+        "Bearer secret extra",
+        "Bearer\ncollector-secret",
+    ],
+)
+def test_malformed_collector_auth_still_uses_compare_digest_and_fails_closed(
+    monkeypatch,
+    configured_collector_token,
+    authorization,
+):
+    calls = []
+
+    def fake_compare_digest(candidate: bytes, expected: bytes) -> bool:
+        calls.append((candidate, expected))
+        return candidate == expected
+
+    monkeypatch.setattr(
+        collector_api.secrets,
+        "compare_digest",
+        fake_compare_digest,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        collector_api.require_collector_token(authorization)
+
+    assert exc_info.value.status_code == 401
+    assert calls == [(b"", b"collector-secret")]
 
 
 @pytest.mark.asyncio
@@ -353,6 +405,54 @@ async def test_complete_maps_snapshot_wire_identity_to_trusted_ctrip_offer(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("booking_url", "expected_url"),
+    [
+        (
+            "HTTPS://FLIGHTS.CTRIP.COM/online/list"
+            "?infant=0&adult=2&depdate=2099-08-01&cabin=Y_1&child=1",
+            "https://flights.ctrip.com/online/list"
+            "?depdate=2099-08-01&cabin=Y_1&adult=2&child=1&infant=0",
+        ),
+        (
+            "https://flights.ctrip.com/booking/MU5106?adult=1",
+            "https://flights.ctrip.com/booking/MU5106?adult=1",
+        ),
+    ],
+)
+async def test_complete_normalizes_functional_ctrip_booking_query(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+    booking_url,
+    expected_url,
+):
+    calls = []
+
+    async def complete_job(_job_id: str, _node_id: str, offers: list[object]):
+        calls.append(offers)
+        return True
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(complete_job=complete_job),
+    )
+
+    response = await collector_client.post(
+        "/internal/collector/jobs/anonymous-job-1/complete",
+        json={
+            "node_id": "mac-1",
+            "offers": [_wire_offer(booking_url=booking_url)],
+        },
+        headers=collector_headers,
+    )
+
+    assert response.status_code == 204
+    assert calls[0][0].booking_url == expected_url
+
+
+@pytest.mark.asyncio
 async def test_complete_uses_collector_ingest_trace_wrapper(
     monkeypatch, collector_client, collector_headers
 ):
@@ -401,6 +501,61 @@ async def test_complete_uses_collector_ingest_trace_wrapper(
         ({"seller_name": "Trip.com"}, "Trip.com"),
         ({"booking_url": "http://flights.ctrip.com/booking"}, None),
         ({"booking_url": "https://flights.ctrip.com.evil.test/booking"}, "evil.test"),
+        ({"booking_url": "https://flights%2Ectrip.com/booking"}, None),
+        ({"booking_url": "https://user@flights.ctrip.com/booking"}, "user"),
+        ({"booking_url": "https://flights.ctrip.com:443/booking"}, None),
+        (
+            {"booking_url": "https://flights.ctrip.com/booking#token-secret"},
+            "token-secret",
+        ),
+        ({"booking_url": "https://flights.ctrip.com/booking\nnext"}, None),
+        ({"booking_url": "https://flights.ctrip.com/booking%0Anext"}, None),
+        (
+            {
+                "booking_url": (
+                    "https://flights.ctrip.com/booking?cookie=cookie-secret"
+                )
+            },
+            "cookie-secret",
+        ),
+        (
+            {"booking_url": "https://flights.ctrip.com/booking?token=token-secret"},
+            "token-secret",
+        ),
+        (
+            {
+                "booking_url": (
+                    "https://flights.ctrip.com/booking?profile=profile-secret"
+                )
+            },
+            "profile-secret",
+        ),
+        (
+            {"booking_url": "https://flights.ctrip.com/booking?source=source-secret"},
+            "source-secret",
+        ),
+        (
+            {
+                "booking_url": (
+                    "https://flights.ctrip.com/booking?account=account-secret"
+                )
+            },
+            "account-secret",
+        ),
+        (
+            {
+                "booking_url": (
+                    "https://flights.ctrip.com/booking?%63ookie=encoded-secret"
+                )
+            },
+            "encoded-secret",
+        ),
+        ({"booking_url": "https://flights.ctrip.com/booking?adult=1&adult=2"}, None),
+        ({"booking_url": "https://flights.ctrip.com/booking?depdate=2099-02-30"}, None),
+        ({"booking_url": "https://flights.ctrip.com/booking?depdate=2099-08-02"}, None),
+        ({"booking_url": "https://flights.ctrip.com/booking?cabin=Y%20secret"}, None),
+        ({"booking_url": "https://flights.ctrip.com/booking?adult=0"}, None),
+        ({"booking_url": "https://flights.ctrip.com/" + "a" * 2050}, None),
         ({"raw_payload": {"cookie": "cookie-secret"}}, "cookie-secret"),
         ({"raw_reference": "browser-state-secret"}, "browser-state-secret"),
     ],
@@ -412,8 +567,11 @@ async def test_complete_rejects_untrusted_offer_fields_without_echoing_input(
     overrides,
     secret,
 ):
+    calls = []
+
     async def complete_job(*_args, **_kwargs):
-        raise AssertionError("invalid offers must not reach the repository")
+        calls.append((_args, _kwargs))
+        return True
 
     monkeypatch.setattr(
         collector_api,
@@ -430,6 +588,7 @@ async def test_complete_rejects_untrusted_offer_fields_without_echoing_input(
 
     assert response.status_code == 422
     assert response.json() == {"detail": "invalid collector request"}
+    assert calls == []
     if secret:
         assert secret not in response.text
 
@@ -440,7 +599,7 @@ async def test_complete_rejects_untrusted_offer_fields_without_echoing_input(
     [
         CollectorJobNotFoundError("job-existence-secret"),
         LeaseOwnershipError("cookie-and-browser-state-secret"),
-        ValueError("raw-offer-secret"),
+        CollectorOfferValidationError("raw-offer-secret"),
     ],
 )
 async def test_complete_repository_rejections_are_indistinguishable(
@@ -468,6 +627,29 @@ async def test_complete_repository_rejections_are_indistinguishable(
     assert response.status_code == 409
     assert response.json() == {"detail": "job unavailable"}
     assert "secret" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_complete_does_not_hide_unrelated_internal_value_error(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+):
+    async def complete_job(*_args, **_kwargs):
+        raise ValueError("internal-programming-secret")
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(complete_job=complete_job),
+    )
+
+    with pytest.raises(ValueError, match="internal-programming-secret"):
+        await collector_client.post(
+            "/internal/collector/jobs/anonymous-job-1/complete",
+            json={"node_id": "mac-1", "offers": [_wire_offer()]},
+            headers=collector_headers,
+        )
 
 
 @pytest.mark.asyncio
@@ -505,6 +687,86 @@ async def test_fail_delegates_ownership_check_to_repository(
 
 
 @pytest.mark.asyncio
+async def test_fail_accepts_rfc3339_offset_timestamp(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+):
+    calls = []
+
+    async def fail_job(_job_id, _node_id, _error_code, retry_at):
+        calls.append(retry_at)
+        return True
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(fail_job=fail_job),
+    )
+
+    response = await collector_client.post(
+        "/internal/collector/jobs/anonymous-job-1/fail",
+        json={
+            "node_id": "mac-1",
+            "error_code": "timeout",
+            "retry_at": "2099-07-19T20:05:00.123456+08:00",
+        },
+        headers=collector_headers,
+    )
+
+    assert response.status_code == 204
+    assert calls == [
+        datetime.fromisoformat("2099-07-19T20:05:00.123456+08:00")
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "retry_at",
+    [
+        4_087_968_300,
+        "2099-07-19T12:05:00",
+        "2099-07-19 12:05:00Z",
+        "2099-07-19T12:05Z",
+        "2099-07-19T12:05:00.1234567Z",
+        "2099-07-19T12:05:00profile-secret",
+    ],
+)
+async def test_fail_rejects_non_rfc3339_or_naive_retry_at_without_echo(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+    retry_at,
+):
+    calls = []
+
+    async def fail_job(*_args, **_kwargs):
+        calls.append((_args, _kwargs))
+        return True
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(fail_job=fail_job),
+    )
+
+    response = await collector_client.post(
+        "/internal/collector/jobs/anonymous-job-1/fail",
+        json={
+            "node_id": "mac-1",
+            "error_code": "timeout",
+            "retry_at": retry_at,
+        },
+        headers=collector_headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid collector request"}
+    assert calls == []
+    assert "profile-secret" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_fail_hides_job_existence_and_ownership_details(
     monkeypatch, collector_client, collector_headers
 ):
@@ -531,3 +793,30 @@ async def test_fail_hides_job_existence_and_ownership_details(
     assert response.status_code == 409
     assert response.json() == {"detail": "job unavailable"}
     assert "job-existence-secret" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_fail_does_not_hide_unrelated_internal_value_error(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+):
+    async def fail_job(*_args, **_kwargs):
+        raise ValueError("internal-programming-secret")
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(fail_job=fail_job),
+    )
+
+    with pytest.raises(ValueError, match="internal-programming-secret"):
+        await collector_client.post(
+            "/internal/collector/jobs/anonymous-job-1/fail",
+            json={
+                "node_id": "mac-1",
+                "error_code": "timeout",
+                "retry_at": "2099-07-19T12:05:00Z",
+            },
+            headers=collector_headers,
+        )

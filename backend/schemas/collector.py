@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime
+import re
+import unicodedata
+from datetime import date, datetime
 from typing import Annotated, Literal
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     StrictInt,
+    ValidationInfo,
     field_validator,
 )
 
@@ -20,6 +23,133 @@ from backend.application.contracts.flight_provider import (
 from backend.application.services.flight_dates import (
     validate_canonical_depart_date,
 )
+
+
+_CTRIP_BOOKING_HOST = "flights.ctrip.com"
+_MAX_BOOKING_URL_LENGTH = 2048
+_BOOKING_QUERY_ORDER = ("depdate", "cabin", "adult", "child", "infant")
+_CABIN_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,16}\Z")
+_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+_RFC3339_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\Z"
+)
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
+def _normalize_ctrip_booking_url(
+    value: str,
+    *,
+    depart_date: str | None,
+) -> str:
+    if len(value) > _MAX_BOOKING_URL_LENGTH:
+        raise ValueError("invalid booking URL")
+    _reject_invalid_percent_encoding(value)
+    if _has_control_characters(value) or "#" in value:
+        raise ValueError("invalid booking URL")
+
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid booking URL") from exc
+    if (
+        parsed.scheme.casefold() != "https"
+        or parsed.netloc.casefold() != _CTRIP_BOOKING_HOST
+        or parsed.hostname != _CTRIP_BOOKING_HOST
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.fragment
+    ):
+        raise ValueError("invalid booking URL")
+
+    query = _normalize_booking_query(
+        parsed.query,
+        depart_date=depart_date,
+    )
+    return urlunsplit(
+        ("https", _CTRIP_BOOKING_HOST, parsed.path, query, "")
+    )
+
+
+def _reject_invalid_percent_encoding(value: str) -> None:
+    for index, character in enumerate(value):
+        if character != "%":
+            continue
+        escape = value[index + 1 : index + 3]
+        if len(escape) != 2 or any(char not in _HEX_DIGITS for char in escape):
+            raise ValueError("invalid booking URL")
+
+
+def _has_control_characters(value: str) -> bool:
+    try:
+        decoded = unquote(value, encoding="utf-8", errors="strict")
+    except UnicodeError as exc:
+        raise ValueError("invalid booking URL") from exc
+    return any(
+        unicodedata.category(character) == "Cc"
+        for character in value + decoded
+    )
+
+
+def _normalize_booking_query(
+    query: str,
+    *,
+    depart_date: str | None,
+) -> str:
+    if not query:
+        return ""
+    try:
+        pairs = parse_qsl(
+            query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            encoding="utf-8",
+            errors="strict",
+            separator="&",
+        )
+    except (UnicodeError, ValueError) as exc:
+        raise ValueError("invalid booking URL") from exc
+
+    normalized: dict[str, str] = {}
+    for key, value in pairs:
+        if key not in _BOOKING_QUERY_ORDER or key in normalized:
+            raise ValueError("invalid booking URL")
+        if key == "depdate":
+            normalized[key] = _validate_booking_date(value, depart_date)
+        elif key == "cabin":
+            if _CABIN_PATTERN.fullmatch(value) is None:
+                raise ValueError("invalid booking URL")
+            normalized[key] = value
+        else:
+            minimum = 1 if key == "adult" else 0
+            normalized[key] = _validate_passenger_count(value, minimum)
+
+    return urlencode(
+        [(key, normalized[key]) for key in _BOOKING_QUERY_ORDER if key in normalized]
+    )
+
+
+def _validate_booking_date(value: str, expected: str | None) -> str:
+    if _DATE_PATTERN.fullmatch(value) is None:
+        raise ValueError("invalid booking URL")
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("invalid booking URL") from exc
+    if expected is not None and value != expected:
+        raise ValueError("invalid booking URL")
+    return value
+
+
+def _validate_passenger_count(value: str, minimum: int) -> str:
+    if not value.isascii() or not value.isdecimal():
+        raise ValueError("invalid booking URL")
+    count = int(value)
+    if not minimum <= count <= 9 or str(count) != value:
+        raise ValueError("invalid booking URL")
+    return value
 
 
 class CollectorRequest(BaseModel):
@@ -68,7 +198,10 @@ class CollectorOffer(CollectorRequest):
     cabin: str | None = Field(default=None, max_length=32)
     currency: Literal["CNY"]
     display_price: Annotated[StrictInt, Field(gt=0)]
-    booking_url: str | None = None
+    booking_url: str | None = Field(
+        default=None,
+        max_length=_MAX_BOOKING_URL_LENGTH,
+    )
 
     @field_validator("depart_date")
     @classmethod
@@ -77,23 +210,17 @@ class CollectorOffer(CollectorRequest):
 
     @field_validator("booking_url")
     @classmethod
-    def validate_ctrip_booking_url(cls, value: str | None) -> str | None:
+    def validate_ctrip_booking_url(
+        cls,
+        value: str | None,
+        info: ValidationInfo,
+    ) -> str | None:
         if value is None:
             return None
-        try:
-            parsed = urlsplit(value)
-            port = parsed.port
-        except ValueError as exc:
-            raise ValueError("invalid booking URL") from exc
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname != "flights.ctrip.com"
-            or parsed.username is not None
-            or parsed.password is not None
-            or port is not None
-        ):
-            raise ValueError("invalid booking URL")
-        return value
+        return _normalize_ctrip_booking_url(
+            value,
+            depart_date=info.data.get("depart_date"),
+        )
 
     def to_internal_offer(self) -> FlightOffer:
         return FlightOffer(
@@ -133,9 +260,15 @@ class FailRequest(CollectorRequest):
     error_code: CollectorErrorCode
     retry_at: datetime
 
-    @field_validator("retry_at")
+    @field_validator("retry_at", mode="before")
     @classmethod
-    def require_timezone(cls, value: datetime) -> datetime:
-        if value.tzinfo is None or value.utcoffset() is None:
+    def parse_rfc3339_retry_at(cls, value: object) -> datetime:
+        if not isinstance(value, str) or _RFC3339_PATTERN.fullmatch(value) is None:
+            raise ValueError("retry_at must be an RFC3339 timestamp")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("retry_at must be an RFC3339 timestamp") from exc
+        if parsed.utcoffset() is None:
             raise ValueError("retry_at must be timezone-aware")
-        return value
+        return parsed
