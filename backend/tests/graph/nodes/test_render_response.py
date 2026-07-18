@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from backend.application.contracts.decision import DecisionResult, FrontendResponse, RecommendedAction
+from backend.application.contracts.intent import SlotBundle
 from backend.application.contracts.search import FlightSearchResult
 from backend.application.graph.nodes.render_response import render_response
 
@@ -17,6 +18,25 @@ def _make_decision():
         signals=["历史低价", "符合心理价位"],
         confidence="high",
     )
+
+
+def deal(flight_no: str, price: int) -> dict:
+    return {"flight_no": flight_no, "price": price, "currency": "CNY"}
+
+
+@pytest.mark.asyncio
+async def test_ai_price_cannot_disagree_with_card():
+    state = {
+        "search_result": {"deals": [deal("JD5121", 650), deal("JD5577", 700)]},
+        "messages": [AIMessage(content="最低价是 ¥700，建议购买 JD5577")],
+        "accumulated_slots": SlotBundle(budget=500),
+        "request_user_id": "u1",
+    }
+    response = (await render_response(state))["response"]
+    assert response.deals[0]["price"] == 650
+    assert "¥650" in response.recommendation["text"]
+    assert "最低价是 ¥700" not in response.recommendation["text"]
+    assert "JD5121" in response.recommendation["text"]
 
 
 @pytest.mark.asyncio
@@ -31,7 +51,36 @@ async def test_render_combines_deals_and_decision():
     assert isinstance(rsp, FrontendResponse)
     assert len(rsp.deals) == 1
     assert rsp.recommendation.get("action") == "buy_now"
-    assert "历史低价" in rsp.recommendation.get("text", "")
+    assert "MU5137" in rsp.recommendation.get("text", "")
+    assert "¥480" in rsp.recommendation.get("text", "")
+    assert "历史低价" not in rsp.recommendation.get("text", "")
+
+
+@pytest.mark.asyncio
+async def test_chat_history_uses_the_grounded_final_snapshot(monkeypatch):
+    persisted: dict[str, str] = {}
+
+    async def capture_history(**kwargs):
+        persisted["assistant_text"] = kwargs["assistant_text"]
+
+    monkeypatch.setattr(
+        "backend.application.graph.nodes.render_response._write_chat_history",
+        capture_history,
+    )
+    state = {
+        "search_result": {"deals": [deal("JD5121", 650), deal("JD5577", 700)]},
+        "messages": [AIMessage(content="最低价是 ¥700，建议购买 JD5577")],
+        "request_user_id": "u1",
+        "request_session_id": "s1",
+        "_session_factory": object(),
+    }
+
+    response = (await render_response(state))["response"]
+
+    assert persisted["assistant_text"] == response.recommendation["text"]
+    assert "¥650" in persisted["assistant_text"]
+    assert "最低价是 ¥700" not in persisted["assistant_text"]
+    assert "| JD5577 |" in persisted["assistant_text"]
 
 
 @pytest.mark.asyncio
