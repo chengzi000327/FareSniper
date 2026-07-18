@@ -32,7 +32,10 @@ from backend.schemas.collector import (
 )
 
 
-_BEARER_PATTERN = re.compile(r"(?i:bearer)[ \t]+([^ \t]+)\Z")
+_TOKEN68_PATTERN = re.compile(r"[A-Za-z0-9\-._~+/]+=*\Z")
+_BEARER_PATTERN = re.compile(
+    r"(?i:bearer)[ \t]+([A-Za-z0-9\-._~+/]+=*)\Z"
+)
 
 
 class CollectorRoute(APIRoute):
@@ -67,10 +70,11 @@ def require_collector_token(
     header = (authorization or "").strip(" \t")
     match = _BEARER_PATTERN.fullmatch(header)
     supplied = match.group(1) if match is not None else ""
+    expected_is_valid = _TOKEN68_PATTERN.fullmatch(expected) is not None
     matches = secrets.compare_digest(
         supplied.encode("utf-8"), expected.encode("utf-8")
     )
-    if not expected.strip() or not matches:
+    if not expected_is_valid or not matches:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="unauthorized",

@@ -156,6 +156,9 @@ def test_collector_accepts_case_insensitive_bearer_with_horizontal_whitespace(
         "Bearer",
         "Bearer secret extra",
         "Bearer\ncollector-secret",
+        "Bearer \ncollector-secret",
+        "Bearer abc=def",
+        "Bearer 密钥",
     ],
 )
 def test_malformed_collector_auth_still_uses_compare_digest_and_fails_closed(
@@ -180,6 +183,19 @@ def test_malformed_collector_auth_still_uses_compare_digest_and_fails_closed(
 
     assert exc_info.value.status_code == 401
     assert calls == [(b"", b"collector-secret")]
+
+
+@pytest.mark.parametrize("configured_token", ["abc=def", "密钥", "secret\nvalue"])
+def test_collector_rejects_invalid_configured_token68(configured_token):
+    original_token = settings.ctrip_collector_token
+    object.__setattr__(settings, "ctrip_collector_token", configured_token)
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            collector_api.require_collector_token(f"Bearer {configured_token}")
+    finally:
+        object.__setattr__(settings, "ctrip_collector_token", original_token)
+
+    assert getattr(exc_info.value, "status_code", None) == 401
 
 
 @pytest.mark.asyncio
