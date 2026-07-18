@@ -267,6 +267,8 @@ def test_inventory_upgrade_adds_only_missing_check_to_precreated_table(
         "(item_count >= 0)",
         '((("item_count") >= (0)::integer))',
         "0 <= item_count",
+        '(("item_count")) >= (((0)::smallint))',
+        '((0)::numeric(1, 0)) <= (("item_count"))',
     ],
 )
 def test_inventory_upgrade_accepts_equivalent_named_check_definitions(
@@ -295,8 +297,18 @@ def test_inventory_upgrade_accepts_equivalent_named_check_definitions(
     assert operations.calls == []
 
 
+@pytest.mark.parametrize(
+    "sqltext",
+    [
+        "item_count >= -1",
+        "item_count::smallint >= 0",
+        "item_count::numeric(1, 0) >= 0",
+    ],
+)
 def test_inventory_upgrade_rejects_mismatched_named_check_without_mutation(
-    monkeypatch: pytest.MonkeyPatch, inventory_migration: ModuleType
+    monkeypatch: pytest.MonkeyPatch,
+    inventory_migration: ModuleType,
+    sqltext: str,
 ) -> None:
     schema: dict[str, dict[str, Any]] = {
         "provider_inventory_observations": {
@@ -304,7 +316,7 @@ def test_inventory_upgrade_rejects_mismatched_named_check_without_mutation(
             "checks": [
                 {
                     "name": "ck_provider_inventory_observation_item_count",
-                    "sqltext": "item_count >= -1",
+                    "sqltext": sqltext,
                 }
             ],
             "rows": [{"provider": "ctrip", "item_count": 0}],

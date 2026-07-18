@@ -27,10 +27,11 @@ was accessed or modified.
   operation.
 - `20260718_provider_inventory_observations.py` creates the full table and named
   non-negative `item_count` check on a fresh schema.
-- When the inventory table already exists, it is preserved and only the missing
-  named check constraint is added.
-- Downgrades inspect before dropping and become no-ops when their owned schema
-  objects are already absent.
+- When the inventory table already exists, it is preserved. A missing named
+  check is added, an equivalent reflected definition is accepted, and a
+  conflicting definition with the required name aborts without mutation.
+- Both revision downgrades are explicitly irreversible and abort before any
+  bind, inspection, schema operation, row operation, or revision decrement.
 
 ## TDD Evidence
 
@@ -190,8 +191,8 @@ explicitly prohibited modifying a database. No `alembic current`, `stamp`,
   check.
 - Confirmed no row SQL, table rename, truncation, credential, URL, or production
   data was added.
-- Confirmed downgrades touch only objects from their revisions and guard absent
-  objects.
+- Confirmed both downgrades are explicitly irreversible and abort before any
+  schema, row, or Alembic version change.
 - Reviewed the scoped diff against all requirements and found no unaddressed
   implementation requirement.
 
@@ -202,18 +203,13 @@ explicitly prohibited modifying a database. No `alembic current`, `stamp`,
 2. No PostgreSQL-backed migration execution was performed because the task
    prohibited database modification. Verification is pure unit/static plus
    non-connecting backend tests.
-3. As with the prior migrations, downgrade reflection can determine whether an
-   object exists but cannot determine whether Alembic or an earlier
-   `Base.metadata.create_all()` originally created it. The recovery procedure
-   is upgrade-only; a downgrade would still reverse present revision objects.
 
 ## Independent Review Fix
 
 This addendum records the follow-up patch for all four findings in
-`.superpowers/sdd/deployment-migration-hardening-review.md`. It supersedes
-Concern 3 above: both provider revision downgrades are now explicitly
-irreversible and abort before obtaining a bind, inspecting schema, or issuing
-any Alembic operation.
+`.superpowers/sdd/deployment-migration-hardening-review.md`. Both provider
+revision downgrades are explicitly irreversible and abort before obtaining a
+bind, inspecting schema, or issuing any Alembic operation.
 
 ### Resolution
 
@@ -337,3 +333,111 @@ Exact output: no output; both commands exited `0`.
 2. PostgreSQL-backed execution was not run because database modification was
    explicitly prohibited. All review-fix verification is pure unit/static and
    non-connecting.
+
+## Constraint Validator Re-review Fix
+
+This final addendum addresses the remaining operand-cast finding. The validator
+now uses a fully anchored comparison grammar and validates the two operands
+independently. It never erases a cast from `item_count`. Parentheses and quoting
+around that identifier are harmless; any other token on the column operand is
+rejected. Numeric casts may be peeled only from literal zero, including in the
+equivalent reversed form `0 <= item_count`.
+
+### Validator RED
+
+The two casted-column regressions were added and run before production code was
+edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+...........FF.....                                                       [100%]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation[item_count::smallint >= 0]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation[item_count::numeric(1, 0) >= 0]
+2 failed, 16 passed in 0.12s
+```
+
+Both failures showed that the prior global cast normalization accepted a
+non-equivalent cast on the column operand.
+
+### Validator GREEN
+
+Command:
+
+```bash
+python3 -m pytest -q --tb=no backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Exact output:
+
+```text
+..................                                                       [100%]
+18 passed in 0.08s
+```
+
+### Validator Static Tests
+
+Command:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper' \
+TEST_DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper_test' \
+python3 -m pytest -q --tb=no \
+  backend/tests/test_alembic_head.py::test_alembic_history_lists_init \
+  backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head \
+  backend/tests/test_alembic_head.py::test_alembic_registers_task4_repositories \
+  backend/tests/test_alembic_head.py::test_demand_metadata_matches_migration_keys \
+  backend/tests/test_alembic_head.py::test_platform_price_metadata_matches_provider_index
+```
+
+Exact output:
+
+```text
+.F...                                                                    [100%]
+=========================== short test summary info ============================
+FAILED backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head
+1 failed, 4 passed in 0.38s
+```
+
+The failure remains the pre-existing stale expectation of the previous head.
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Exact output: no output; both commands exited `0`.
+
+### Validator Self-Review
+
+- Confirmed the comparison regex is anchored with `fullmatch()` across the
+  entire reflected definition after only whitespace and quote normalization.
+- Confirmed the `item_count` operand accepts only harmless enclosing
+  parentheses and rejects every cast, including `::smallint` and
+  `::numeric(1,0)`.
+- Confirmed the zero operand accepts only literal `0` plus supported numeric
+  casts applied to that literal.
+- Confirmed both `item_count >= 0` and the reversed `0 <= item_count` grammar
+  validate their operands in the correct roles.
+- Confirmed mismatches still abort with zero Alembic operations and unchanged
+  modeled rows/schema.
+- Confirmed the top-level report now coherently describes both revisions as
+  explicitly irreversible.
+- Confirmed no database, Railway environment, secret, deployment URL, or
+  production data was accessed or added.
+
+### Validator Remaining Concerns
+
+1. The unrelated Alembic head assertion remains stale and red.
+2. PostgreSQL-backed execution was not run because all database access and
+   modification were explicitly prohibited.

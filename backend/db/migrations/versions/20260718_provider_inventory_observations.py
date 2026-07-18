@@ -18,19 +18,67 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _ITEM_COUNT_CHECK_NAME = "ck_provider_inventory_observation_item_count"
+_COMPARISON_RE = re.compile(
+    r"^(?P<left>.+?)(?P<operator>>=|<=)(?P<right>.+)$"
+)
+_ZERO_CAST_RE = re.compile(
+    r"^(?P<operand>.+)::"
+    r"(?:smallint|integer|bigint|numeric(?:\(\d+(?:,\d+)?\))?)$"
+)
+
+
+def _strip_outer_parentheses(expression: str) -> str:
+    while expression.startswith("(") and expression.endswith(")"):
+        depth = 0
+        for index, character in enumerate(expression):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    if index != len(expression) - 1:
+                        return expression
+                    expression = expression[1:-1]
+                    break
+                if depth < 0:
+                    return expression
+        else:
+            return expression
+    return expression
+
+
+def _is_item_count_operand(expression: str) -> bool:
+    return _strip_outer_parentheses(expression) == "item_count"
+
+
+def _is_zero_operand(expression: str) -> bool:
+    expression = _strip_outer_parentheses(expression)
+    while cast_match := _ZERO_CAST_RE.fullmatch(expression):
+        expression = _strip_outer_parentheses(cast_match.group("operand"))
+    return expression == "0"
 
 
 def _is_nonnegative_item_count_check(sqltext: object) -> bool:
     if not isinstance(sqltext, str):
         return False
     normalized = re.sub(r"\s+", "", sqltext.lower()).replace('"', "")
-    normalized = re.sub(
-        r"::(?:smallint|integer|bigint|numeric(?:\(\d+(?:,\d+)?\))?)",
-        "",
-        normalized,
+    comparison = _COMPARISON_RE.fullmatch(
+        _strip_outer_parentheses(normalized)
     )
-    normalized = normalized.replace("(", "").replace(")", "")
-    return normalized in {"item_count>=0", "0<=item_count"}
+    if comparison is None:
+        return False
+    left = comparison.group("left")
+    operator = comparison.group("operator")
+    right = comparison.group("right")
+    return (
+        operator == ">="
+        and _is_item_count_operand(left)
+        and _is_zero_operand(right)
+    ) or (
+        operator == "<="
+        and _is_zero_operand(left)
+        and _is_item_count_operand(right)
+    )
 
 
 def upgrade() -> None:
