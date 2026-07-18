@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 import re
 import sys
@@ -110,6 +111,31 @@ def _positive_int(value: object) -> int | None:
     return value
 
 
+def _attempt_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _utc_instant(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_later_status_instant(
+    payload: dict[str, Any], key: str, baseline: datetime | None
+) -> bool:
+    current = _utc_instant(payload.get(key))
+    return current is not None and (baseline is None or current > baseline)
+
+
 def _currency_code(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -157,7 +183,7 @@ def _valid_ctrip_row(row: object) -> dict[str, Any] | None:
 
 
 def _deal_matches_query(deal: dict[str, Any], query: FlightQuery) -> bool:
-    return (
+    route_matches = (
         deal.get("origin_code"),
         deal.get("destination_code"),
         deal.get("depart_date"),
@@ -165,6 +191,13 @@ def _deal_matches_query(deal: dict[str, Any], query: FlightQuery) -> bool:
         query.origin_code,
         query.destination_code,
         query.depart_date,
+    )
+    return route_matches and all(
+        scope is None or deal.get(field) == scope
+        for field, scope in (
+            ("origin_airport_code", query.origin_airport_scope),
+            ("destination_airport_code", query.destination_airport_scope),
+        )
     )
 
 
@@ -368,6 +401,12 @@ async def verify(
         "destination_code": query.destination_code,
         "depart_date": query.depart_date,
     }
+    if query.origin_airport_scope is not None:
+        status_params["origin_airport_code"] = query.origin_airport_scope
+    if query.destination_airport_scope is not None:
+        status_params[
+            "destination_airport_code"
+        ] = query.destination_airport_scope
     message = (
         f"{query.depart_date} {query.origin_city}到"
         f"{query.destination_city}的机票"
@@ -399,6 +438,19 @@ async def verify(
                     raise VerificationError(
                         "Mac collector heartbeat is offline"
                     )
+                baseline_attempts = _attempt_count(
+                    status_payload.get("job_attempts")
+                )
+                if baseline_attempts is None:
+                    raise VerificationError(
+                        "collector status has invalid attempt evidence"
+                    )
+                baseline_job_updated_at = _utc_instant(
+                    status_payload.get("job_updated_at")
+                )
+                baseline_snapshot_observed_at = _utc_instant(
+                    status_payload.get("snapshot_observed_at")
+                )
 
                 await _request_json(
                     client,
@@ -418,7 +470,24 @@ async def verify(
                         params=status_params,
                         deadline=deadline,
                     )
-                    if status_payload.get("job_status") == "completed":
+                    attempts = _attempt_count(
+                        status_payload.get("job_attempts")
+                    )
+                    if (
+                        status_payload.get("job_status") == "completed"
+                        and attempts is not None
+                        and attempts > baseline_attempts
+                        and _is_later_status_instant(
+                            status_payload,
+                            "job_updated_at",
+                            baseline_job_updated_at,
+                        )
+                        and _is_later_status_instant(
+                            status_payload,
+                            "snapshot_observed_at",
+                            baseline_snapshot_observed_at,
+                        )
+                    ):
                         break
                     await asyncio.sleep(
                         min(poll_seconds, _remaining_seconds(deadline))

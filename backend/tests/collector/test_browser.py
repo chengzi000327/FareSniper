@@ -18,6 +18,18 @@ from backend.collector.browser import (
 )
 
 
+class FakeOptions:
+    def __init__(self):
+        self.arguments: list[str] = []
+
+    def add_argument(self, value: str) -> None:
+        self.arguments.append(value)
+
+
+def _options_factory() -> FakeOptions:
+    return FakeOptions()
+
+
 def _job(**overrides):
     payload = {
         "origin_code": "BJS",
@@ -34,13 +46,24 @@ def test_capture_result_normalizes_wire_style_error_code():
     assert result.error_code is CollectorErrorCode.login_required
 
 
-def test_browser_uses_dedicated_profile_and_no_proxy(tmp_path, monkeypatch):
+def test_browser_uses_dedicated_profile_and_ctrip_only_proxy_bypass(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.setenv("NO_PROXY", "example.test")
 
-    options = build_chrome_options(profile_dir=tmp_path, headless=False)
+    options = build_chrome_options(
+        profile_dir=tmp_path,
+        headless=False,
+        options_factory=_options_factory,
+    )
 
     assert f"--user-data-dir={tmp_path.resolve()}" in options.arguments
-    assert "--no-proxy-server" in options.arguments
+    assert "--no-proxy-server" not in options.arguments
+    assert (
+        "--proxy-bypass-list=ctrip.com;*.ctrip.com;ctrip.com.cn;*.ctrip.com.cn"
+        in options.arguments
+    )
     assert all("--headless" not in arg for arg in options.arguments)
     assert set(os.environ["NO_PROXY"].split(",")) >= {
         "example.test",
@@ -56,7 +79,11 @@ def test_browser_rejects_default_chrome_profile(monkeypatch, tmp_path):
     )
 
     with pytest.raises(ValueError, match="dedicated"):
-        build_chrome_options(profile_dir=default_profile, headless=False)
+        build_chrome_options(
+            profile_dir=default_profile,
+            headless=False,
+            options_factory=_options_factory,
+        )
 
 
 def test_interceptor_does_not_fabricate_browser_identity():
@@ -111,6 +138,15 @@ def test_search_url_contains_only_route_and_future_date():
     )
 
 
+def test_search_url_prefers_explicit_airport_scope():
+    assert build_search_url(
+        _job(origin_airport_code="PKX", destination_airport_code="SHA")
+    ) == (
+        "https://flights.ctrip.com/online/list/oneway-pkx-sha"
+        "?depdate=2099-08-08"
+    )
+
+
 @pytest.mark.asyncio
 async def test_login_is_visible_and_uses_dedicated_profile(tmp_path):
     calls: dict[str, object] = {}
@@ -140,7 +176,11 @@ async def test_login_is_visible_and_uses_dedicated_profile(tmp_path):
         calls["arguments"] = options.arguments
         return Driver()
 
-    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        driver_factory=factory,
+        options_factory=_options_factory,
+    )
     await browser.login(wait_for_user=lambda: calls.setdefault("waited", True))
     await browser.close()
 
@@ -177,6 +217,7 @@ async def test_generic_logged_out_homepage_is_not_authenticated(tmp_path):
     browser = CtripBrowser(
         profile_dir=tmp_path,
         driver_factory=lambda **_kwargs: Driver(),
+        options_factory=_options_factory,
     )
     try:
         status = await browser.login(wait_for_user=lambda: None)
@@ -248,7 +289,11 @@ async def test_capture_page_failure_releases_profile_and_recreates_driver(
         drivers.append(driver)
         return driver
 
-    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        driver_factory=factory,
+        options_factory=_options_factory,
+    )
     first = await browser.capture(_job())
     second = await browser.capture(_job())
     await browser.close()
@@ -290,7 +335,11 @@ async def test_capture_dependency_failure_releases_cached_driver(tmp_path):
         drivers.append(driver)
         return driver
 
-    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        driver_factory=factory,
+        options_factory=_options_factory,
+    )
     first = await browser.capture(_job())
     second = await browser.capture(_job())
     await browser.close()

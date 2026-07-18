@@ -154,9 +154,11 @@ def build_flight_query(
         origin_city=origin_location.city_name,
         origin_code=origin_location.provider_code("ctrip"),
         origin_airport_ids=_airport_ids(origin_location),
+        origin_airport_scope=origin_location.airport_iata,
         destination_city=destination_location.city_name,
         destination_code=destination_location.provider_code("ctrip"),
         destination_airport_ids=_airport_ids(destination_location),
+        destination_airport_scope=destination_location.airport_iata,
         depart_date=parsed.isoformat(),
         is_mainland_domestic=route_region is RouteRegion.mainland_domestic,
     )

@@ -19,6 +19,7 @@ from backend.infrastructure.db.flight_demand_repo import (
     complete_job,
     enqueue_demand,
     fail_job,
+    read_collector_verification_status,
     record_heartbeat,
 )
 from backend.infrastructure.db.flight_snapshot_repo import (
@@ -36,6 +37,7 @@ def _offer(
     origin_code: str = "BJS",
     destination_code: str = "SHA",
     depart_date: str = "2099-08-01",
+    booking_url: str | None = "https://flights.ctrip.com/booking/MU5106",
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=data_provider,
@@ -44,15 +46,19 @@ def _offer(
         airline="东方航空",
         origin_city="北京",
         origin_code=origin_code,
+        origin_airport_code="PEK" if origin_code == "BJS" else origin_code,
         destination_city="上海",
         destination_code=destination_code,
+        destination_airport_code=(
+            "SHA" if destination_code == "SHA" else destination_code
+        ),
         depart_date=depart_date,
         depart_time="08:00",
         arrive_time="10:00",
         duration_minutes=120,
         currency="CNY",
         total_price=price,
-        booking_url="https://flights.ctrip.com/booking/MU5106",
+        booking_url=booking_url,
     )
 
 
@@ -280,7 +286,14 @@ async def test_empty_and_failed_jobs_preserve_last_successful_snapshot(seeded_pg
         "BJS", "SHA", "2099-08-01", "recent_search", 50
     )
     assert await claim_next("mac-1", lease_seconds=60) is not None
-    assert await complete_job(first_id, "mac-1", []) is True
+    with pytest.raises(CollectorOfferValidationError, match="at least one"):
+        await complete_job(first_id, "mac-1", [])
+    assert await fail_job(
+        first_id,
+        "mac-1",
+        "empty",
+        datetime.now(timezone.utc) + timedelta(minutes=5),
+    ) is True
 
     failed_job_id = await enqueue_demand(
         "BJS", "CAN", "2099-08-01", "recent_search", 50
@@ -304,6 +317,27 @@ async def test_empty_and_failed_jobs_preserve_last_successful_snapshot(seeded_pg
 
 
 @pytest.mark.asyncio
+async def test_complete_job_rejects_offer_without_ctrip_booking_url(seeded_pg):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+
+    with pytest.raises(CollectorOfferValidationError, match="booking URL"):
+        await complete_job(job_id, "mac-1", [_offer(booking_url=None)])
+
+    async with seeded_pg.connect() as connection:
+        status = (
+            await connection.execute(
+                select(FlightSearchDemandRow.status).where(
+                    FlightSearchDemandRow.id == job_id
+                )
+            )
+        ).scalar_one()
+    assert status == "leased"
+
+
+@pytest.mark.asyncio
 async def test_complete_job_requires_owner_and_is_idempotent(seeded_pg):
     job_id = await enqueue_demand(
         "BJS", "SHA", "2099-08-01", "recent_search", 50
@@ -323,6 +357,26 @@ async def test_complete_job_requires_owner_and_is_idempotent(seeded_pg):
         depart_date="2099-08-01",
     )
     assert rows[0]["lowest_price"] == 580
+
+
+@pytest.mark.asyncio
+async def test_reenqueue_completed_hourly_demand_creates_a_new_claim(seeded_pg):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    first = await claim_next("mac-1", lease_seconds=60)
+    assert first is not None
+    await complete_job(job_id, "mac-1", [_offer()])
+
+    duplicate_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    second = await claim_next("mac-1", lease_seconds=60)
+
+    assert duplicate_id == job_id
+    assert second is not None
+    assert second.job_id == job_id
+    assert second.attempts == 2
 
 
 @pytest.mark.asyncio
@@ -422,7 +476,12 @@ async def test_snapshot_failure_rolls_back_job_and_existing_snapshot(
         provider,
         offers,
         ttl_minutes,
+        *,
+        origin_airport_code=None,
+        destination_airport_code=None,
     ):
+        assert origin_airport_code is None
+        assert destination_airport_code is None
         await session.execute(
             update(PlatformPriceSnapshot)
             .where(PlatformPriceSnapshot.data_provider == "ctrip_snapshot")
@@ -505,3 +564,43 @@ async def test_complete_job_records_node_success(seeded_pg):
             )
         ).scalar_one()
     assert last_success is not None
+
+
+@pytest.mark.asyncio
+async def test_verification_status_reports_exact_scoped_ingestion(seeded_pg):
+    await record_heartbeat("mac-1", "1.0.0", "ready")
+    job_id = await enqueue_demand(
+        "BJS",
+        "SHA",
+        "2099-08-01",
+        "recent_search",
+        50,
+        origin_airport_code="PEK",
+        destination_airport_code="SHA",
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+    await complete_job(job_id, "mac-1", [_offer()])
+
+    exact = await read_collector_verification_status(
+        origin_code="BJS",
+        origin_airport_code="PEK",
+        destination_code="SHA",
+        destination_airport_code="SHA",
+        depart_date="2099-08-01",
+        heartbeat_timeout_seconds=180,
+    )
+    other_airport = await read_collector_verification_status(
+        origin_code="BJS",
+        origin_airport_code="PKX",
+        destination_code="SHA",
+        destination_airport_code="SHA",
+        depart_date="2099-08-01",
+        heartbeat_timeout_seconds=180,
+    )
+
+    assert exact.job_status == "completed"
+    assert exact.job_attempts == 1
+    assert exact.snapshot_observed_at is not None
+    assert other_airport.job_status == "missing"
+    assert other_airport.job_attempts == 0
+    assert other_airport.snapshot_observed_at is None

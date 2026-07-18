@@ -32,7 +32,9 @@ class FlightSnapshot(Base):
 
     id = Column(String, primary_key=True)
     origin_code = Column(String, nullable=False)
+    origin_airport_code = Column(String, nullable=True)
     destination_code = Column(String, nullable=False)
+    destination_airport_code = Column(String, nullable=True)
     depart_date = Column(String, nullable=False)
     flight_no = Column(String, nullable=False)
     airline = Column(String, nullable=False, default="")
@@ -92,7 +94,9 @@ class ProviderInventoryObservation(Base):
 
 def _snapshot_id(f: dict[str, Any]) -> str:
     raw = (
-        f"{f['origin_code']}|{f['destination_code']}|{f['depart_date']}|"
+        f"{f['origin_code']}|{f.get('origin_airport_code') or ''}|"
+        f"{f['destination_code']}|"
+        f"{f.get('destination_airport_code') or ''}|{f['depart_date']}|"
         f"{f['flight_no']}|{f.get('dep_time', '')}"
     )
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:24]
@@ -194,7 +198,11 @@ def _offer_to_provider_flight(offer: object) -> dict[str, Any]:
         "flight_no": values["flight_no"],
         "airline": values.get("airline") or "",
         "origin_code": values["origin_code"],
+        "origin_airport_code": values.get("origin_airport_code"),
         "destination_code": values["destination_code"],
+        "destination_airport_code": values.get(
+            "destination_airport_code"
+        ),
         "depart_date": values["depart_date"],
         "dep_time": values.get("depart_time") or "",
         "arr_time": values.get("arrive_time") or "",
@@ -270,7 +278,11 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
             values = {
                 "id": sid,
                 "origin_code": f["origin_code"],
+                "origin_airport_code": f.get("origin_airport_code"),
                 "destination_code": f["destination_code"],
+                "destination_airport_code": f.get(
+                    "destination_airport_code"
+                ),
                 "depart_date": f["depart_date"],
                 "flight_no": f["flight_no"],
                 "airline": f.get("airline", ""),
@@ -332,7 +344,9 @@ async def upsert_provider_flights(
     ttl_minutes: int,
     *,
     origin_code: str | None = None,
+    origin_airport_code: str | None = None,
     destination_code: str | None = None,
+    destination_airport_code: str | None = None,
     depart_date: str | None = None,
 ) -> None:
     async with get_session() as session:
@@ -342,7 +356,9 @@ async def upsert_provider_flights(
             flights,
             ttl_minutes,
             origin_code=origin_code,
+            origin_airport_code=origin_airport_code,
             destination_code=destination_code,
+            destination_airport_code=destination_airport_code,
             depart_date=depart_date,
         )
         await session.commit()
@@ -355,7 +371,9 @@ async def _upsert_provider_flights_in_session(
     ttl_minutes: int,
     *,
     origin_code: str | None = None,
+    origin_airport_code: str | None = None,
     destination_code: str | None = None,
+    destination_airport_code: str | None = None,
     depart_date: str | None = None,
 ) -> None:
     if provider == "ctrip_snapshot" and not flights:
@@ -372,11 +390,21 @@ async def _upsert_provider_flights_in_session(
     s = session
     route_lock = _advisory_lock_key("|".join((provider, *scope)))
     await s.execute(select(func.pg_advisory_xact_lock(route_lock)))
-    scoped_snapshot_ids = select(FlightSnapshot.id).where(
+    snapshot_scope = [
         FlightSnapshot.origin_code == scope[0],
         FlightSnapshot.destination_code == scope[1],
         FlightSnapshot.depart_date == scope[2],
-    )
+    ]
+    if origin_airport_code is not None:
+        snapshot_scope.append(
+            FlightSnapshot.origin_airport_code == origin_airport_code
+        )
+    if destination_airport_code is not None:
+        snapshot_scope.append(
+            FlightSnapshot.destination_airport_code
+            == destination_airport_code
+        )
+    scoped_snapshot_ids = select(FlightSnapshot.id).where(*snapshot_scope)
     await s.execute(
         delete(PlatformPriceSnapshot).where(
             PlatformPriceSnapshot.data_provider == provider,
@@ -390,7 +418,11 @@ async def _upsert_provider_flights_in_session(
         values = {
             "id": sid,
             "origin_code": f["origin_code"],
+            "origin_airport_code": f.get("origin_airport_code"),
             "destination_code": f["destination_code"],
+            "destination_airport_code": f.get(
+                "destination_airport_code"
+            ),
             "depart_date": f["depart_date"],
             "flight_no": f["flight_no"],
             "airline": f.get("airline", ""),
@@ -458,39 +490,43 @@ async def _upsert_provider_flights_in_session(
                     },
                 )
             )
-    observation_values = {
-        "provider": provider,
-        "origin_code": scope[0],
-        "destination_code": scope[1],
-        "depart_date": scope[2],
-        "observed_at": now,
-        "expires_at": expires_at,
-        "item_count": len(flights),
-    }
-    observation_stmt = pg_insert(
-        ProviderInventoryObservation.__table__
-    ).values(**observation_values)
-    await s.execute(
-        observation_stmt.on_conflict_do_update(
-            index_elements=[
-                ProviderInventoryObservation.provider,
-                ProviderInventoryObservation.origin_code,
-                ProviderInventoryObservation.destination_code,
-                ProviderInventoryObservation.depart_date,
-            ],
-            set_={
-                "observed_at": now,
-                "expires_at": expires_at,
-                "item_count": len(flights),
-            },
+    if origin_airport_code is None and destination_airport_code is None:
+        observation_values = {
+            "provider": provider,
+            "origin_code": scope[0],
+            "destination_code": scope[1],
+            "depart_date": scope[2],
+            "observed_at": now,
+            "expires_at": expires_at,
+            "item_count": len(flights),
+        }
+        observation_stmt = pg_insert(
+            ProviderInventoryObservation.__table__
+        ).values(**observation_values)
+        await s.execute(
+            observation_stmt.on_conflict_do_update(
+                index_elements=[
+                    ProviderInventoryObservation.provider,
+                    ProviderInventoryObservation.origin_code,
+                    ProviderInventoryObservation.destination_code,
+                    ProviderInventoryObservation.depart_date,
+                ],
+                set_={
+                    "observed_at": now,
+                    "expires_at": expires_at,
+                    "item_count": len(flights),
+                },
+            )
         )
-    )
 
 
 async def upsert_provider_offers(
     provider: str,
     offers: list[object],
     ttl_minutes: int,
+    *,
+    origin_airport_code: str | None = None,
+    destination_airport_code: str | None = None,
 ) -> None:
     async with get_session() as session:
         await _upsert_provider_offers_in_session(
@@ -498,6 +534,8 @@ async def upsert_provider_offers(
             provider,
             offers,
             ttl_minutes,
+            origin_airport_code=origin_airport_code,
+            destination_airport_code=destination_airport_code,
         )
         await session.commit()
 
@@ -507,6 +545,9 @@ async def _upsert_provider_offers_in_session(
     provider: str,
     offers: list[object],
     ttl_minutes: int,
+    *,
+    origin_airport_code: str | None = None,
+    destination_airport_code: str | None = None,
 ) -> None:
     if not offers:
         return
@@ -516,6 +557,8 @@ async def _upsert_provider_offers_in_session(
         provider,
         flights,
         ttl_minutes,
+        origin_airport_code=origin_airport_code,
+        destination_airport_code=destination_airport_code,
     )
 
 
@@ -648,9 +691,15 @@ async def read_provider_deals(
     origin_code: str,
     destination_code: str,
     depart_date: str,
+    *,
+    origin_airport_code: str | None = None,
+    destination_airport_code: str | None = None,
 ) -> tuple[list[dict[str, Any]], int | None, bool]:
     async with get_session() as s:
-        observation = (
+        observation = None if (
+            origin_airport_code is not None
+            or destination_airport_code is not None
+        ) else (
             await s.execute(
                 select(ProviderInventoryObservation).where(
                     ProviderInventoryObservation.provider == provider,
@@ -661,6 +710,21 @@ async def read_provider_deals(
                 )
             )
         ).scalar_one_or_none()
+        snapshot_scope = [
+            FlightSnapshot.origin_code == origin_code,
+            FlightSnapshot.destination_code == destination_code,
+            FlightSnapshot.depart_date == depart_date,
+            PlatformPriceSnapshot.data_provider == provider,
+        ]
+        if origin_airport_code is not None:
+            snapshot_scope.append(
+                FlightSnapshot.origin_airport_code == origin_airport_code
+            )
+        if destination_airport_code is not None:
+            snapshot_scope.append(
+                FlightSnapshot.destination_airport_code
+                == destination_airport_code
+            )
         snaps = (
             await s.execute(
                 select(FlightSnapshot)
@@ -669,12 +733,7 @@ async def read_provider_deals(
                     PlatformPriceSnapshot.flight_snapshot_id
                     == FlightSnapshot.id,
                 )
-                .where(
-                    FlightSnapshot.origin_code == origin_code,
-                    FlightSnapshot.destination_code == destination_code,
-                    FlightSnapshot.depart_date == depart_date,
-                    PlatformPriceSnapshot.data_provider == provider,
-                )
+                .where(*snapshot_scope)
                 .distinct()
             )
         ).scalars().all()
@@ -733,7 +792,11 @@ async def read_provider_deals(
                     "flight_no": snap.flight_no,
                     "airline": snap.airline,
                     "origin_code": snap.origin_code,
+                    "origin_airport_code": snap.origin_airport_code,
                     "destination_code": snap.destination_code,
+                    "destination_airport_code": (
+                        snap.destination_airport_code
+                    ),
                     "depart_date": snap.depart_date,
                     "dep_time": snap.dep_time,
                     "arr_time": snap.arr_time,

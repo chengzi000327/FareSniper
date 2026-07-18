@@ -90,8 +90,10 @@ export interface DealCardDto {
   platform: string;
   origin_city: string;
   origin_code: string;
+  origin_airport_code?: string | null;
   destination_city: string;
   destination_code: string;
+  destination_airport_code?: string | null;
   depart_date: string;
   airline: string;
   depart_time: string;
@@ -265,6 +267,8 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   ];
   if (requiredStrings.some((key) => typeof value[key] !== "string")) return false;
   if (
+    !hasOptionalField(value, "origin_airport_code", (item) => item === null || typeof item === "string") ||
+    !hasOptionalField(value, "destination_airport_code", (item) => item === null || typeof item === "string") ||
     !isCurrency(value.currency) ||
     (value.recommend_score !== null && typeof value.recommend_score !== "string") ||
     (value.winning_price_id !== null && typeof value.winning_price_id !== "string") ||

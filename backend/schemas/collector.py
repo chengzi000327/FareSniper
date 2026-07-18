@@ -29,6 +29,7 @@ _CTRIP_BOOKING_HOST = "flights.ctrip.com"
 _MAX_BOOKING_URL_LENGTH = 2048
 _BOOKING_QUERY_ORDER = ("depdate", "cabin", "adult", "child", "infant")
 _CABIN_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,16}\Z")
+_AIRPORT_CODE_PATTERN = re.compile(r"[A-Z]{3}\Z")
 _DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 _RFC3339_PATTERN = re.compile(
     r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
@@ -37,7 +38,7 @@ _RFC3339_PATTERN = re.compile(
 _HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
 
 
-def _normalize_ctrip_booking_url(
+def normalize_ctrip_booking_url(
     value: str,
     *,
     depart_date: str | None,
@@ -163,7 +164,9 @@ class ClaimRequest(CollectorRequest):
 class CollectorJobResponse(BaseModel):
     job_id: str
     origin_code: str
+    origin_airport_code: str | None = None
     destination_code: str
+    destination_airport_code: str | None = None
     depart_date: str
     source: str
     priority: int
@@ -186,7 +189,9 @@ class CollectorStatusResponse(BaseModel):
     last_heartbeat_at: datetime | None = None
     last_success_at: datetime | None = None
     job_status: Literal["missing", "pending", "leased", "retry", "completed"]
+    job_attempts: int = Field(ge=0)
     job_updated_at: datetime | None = None
+    snapshot_observed_at: datetime | None = None
 
 
 class CollectorOffer(CollectorRequest):
@@ -196,8 +201,10 @@ class CollectorOffer(CollectorRequest):
     airline: str = Field(default="", max_length=128)
     origin_city: str = Field(min_length=1, max_length=128)
     origin_code: str = Field(min_length=1, max_length=16)
+    origin_airport_code: str = Field(pattern=_AIRPORT_CODE_PATTERN)
     destination_city: str = Field(min_length=1, max_length=128)
     destination_code: str = Field(min_length=1, max_length=16)
+    destination_airport_code: str = Field(pattern=_AIRPORT_CODE_PATTERN)
     depart_date: str
     depart_time: str = Field(default="", max_length=16)
     arrive_time: str = Field(default="", max_length=16)
@@ -206,10 +213,7 @@ class CollectorOffer(CollectorRequest):
     cabin: str | None = Field(default=None, max_length=32)
     currency: Literal["CNY"]
     display_price: Annotated[StrictInt, Field(gt=0)]
-    booking_url: str | None = Field(
-        default=None,
-        max_length=_MAX_BOOKING_URL_LENGTH,
-    )
+    booking_url: str = Field(max_length=_MAX_BOOKING_URL_LENGTH)
 
     @field_validator("depart_date")
     @classmethod
@@ -220,12 +224,10 @@ class CollectorOffer(CollectorRequest):
     @classmethod
     def validate_ctrip_booking_url(
         cls,
-        value: str | None,
+        value: str,
         info: ValidationInfo,
-    ) -> str | None:
-        if value is None:
-            return None
-        return _normalize_ctrip_booking_url(
+    ) -> str:
+        return normalize_ctrip_booking_url(
             value,
             depart_date=info.data.get("depart_date"),
         )
@@ -238,8 +240,10 @@ class CollectorOffer(CollectorRequest):
             airline=self.airline,
             origin_city=self.origin_city,
             origin_code=self.origin_code,
+            origin_airport_code=self.origin_airport_code,
             destination_city=self.destination_city,
             destination_code=self.destination_code,
+            destination_airport_code=self.destination_airport_code,
             depart_date=self.depart_date,
             depart_time=self.depart_time,
             arrive_time=self.arrive_time,
@@ -260,7 +264,7 @@ class CollectorOffer(CollectorRequest):
 
 class CompleteRequest(CollectorRequest):
     node_id: str = Field(min_length=1, max_length=128)
-    offers: list[CollectorOffer] = Field(max_length=500)
+    offers: list[CollectorOffer] = Field(min_length=1, max_length=500)
 
 
 class FailRequest(CollectorRequest):

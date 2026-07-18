@@ -90,10 +90,15 @@ def test_alembic_registers_task4_repositories():
 
 def test_demand_metadata_matches_migration_keys():
     table = FlightSearchDemandRow.__table__
-    constraint = next(
+    hourly_constraint = next(
         item
         for item in table.constraints
         if item.name == "uq_flight_search_demand_hour"
+    )
+    compatibility_constraint = next(
+        item
+        for item in table.constraints
+        if item.name == "uq_flight_search_demand_route_date"
     )
     index = next(
         item
@@ -101,12 +106,20 @@ def test_demand_metadata_matches_migration_keys():
         if item.name == "ix_flight_search_demands_due"
     )
 
-    assert [column.name for column in constraint.columns] == [
+    expected_unique_columns = [
         "origin_code",
+        "origin_airport_code",
         "destination_code",
+        "destination_airport_code",
         "depart_date",
         "demand_hour",
     ]
+    assert [
+        column.name for column in hourly_constraint.columns
+    ] == expected_unique_columns
+    assert [
+        column.name for column in compatibility_constraint.columns
+    ] == expected_unique_columns
     assert [column.name for column in index.columns] == [
         "active",
         "status",
@@ -124,6 +137,83 @@ def test_demand_metadata_matches_migration_keys():
         "created_at",
         "updated_at",
     } <= set(table.columns.keys())
+
+
+@pytest.mark.asyncio
+async def test_old_route_date_insert_and_named_conflict_survive_upgrade(
+    seeded_pg,
+):
+    now = datetime(2099, 7, 1, 12, 45, tzinfo=timezone.utc)
+    old_binary_upsert = text(
+        """
+        INSERT INTO flight_search_demands (
+            id, origin_code, destination_code, depart_date, priority,
+            source, last_requested_at, next_run_at, expires_at, active
+        ) VALUES (
+            :id, :origin_code, :destination_code, :depart_date, :priority,
+            :source, :requested_at, :requested_at, :expires_at, true
+        )
+        ON CONFLICT ON CONSTRAINT uq_flight_search_demand_route_date
+        DO UPDATE SET
+            priority = greatest(
+                flight_search_demands.priority, EXCLUDED.priority
+            ),
+            source = EXCLUDED.source,
+            last_requested_at = EXCLUDED.last_requested_at,
+            next_run_at = least(
+                flight_search_demands.next_run_at, EXCLUDED.next_run_at
+            ),
+            expires_at = EXCLUDED.expires_at,
+            active = true
+        """
+    )
+    params = {
+        "id": "old-binary-route-date-id",
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+        "priority": 10,
+        "source": "recent_search",
+        "requested_at": now,
+        "expires_at": now + timedelta(days=7),
+    }
+
+    async with seeded_pg.begin() as connection:
+        await connection.execute(old_binary_upsert, params)
+        await connection.execute(
+            old_binary_upsert,
+            {
+                **params,
+                "priority": 90,
+                "source": "price_alert",
+                "requested_at": now + timedelta(hours=2),
+            },
+        )
+        row = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT origin_airport_code, destination_airport_code,
+                           demand_hour, status, attempts, next_attempt_at,
+                           created_at, updated_at, priority, source
+                    FROM flight_search_demands
+                    WHERE id = :id
+                    """
+                ),
+                {"id": params["id"]},
+            )
+        ).one()
+
+    assert row.origin_airport_code == ""
+    assert row.destination_airport_code == ""
+    assert row.demand_hour == datetime(1970, 1, 1, tzinfo=timezone.utc)
+    assert row.status == "pending"
+    assert row.attempts == 0
+    assert row.next_attempt_at is not None
+    assert row.created_at is not None
+    assert row.updated_at is not None
+    assert row.priority == 90
+    assert row.source == "price_alert"
 
 
 def test_collector_node_metadata_matches_migration():

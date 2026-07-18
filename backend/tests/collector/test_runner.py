@@ -13,6 +13,14 @@ from backend.collector.browser import CaptureResult, CtripBrowser
 from backend.collector.runner import CollectorRunner
 
 
+class FakeOptions:
+    def __init__(self):
+        self.arguments: list[str] = []
+
+    def add_argument(self, value: str) -> None:
+        self.arguments.append(value)
+
+
 @pytest.fixture
 def job():
     return SimpleNamespace(
@@ -294,7 +302,11 @@ async def test_runner_parse_failure_releases_real_driver_before_next_job(
         return driver
 
     api = FakeApi(job)
-    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        driver_factory=factory,
+        options_factory=FakeOptions,
+    )
     runner = CollectorRunner(api, browser)
 
     first = await runner.run_once()

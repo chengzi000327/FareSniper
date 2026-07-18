@@ -101,7 +101,9 @@ async def claim(request: ClaimRequest) -> ClaimResponse:
         job=CollectorJobResponse(
             job_id=job.job_id,
             origin_code=job.origin_code,
+            origin_airport_code=job.origin_airport_code,
             destination_code=job.destination_code,
+            destination_airport_code=job.destination_airport_code,
             depart_date=job.depart_date,
             source=job.source,
             priority=job.priority,
@@ -134,10 +136,20 @@ async def collector_status(
     origin_code: str,
     destination_code: str,
     depart_date: str,
+    origin_airport_code: str | None = None,
+    destination_airport_code: str | None = None,
 ) -> CollectorStatusResponse:
     if (
         not re.fullmatch(r"[A-Z0-9]{3,8}", origin_code)
         or not re.fullmatch(r"[A-Z0-9]{3,8}", destination_code)
+        or (
+            origin_airport_code is not None
+            and not re.fullmatch(r"[A-Z]{3}", origin_airport_code)
+        )
+        or (
+            destination_airport_code is not None
+            and not re.fullmatch(r"[A-Z]{3}", destination_airport_code)
+        )
     ):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -146,7 +158,9 @@ async def collector_status(
     try:
         snapshot = await flight_demand_repo.read_collector_verification_status(
             origin_code=origin_code,
+            origin_airport_code=origin_airport_code,
             destination_code=destination_code,
+            destination_airport_code=destination_airport_code,
             depart_date=depart_date,
             heartbeat_timeout_seconds=(
                 settings.ctrip_collector_heartbeat_timeout_seconds
@@ -162,7 +176,9 @@ async def collector_status(
         last_heartbeat_at=snapshot.last_heartbeat_at,
         last_success_at=snapshot.last_success_at,
         job_status=snapshot.job_status,
+        job_attempts=snapshot.job_attempts,
         job_updated_at=snapshot.job_updated_at,
+        snapshot_observed_at=snapshot.snapshot_observed_at,
     )
 
 
@@ -181,6 +197,7 @@ async def complete(job_id: str, request: CompleteRequest) -> Response:
                 job_id,
                 request.node_id,
                 offers,
+                ttl_minutes=settings.ctrip_snapshot_ttl_minutes,
             ),
         )
     except (

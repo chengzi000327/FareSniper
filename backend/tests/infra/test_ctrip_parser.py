@@ -70,6 +70,40 @@ def test_parser_preserves_payload_scope_instead_of_rewriting_from_query(
     assert offer.depart_date == "2026-08-09"
 
 
+def test_parser_filters_inventory_to_explicit_airport_scope(
+    ctrip_payload,
+):
+    query = FlightQuery(
+        origin_city="北京",
+        origin_code="BJS",
+        origin_airport_ids=["PKX"],
+        origin_airport_scope="PKX",
+        destination_city="上海",
+        destination_code="SHA",
+        destination_airport_ids=["SHA"],
+        destination_airport_scope="SHA",
+        depart_date="2026-08-08",
+        is_mainland_domestic=True,
+    )
+    pek_itinerary = ctrip_payload["data"]["flightItineraryList"][0]
+    pkx_itinerary = copy.deepcopy(pek_itinerary)
+    pkx_flight = pkx_itinerary["flightSegments"][0]["flightList"][0]
+    pkx_flight["flightNo"] = "CZ3001"
+    pkx_flight["departureAirportCode"] = "PKX"
+    ctrip_payload["data"]["flightItineraryList"] = [
+        pek_itinerary,
+        pkx_itinerary,
+    ]
+
+    offers = parse_batch_search(ctrip_payload, query)
+
+    assert [offer.flight_no for offer in offers] == ["CZ3001"]
+    assert offers[0].origin_code == "BJS"
+    assert offers[0].origin_airport_code == "PKX"
+    assert offers[0].destination_code == "SHA"
+    assert offers[0].destination_airport_code == "SHA"
+
+
 @pytest.mark.parametrize("missing_direction", ["departure", "arrival"])
 def test_parser_requires_real_route_evidence_per_direction(
     ctrip_payload,
@@ -160,9 +194,9 @@ def test_parser_accepts_multiple_consistent_city_and_airport_codes(
         {
             "departureCityCode": "BJS",
             "departureAirportCode": "PEK",
-            "departureAirportTlc": "PKX",
+            "departureAirportTlc": "PEK",
             "arrivalCityCode": "SHA",
-            "arrivalAirportCode": "SHA",
+            "arrivalAirportCode": "PVG",
             "arrivalAirportTlc": "PVG",
         }
     )

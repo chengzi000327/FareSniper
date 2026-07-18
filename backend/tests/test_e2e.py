@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import copy
 from collections.abc import AsyncGenerator
 from datetime import date, datetime, timedelta, timezone
+import json
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -19,6 +22,7 @@ from backend.api._deps import current_user_id
 from backend.infrastructure.flight_data.providers.ctrip_snapshot import (
     CtripSnapshotProvider,
 )
+from backend.infrastructure.flight_data.ctrip_parser import parse_batch_search
 from backend.main import create_app
 from backend.schemas.search import SearchResponseDto
 
@@ -388,3 +392,115 @@ async def test_altay_to_sanya_ctrip_snapshot_price_is_grounded_everywhere(
     assert response.analysis["min_price"] == ctrip_price
     assert f"¥{ctrip_price}" in response.recommendation["text"]
     assert f"CNY {ctrip_price}" in response.recommendation["text"]
+
+
+@pytest.mark.asyncio
+async def test_explicit_airport_capture_filters_before_render(
+    monkeypatch,
+) -> None:
+    depart_date = (date.today() + timedelta(days=30)).isoformat()
+    query = build_flight_query(
+        "北京大兴机场",
+        "上海虹桥机场",
+        depart_date,
+    )
+    fixture_path = (
+        Path(__file__).parent / "fixtures/providers/ctrip_batch_search.json"
+    )
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    pek_itinerary = payload["data"]["flightItineraryList"][0]
+    pek_flight = pek_itinerary["flightSegments"][0]["flightList"][0]
+    pek_flight["departureDateTime"] = f"{depart_date} 08:00:00"
+    pek_flight["arrivalDateTime"] = f"{depart_date} 10:20:00"
+    pkx_itinerary = copy.deepcopy(pek_itinerary)
+    pkx_flight = pkx_itinerary["flightSegments"][0]["flightList"][0]
+    pkx_flight["flightNo"] = "CZ3001"
+    pkx_flight["departureAirportCode"] = "PKX"
+    payload["data"]["flightItineraryList"] = [pek_itinerary, pkx_itinerary]
+
+    captured = [
+        offer.model_copy(
+            update={
+                "booking_url": (
+                    "https://flights.ctrip.com/online/list/oneway-pkx-sha"
+                    f"?depdate={depart_date}"
+                )
+            }
+        )
+        for offer in parse_batch_search(payload, query)
+    ]
+    stored_rows = [
+        {
+            "flight_no": offer.flight_no,
+            "airline": offer.airline,
+            "origin_code": offer.origin_code,
+            "origin_airport_code": offer.origin_airport_code,
+            "destination_code": offer.destination_code,
+            "destination_airport_code": offer.destination_airport_code,
+            "depart_date": offer.depart_date,
+            "dep_time": offer.depart_time,
+            "arr_time": offer.arrive_time,
+            "duration": f"{offer.duration_minutes}分钟",
+            "stops": offer.stops,
+            "prices": [
+                {
+                    "platform": "携程",
+                    "price": offer.total_price,
+                    "currency": "CNY",
+                    "url": offer.booking_url,
+                    "crawled_at": datetime.now(timezone.utc).isoformat(),
+                    "expires_at": (
+                        datetime.now(timezone.utc) - timedelta(minutes=1)
+                    ).isoformat(),
+                }
+            ],
+        }
+        for offer in captured
+    ]
+
+    async def read_snapshot(**scope):
+        assert scope == {
+            "provider": "ctrip_snapshot",
+            "origin_code": "BJS",
+            "origin_airport_code": "PKX",
+            "destination_code": "SHA",
+            "destination_airport_code": "SHA",
+            "depart_date": depart_date,
+        }
+        return stored_rows, 1, True
+
+    async def ignore_refresh(**_scope):
+        return None
+
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.read_provider_deals",
+        read_snapshot,
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.enqueue_demand",
+        ignore_refresh,
+    )
+    search_result = await FlightSearchAggregator(
+        [CtripSnapshotProvider()], timeout_seconds=1
+    ).collect(query)
+    intent = NormalizedIntent(
+        origin=LocationRef(city="北京", iata_code="PKX"),
+        destination=LocationRef(city="上海", iata_code="SHA"),
+        date_window=DateWindow(start_date=depart_date, end_date=depart_date),
+        raw_text=f"{depart_date} 北京大兴机场到上海虹桥机场",
+    )
+    response = (
+        await render_response(
+            {
+                "request_user_id": "e2e-airport-user",
+                "intent": intent,
+                "search_result": search_result,
+            }
+        )
+    )["response"]
+
+    assert [deal["flight_no"] for deal in response.deals] == ["CZ3001"]
+    assert response.deals[0]["origin_code"] == "BJS"
+    assert response.deals[0]["origin_airport_code"] == "PKX"
+    assert response.deals[0]["destination_code"] == "SHA"
+    assert response.deals[0]["destination_airport_code"] == "SHA"

@@ -156,7 +156,7 @@ def test_mac_collector_runbook_covers_install_operations_and_recovery():
         "scripts/install_macos_collector.sh",
         "doctor",
         "login",
-        "--no-proxy-server",
+        "proxy bypass",
         "Clash Verge",
         "launchctl print",
         "collector.log",

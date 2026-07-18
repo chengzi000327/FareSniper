@@ -31,7 +31,32 @@ def upgrade() -> None:
 
     op.add_column(
         "flight_search_demands",
-        sa.Column("demand_hour", sa.DateTime(timezone=True), nullable=True),
+        sa.Column(
+            "origin_airport_code",
+            sa.String(),
+            nullable=False,
+            server_default="",
+        ),
+    )
+    op.add_column(
+        "flight_search_demands",
+        sa.Column(
+            "destination_airport_code",
+            sa.String(),
+            nullable=False,
+            server_default="",
+        ),
+    )
+    op.add_column(
+        "flight_search_demands",
+        sa.Column(
+            "demand_hour",
+            sa.DateTime(timezone=True),
+            nullable=True,
+            server_default=sa.text(
+                "'1970-01-01 00:00:00+00'::timestamptz"
+            ),
+        ),
     )
     op.add_column(
         "flight_search_demands",
@@ -54,6 +79,7 @@ def upgrade() -> None:
             "next_attempt_at",
             sa.DateTime(timezone=True),
             nullable=True,
+            server_default=sa.text("now()"),
         ),
     )
     op.add_column(
@@ -76,6 +102,7 @@ def upgrade() -> None:
             "created_at",
             sa.DateTime(timezone=True),
             nullable=True,
+            server_default=sa.text("now()"),
         ),
     )
     op.add_column(
@@ -84,6 +111,7 @@ def upgrade() -> None:
             "updated_at",
             sa.DateTime(timezone=True),
             nullable=True,
+            server_default=sa.text("now()"),
         ),
     )
     op.execute(
@@ -106,7 +134,26 @@ def upgrade() -> None:
     op.create_unique_constraint(
         "uq_flight_search_demand_hour",
         "flight_search_demands",
-        ["origin_code", "destination_code", "depart_date", "demand_hour"],
+        [
+            "origin_code",
+            "origin_airport_code",
+            "destination_code",
+            "destination_airport_code",
+            "depart_date",
+            "demand_hour",
+        ],
+    )
+    op.create_unique_constraint(
+        "uq_flight_search_demand_route_date",
+        "flight_search_demands",
+        [
+            "origin_code",
+            "origin_airport_code",
+            "destination_code",
+            "destination_airport_code",
+            "depart_date",
+            "demand_hour",
+        ],
     )
     op.create_index(
         "ix_flight_search_demands_due",
@@ -123,6 +170,15 @@ def upgrade() -> None:
             "last_heartbeat", sa.DateTime(timezone=True), nullable=False
         ),
         sa.Column("last_success", sa.DateTime(timezone=True), nullable=True),
+    )
+
+    op.add_column(
+        "flight_snapshots",
+        sa.Column("origin_airport_code", sa.String(), nullable=True),
+    )
+    op.add_column(
+        "flight_snapshots",
+        sa.Column("destination_airport_code", sa.String(), nullable=True),
     )
 
     op.execute(
@@ -149,16 +205,41 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    inspector = sa.inspect(op.get_bind())
+    demand_constraints = {
+        item["name"]
+        for item in inspector.get_unique_constraints(
+            "flight_search_demands"
+        )
+    }
+    demand_columns = {
+        item["name"]
+        for item in inspector.get_columns("flight_search_demands")
+    }
+    snapshot_columns = {
+        item["name"] for item in inspector.get_columns("flight_snapshots")
+    }
+
     op.drop_constraint(
         "uq_platform_price_provider_seller",
         "platform_price_snapshots",
         type_="unique",
     )
+    if "destination_airport_code" in snapshot_columns:
+        op.drop_column("flight_snapshots", "destination_airport_code")
+    if "origin_airport_code" in snapshot_columns:
+        op.drop_column("flight_snapshots", "origin_airport_code")
     op.drop_table("collector_nodes")
 
     op.drop_index(
         "ix_flight_search_demands_due", table_name="flight_search_demands"
     )
+    if "uq_flight_search_demand_route_date" in demand_constraints:
+        op.drop_constraint(
+            "uq_flight_search_demand_route_date",
+            "flight_search_demands",
+            type_="unique",
+        )
     op.drop_constraint(
         "uq_flight_search_demand_hour",
         "flight_search_demands",
@@ -262,3 +343,9 @@ def downgrade() -> None:
     op.drop_column("flight_search_demands", "attempts")
     op.drop_column("flight_search_demands", "status")
     op.drop_column("flight_search_demands", "demand_hour")
+    if "destination_airport_code" in demand_columns:
+        op.drop_column(
+            "flight_search_demands", "destination_airport_code"
+        )
+    if "origin_airport_code" in demand_columns:
+        op.drop_column("flight_search_demands", "origin_airport_code")

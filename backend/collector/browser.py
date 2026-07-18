@@ -19,6 +19,7 @@ DEFAULT_PROFILE_DIR = Path.home() / ".faresniper" / "ctrip-profile"
 CTRIP_HOME_URL = "https://www.ctrip.com/"
 _ROUTE_CODE_PATTERN = re.compile(r"[A-Za-z]{3}\Z")
 _AUTH_COOKIE_NAMES = frozenset({"cticket", "login_uid"})
+_CTRIP_PROXY_BYPASS = "ctrip.com;*.ctrip.com;ctrip.com.cn;*.ctrip.com.cn"
 
 BATCH_SEARCH_INTERCEPT_SCRIPT = """
 (function() {
@@ -103,24 +104,38 @@ def _set_localhost_no_proxy() -> None:
         os.environ[name] = ",".join(values)
 
 
-def build_chrome_options(*, profile_dir: Path, headless: bool):
-    from selenium.webdriver.chrome.options import Options
-
+def build_chrome_options(
+    *,
+    profile_dir: Path,
+    headless: bool,
+    options_factory: Callable[[], object] | None = None,
+):
     profile = _ensure_dedicated_profile(profile_dir)
     _set_localhost_no_proxy()
-    options = Options()
-    options.add_argument(f"--user-data-dir={profile}")
-    options.add_argument("--profile-directory=Default")
-    options.add_argument("--no-proxy-server")
-    options.add_argument("--window-size=1440,1000")
+    if options_factory is None:
+        from selenium.webdriver.chrome.options import Options
+
+        options_factory = Options
+    options = options_factory()
+    add_argument = getattr(options, "add_argument")
+    add_argument(f"--user-data-dir={profile}")
+    add_argument("--profile-directory=Default")
+    add_argument(f"--proxy-bypass-list={_CTRIP_PROXY_BYPASS}")
+    add_argument("--window-size=1440,1000")
     if headless:
-        options.add_argument("--headless=new")
+        add_argument("--headless=new")
     return options
 
 
 def build_search_url(job: object) -> str:
-    origin = str(getattr(job, "origin_code", ""))
-    destination = str(getattr(job, "destination_code", ""))
+    origin = str(
+        getattr(job, "origin_airport_code", None)
+        or getattr(job, "origin_code", "")
+    )
+    destination = str(
+        getattr(job, "destination_airport_code", None)
+        or getattr(job, "destination_code", "")
+    )
     depart_date = str(getattr(job, "depart_date", ""))
     if (
         _ROUTE_CODE_PATTERN.fullmatch(origin) is None
@@ -178,10 +193,12 @@ class CtripBrowser:
         profile_dir: Path = DEFAULT_PROFILE_DIR,
         timeout_seconds: float = 90.0,
         driver_factory: Callable[..., object] | None = None,
+        options_factory: Callable[[], object] | None = None,
     ) -> None:
         self.profile_dir = _ensure_dedicated_profile(profile_dir)
         self.timeout_seconds = timeout_seconds
         self._driver_factory = driver_factory
+        self._options_factory = options_factory
         self._driver: object | None = None
         self._headless: bool | None = None
 
@@ -208,6 +225,7 @@ class CtripBrowser:
         options = build_chrome_options(
             profile_dir=self.profile_dir,
             headless=headless,
+            options_factory=self._options_factory,
         )
         if self._driver_factory is None:
             from selenium import webdriver

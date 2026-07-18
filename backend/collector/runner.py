@@ -151,10 +151,37 @@ class CollectorRunner:
             return await self._fail_once(job_id, capture.error_code)
 
         try:
+            origin_airport_scope = getattr(
+                job, "origin_airport_code", None
+            )
+            destination_airport_scope = getattr(
+                job, "destination_airport_code", None
+            )
             query = build_flight_query(
-                str(getattr(job, "origin_code", "")),
-                str(getattr(job, "destination_code", "")),
+                str(origin_airport_scope or getattr(job, "origin_code", "")),
+                str(
+                    destination_airport_scope
+                    or getattr(job, "destination_code", "")
+                ),
                 str(getattr(job, "depart_date", "")),
+            )
+            query = query.model_copy(
+                update={
+                    "origin_code": str(
+                        getattr(job, "origin_code", query.origin_code)
+                    ),
+                    "origin_airport_scope": origin_airport_scope,
+                    "destination_code": str(
+                        getattr(
+                            job,
+                            "destination_code",
+                            query.destination_code,
+                        )
+                    ),
+                    "destination_airport_scope": (
+                        destination_airport_scope
+                    ),
+                }
             )
             offers: list[FlightOffer] = []
             for payload in capture.payloads:
@@ -194,10 +221,25 @@ class CollectorRunner:
         expected_destination = str(
             getattr(job, "destination_code", "")
         ).upper()
+        expected_origin_airport = getattr(
+            job, "origin_airport_code", None
+        )
+        expected_destination_airport = getattr(
+            job, "destination_airport_code", None
+        )
         expected_date = str(getattr(job, "depart_date", ""))
         return all(
             offer.origin_code.upper() == expected_origin
             and offer.destination_code.upper() == expected_destination
+            and (
+                expected_origin_airport is None
+                or offer.origin_airport_code == expected_origin_airport
+            )
+            and (
+                expected_destination_airport is None
+                or offer.destination_airport_code
+                == expected_destination_airport
+            )
             and offer.depart_date == expected_date
             for offer in offers
         )

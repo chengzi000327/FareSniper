@@ -66,8 +66,10 @@ async def test_client_sends_only_normalized_offer_fields():
         airline="东方航空",
         origin_city="北京",
         origin_code="BJS",
+        origin_airport_code="PEK",
         destination_city="上海",
         destination_code="SHA",
+        destination_airport_code="SHA",
         depart_date="2099-08-08",
         depart_time="08:00",
         arrive_time="10:00",
@@ -97,6 +99,8 @@ async def test_client_sends_only_normalized_offer_fields():
     wire_offer = payloads[0]["offers"][0]
     assert wire_offer["data_provider"] == "ctrip_snapshot"
     assert wire_offer["display_price"] == 580
+    assert wire_offer["origin_airport_code"] == "PEK"
+    assert wire_offer["destination_airport_code"] == "SHA"
     assert "raw_reference" not in wire_offer
     assert "base_price" not in wire_offer
 

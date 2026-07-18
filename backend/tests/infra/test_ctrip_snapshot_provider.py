@@ -47,14 +47,77 @@ async def test_empty_snapshot_queues_demand(monkeypatch):
     assert result.status is ProviderStatus.queued
     assert result.message == "等待下次刷新"
     assert queued == [
-        {
-            "origin_code": "BJS",
-            "destination_code": "SHA",
-            "depart_date": "2099-08-01",
+            {
+                "origin_code": "BJS",
+                "origin_airport_code": None,
+                "destination_code": "SHA",
+                "destination_airport_code": None,
+                "depart_date": "2099-08-01",
             "priority": 50,
             "source": "recent_search",
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_explicit_airport_snapshot_uses_airport_scope_for_read_and_demand(
+    monkeypatch,
+):
+    reads = []
+    queued = []
+
+    async def read_empty(**kwargs):
+        reads.append(kwargs)
+        return [], None, False
+
+    async def capture_demand(**kwargs):
+        queued.append(kwargs)
+
+    monkeypatch.setattr(ctrip_provider, "read_provider_deals", read_empty)
+    monkeypatch.setattr(ctrip_provider, "enqueue_demand", capture_demand)
+    query = build_flight_query("北京大兴机场", "上海虹桥机场", "2099-08-01")
+
+    result = await CtripSnapshotProvider().search(query)
+
+    scope = {
+        "origin_code": "BJS",
+        "origin_airport_code": "PKX",
+        "destination_code": "SHA",
+        "destination_airport_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    assert result.status is ProviderStatus.queued
+    assert reads == [{"provider": "ctrip_snapshot", **scope}]
+    assert queued == [{**scope, "priority": 50, "source": "recent_search"}]
+
+
+@pytest.mark.asyncio
+async def test_city_and_same_named_airport_keep_distinct_snapshot_scope(
+    monkeypatch,
+):
+    reads = []
+
+    async def read_empty(**kwargs):
+        reads.append(kwargs)
+        return [], None, False
+
+    async def ignore_demand(**_kwargs):
+        return None
+
+    monkeypatch.setattr(ctrip_provider, "read_provider_deals", read_empty)
+    monkeypatch.setattr(ctrip_provider, "enqueue_demand", ignore_demand)
+
+    await CtripSnapshotProvider().search(
+        build_flight_query("北京", "上海", "2099-08-01")
+    )
+    await CtripSnapshotProvider().search(
+        build_flight_query("北京", "上海虹桥机场", "2099-08-01")
+    )
+
+    assert reads[0]["destination_code"] == "SHA"
+    assert reads[0]["destination_airport_code"] is None
+    assert reads[1]["destination_code"] == "SHA"
+    assert reads[1]["destination_airport_code"] == "SHA"
 
 
 @pytest.mark.asyncio
@@ -223,10 +286,12 @@ async def test_stale_nonempty_snapshot_returns_reference_offers_and_renews_deman
     assert len(result.offers) == 1
     assert result.offers[0].price_status is PriceStatus.stale
     assert queued == [
-        {
-            "origin_code": "BJS",
-            "destination_code": "SHA",
-            "depart_date": "2099-08-01",
+            {
+                "origin_code": "BJS",
+                "origin_airport_code": None,
+                "destination_code": "SHA",
+                "destination_airport_code": None,
+                "depart_date": "2099-08-01",
             "priority": 50,
             "source": "recent_search",
         }

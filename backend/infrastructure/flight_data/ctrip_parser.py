@@ -134,14 +134,22 @@ def _parse_itinerary(
             and airline.strip()
         )
     )
-    origin_code = _actual_city_code(
+    origin_code, origin_airport_code = _actual_route_evidence(
         first_flight,
         direction="departure",
     )
-    destination_code = _actual_city_code(
+    destination_code, destination_airport_code = _actual_route_evidence(
         last_flight,
         direction="arrival",
     )
+    if (
+        query.origin_airport_scope is not None
+        and origin_airport_code != query.origin_airport_scope
+    ) or (
+        query.destination_airport_scope is not None
+        and destination_airport_code != query.destination_airport_scope
+    ):
+        return None
     depart_date = _actual_depart_date(
         first_flight.get("departureDateTime")
     )
@@ -153,11 +161,13 @@ def _parse_itinerary(
         airline="/".join(airlines),
         origin_city=_actual_city_name(origin_code, query.origin_city),
         origin_code=origin_code,
+        origin_airport_code=origin_airport_code,
         destination_city=_actual_city_name(
             destination_code,
             query.destination_city,
         ),
         destination_code=destination_code,
+        destination_airport_code=destination_airport_code,
         depart_date=depart_date,
         depart_time=_time_value(first_flight.get("departureDateTime")),
         arrive_time=_time_value(last_flight.get("arrivalDateTime")),
@@ -174,23 +184,24 @@ def _parse_itinerary(
     )
 
 
-def _actual_city_code(
+def _actual_route_evidence(
     flight: Mapping[str, Any],
     *,
     direction: str,
-) -> str:
-    normalized_codes: set[str] = set()
+) -> tuple[str, str | None]:
+    actual_city_codes: set[str] = set()
     for field in _CITY_CODE_FIELDS[direction]:
         code = _normalized_code(flight.get(field))
         if code is None:
             continue
         location = _CATALOG.resolve_location(code)
-        normalized_codes.add(
+        actual_city_codes.add(
             location.provider_code("ctrip")
             if location is not None
             else code
         )
 
+    actual_airport_codes: set[str] = set()
     for field in _AIRPORT_CODE_FIELDS[direction]:
         code = _normalized_code(flight.get(field))
         if code is None:
@@ -200,17 +211,22 @@ def _actual_city_code(
             raise _CtripScopeEvidenceError(
                 "flight airport code is unknown"
             )
-        normalized_codes.add(location.provider_code("ctrip"))
+        actual_airport_codes.add(location.airport_iata)
+        actual_city_codes.add(location.provider_code("ctrip"))
 
-    if not normalized_codes:
+    if not actual_city_codes:
         raise _CtripScopeEvidenceError(
             f"{direction} route evidence is missing"
         )
-    if len(normalized_codes) != 1:
+    if len(actual_city_codes) != 1 or len(actual_airport_codes) > 1:
         raise _CtripScopeEvidenceError(
             f"{direction} route evidence conflicts"
         )
-    return next(iter(normalized_codes))
+
+    actual_airport = (
+        next(iter(actual_airport_codes)) if actual_airport_codes else None
+    )
+    return next(iter(actual_city_codes)), actual_airport
 
 
 def _normalized_code(value: Any) -> str | None:

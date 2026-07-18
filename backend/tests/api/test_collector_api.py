@@ -57,8 +57,10 @@ def _wire_offer(**overrides) -> dict:
         "airline": "东方航空",
         "origin_city": "北京",
         "origin_code": "BJS",
+        "origin_airport_code": "PEK",
         "destination_city": "上海",
         "destination_code": "SHA",
+        "destination_airport_code": "SHA",
         "depart_date": "2099-08-01",
         "depart_time": "08:00",
         "arrive_time": "10:00",
@@ -251,7 +253,9 @@ async def test_claim_returns_one_repository_leased_job(
     claimed_job = CollectorJob(
         job_id="anonymous-job-1",
         origin_code="BJS",
+        origin_airport_code=None,
         destination_code="SHA",
+        destination_airport_code=None,
         depart_date="2099-08-01",
         source="recent_search",
         priority=50,
@@ -284,7 +288,9 @@ async def test_claim_returns_one_repository_leased_job(
         "job": {
             "job_id": "anonymous-job-1",
             "origin_code": "BJS",
+            "origin_airport_code": None,
             "destination_code": "SHA",
+            "destination_airport_code": None,
             "depart_date": "2099-08-01",
             "source": "recent_search",
             "priority": 50,
@@ -395,7 +401,9 @@ async def test_status_reports_sanitized_collector_and_scoped_job_state(
             last_heartbeat_at=checked_at,
             last_success_at=checked_at,
             job_status="completed",
+            job_attempts=2,
             job_updated_at=checked_at,
+            snapshot_observed_at=checked_at,
         )
 
     monkeypatch.setattr(
@@ -413,7 +421,9 @@ async def test_status_reports_sanitized_collector_and_scoped_job_state(
         "/internal/collector/status",
         params={
             "origin_code": "AAT",
+            "origin_airport_code": "AAT",
             "destination_code": "SYX",
+            "destination_airport_code": "SYX",
             "depart_date": "2099-08-01",
         },
         headers=collector_headers,
@@ -423,7 +433,9 @@ async def test_status_reports_sanitized_collector_and_scoped_job_state(
     assert calls == [
         {
             "origin_code": "AAT",
+            "origin_airport_code": "AAT",
             "destination_code": "SYX",
+            "destination_airport_code": "SYX",
             "depart_date": "2099-08-01",
             "heartbeat_timeout_seconds": 180,
         }
@@ -433,7 +445,9 @@ async def test_status_reports_sanitized_collector_and_scoped_job_state(
         "last_heartbeat_at": "2099-07-19T12:00:00Z",
         "last_success_at": "2099-07-19T12:00:00Z",
         "job_status": "completed",
+        "job_attempts": 2,
         "job_updated_at": "2099-07-19T12:00:00Z",
+        "snapshot_observed_at": "2099-07-19T12:00:00Z",
     }
     assert "node_id" not in response.text
 
@@ -444,7 +458,14 @@ async def test_complete_maps_snapshot_wire_identity_to_trusted_ctrip_offer(
 ):
     calls = []
 
-    async def complete_job(job_id: str, node_id: str, offers: list[object]):
+    async def complete_job(
+        job_id: str,
+        node_id: str,
+        offers: list[object],
+        *,
+        ttl_minutes: int,
+    ):
+        assert ttl_minutes == 75
         calls.append((job_id, node_id, offers))
         return True
 
@@ -479,6 +500,77 @@ async def test_complete_maps_snapshot_wire_identity_to_trusted_ctrip_offer(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "offers",
+    [[], [_wire_offer(booking_url=None)]],
+)
+async def test_complete_rejects_empty_or_unbookable_success(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+    offers,
+):
+    calls = []
+
+    async def complete_job(*args, **kwargs):
+        calls.append((args, kwargs))
+        return True
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(complete_job=complete_job),
+    )
+
+    response = await collector_client.post(
+        "/internal/collector/jobs/anonymous-job-1/complete",
+        json={"node_id": "mac-1", "offers": offers},
+        headers=collector_headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "invalid collector request"}
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_complete_passes_configured_snapshot_ttl(
+    monkeypatch,
+    collector_client,
+    collector_headers,
+):
+    calls = []
+    original_ttl = settings.ctrip_snapshot_ttl_minutes
+    object.__setattr__(settings, "ctrip_snapshot_ttl_minutes", 37)
+
+    async def complete_job(job_id, node_id, offers, *, ttl_minutes):
+        calls.append((job_id, node_id, offers, ttl_minutes))
+        return True
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(complete_job=complete_job),
+    )
+    try:
+        response = await collector_client.post(
+            "/internal/collector/jobs/anonymous-job-1/complete",
+            json={"node_id": "mac-1", "offers": [_wire_offer()]},
+            headers=collector_headers,
+        )
+    finally:
+        object.__setattr__(
+            settings,
+            "ctrip_snapshot_ttl_minutes",
+            original_ttl,
+        )
+
+    assert response.status_code == 204
+    assert len(calls) == 1
+    assert calls[0][3] == 37
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("booking_url", "expected_url"),
     [
         (
@@ -502,7 +594,14 @@ async def test_complete_normalizes_functional_ctrip_booking_query(
 ):
     calls = []
 
-    async def complete_job(_job_id: str, _node_id: str, offers: list[object]):
+    async def complete_job(
+        _job_id: str,
+        _node_id: str,
+        offers: list[object],
+        *,
+        ttl_minutes: int,
+    ):
+        assert ttl_minutes == 75
         calls.append(offers)
         return True
 
@@ -531,7 +630,14 @@ async def test_complete_uses_collector_ingest_trace_wrapper(
 ):
     trace_calls = []
 
-    async def complete_job(_job_id: str, _node_id: str, _offers: list[object]):
+    async def complete_job(
+        _job_id: str,
+        _node_id: str,
+        _offers: list[object],
+        *,
+        ttl_minutes: int,
+    ):
+        assert ttl_minutes == 75
         return True
 
     async def trace_collector_ingest(job_id, result_count, operation):

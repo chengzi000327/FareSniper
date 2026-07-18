@@ -12,6 +12,7 @@ import sys
 from threading import Thread
 import time
 from typing import Any, Iterator
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pytest
@@ -44,7 +45,7 @@ def _run(
 def _fake_backend(
     *,
     freshness: str = "fresh",
-    statuses: tuple[str, ...] = ("completed",),
+    statuses: tuple[str, ...] = ("completed", "leased", "completed"),
     query_overrides: dict[str, Any] | None = None,
     deal_overrides: dict[str, Any] | None = None,
     winner_overrides: dict[str, Any] | None = None,
@@ -58,6 +59,7 @@ def _fake_backend(
     state: dict[str, Any] = {
         "search_count": 0,
         "status_count": 0,
+        "status_queries": [],
         "requests": [],
     }
 
@@ -73,10 +75,19 @@ def _fake_backend(
         def do_GET(self) -> None:  # noqa: N802
             assert self.headers["Authorization"] == f"Bearer {SECRET_COLLECTOR}"
             assert self.path.startswith("/internal/collector/status?")
+            status_query = parse_qs(urlsplit(self.path).query)
+            state["status_queries"].append(status_query)
             state["requests"].append("status")
             status_index = min(state["status_count"], len(statuses) - 1)
             job_status = statuses[status_index]
             state["status_count"] += 1
+            is_new_attempt = status_index > 0 and job_status in {
+                "leased",
+                "completed",
+            }
+            observed_minute = status_index if (
+                is_new_attempt and job_status == "completed"
+            ) else 0
             self._json(
                 200,
                 {
@@ -84,7 +95,13 @@ def _fake_backend(
                     "last_heartbeat_at": "2099-07-19T12:00:00Z",
                     "last_success_at": "2099-07-19T12:00:00Z",
                     "job_status": job_status,
-                    "job_updated_at": "2099-07-19T12:00:00Z",
+                    "job_attempts": 2 if is_new_attempt else 1,
+                    "job_updated_at": (
+                        f"2099-07-19T12:{status_index:02d}:00Z"
+                    ),
+                    "snapshot_observed_at": (
+                        f"2099-07-19T12:{observed_minute:02d}:00Z"
+                    ),
                 },
             )
 
@@ -133,7 +150,9 @@ def _fake_backend(
             pristine_deal = {
                 "flight_no": "CZ5704",
                 "origin_code": "AAT",
+                "origin_airport_code": "AAT",
                 "destination_code": "SYX",
+                "destination_airport_code": "SYX",
                 "depart_date": "2099-08-01",
                 "winning_price_id": "flyai-winning-row",
                 "price": 1688,
@@ -249,12 +268,28 @@ def test_live_verifier_searches_only_to_trigger_and_verify_after_polling():
         "status",
         "search",
     ]
+    assert all(
+        query.get("origin_airport_code") == ["AAT"]
+        and query.get("destination_airport_code") == ["SYX"]
+        for query in state["status_queries"]
+    )
     assert "collector=online" in result.stdout
     assert "job=completed" in result.stdout
     assert "ctrip_price=CNY 1999" in result.stdout
     assert SECRET_JWT not in result.stdout + result.stderr
     assert SECRET_COLLECTOR not in result.stdout + result.stderr
     assert "https://flights.ctrip.com" not in result.stdout
+
+
+def test_live_verifier_rejects_unchanged_completed_job_and_snapshot():
+    with _fake_backend(statuses=("completed",)) as (base_url, state):
+        result = _run(
+            *_live_args(base_url, timeout="1"), env=_secret_env()
+        )
+
+    assert result.returncode == 1
+    assert "verification timed out" in result.stderr
+    assert state["search_count"] == 1
 
 
 def test_live_verifier_accepts_real_renderer_single_cny_amount_format():
@@ -418,7 +453,13 @@ async def test_verify_enforces_one_wall_clock_deadline_and_remaining_request_bud
         if request.method == "GET":
             return httpx.Response(
                 200,
-                json={"collector_online": True, "job_status": "pending"},
+                json={
+                    "collector_online": True,
+                    "job_status": "pending",
+                    "job_attempts": 0,
+                    "job_updated_at": None,
+                    "snapshot_observed_at": None,
+                },
             )
         return httpx.Response(200, json={})
 
