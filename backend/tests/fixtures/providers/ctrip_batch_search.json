@@ -1,0 +1,28 @@
+{
+  "code": 0,
+  "data": {
+    "flightItineraryList": [
+      {
+        "flightSegments": [
+          {
+            "flightList": [
+              {
+                "flightNo": "CA1835",
+                "marketAirlineName": "中国国航",
+                "departureDateTime": "2026-08-08 08:00:00",
+                "arrivalDateTime": "2026-08-08 10:20:00",
+                "duration": 140
+              }
+            ]
+          }
+        ],
+        "priceList": [
+          {
+            "cabin": "Y",
+            "adultPrice": 680
+          }
+        ]
+      }
+    ]
+  }
+}
