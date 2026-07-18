@@ -47,3 +47,21 @@ def test_parser_keeps_only_real_ctrip_fields(ctrip_payload, query):
 def test_parser_rejects_missing_batch_search_inventory(query):
     with pytest.raises(CtripBatchSearchParseError):
         parse_batch_search({"code": 0, "data": {}}, query)
+
+
+def test_parser_preserves_payload_scope_instead_of_rewriting_from_query(
+    ctrip_payload,
+    query,
+):
+    flight = ctrip_payload["data"]["flightItineraryList"][0][
+        "flightSegments"
+    ][0]["flightList"][0]
+    flight["departureCityCode"] = "CAN"
+    flight["arrivalCityCode"] = "SZX"
+    flight["departureDateTime"] = "2026-08-09 08:00:00"
+
+    offer = parse_batch_search(ctrip_payload, query)[0]
+
+    assert offer.origin_code == "CAN"
+    assert offer.destination_code == "SZX"
+    assert offer.depart_date == "2026-08-09"

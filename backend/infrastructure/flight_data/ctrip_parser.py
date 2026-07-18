@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import date
 from typing import Any
 
 from backend.application.contracts.flight_provider import (
@@ -8,6 +9,36 @@ from backend.application.contracts.flight_provider import (
     FlightQuery,
     PriceStatus,
 )
+from backend.application.services.airport_catalog import AirportCatalog
+
+
+_CATALOG = AirportCatalog.load_default()
+_CITY_CODE_FIELDS = {
+    "departure": (
+        "departureCityCode",
+        "departureCityTlc",
+        "departCityCode",
+        "dcity",
+    ),
+    "arrival": (
+        "arrivalCityCode",
+        "arrivalCityTlc",
+        "arriveCityCode",
+        "acity",
+    ),
+}
+_AIRPORT_CODE_FIELDS = {
+    "departure": (
+        "departureAirportCode",
+        "departureAirportTlc",
+        "departureAirportIataCode",
+    ),
+    "arrival": (
+        "arrivalAirportCode",
+        "arrivalAirportTlc",
+        "arrivalAirportIataCode",
+    ),
+}
 
 
 class CtripBatchSearchParseError(ValueError):
@@ -92,17 +123,33 @@ def _parse_itinerary(
             and airline.strip()
         )
     )
+    origin_code = _actual_city_code(
+        first_flight,
+        direction="departure",
+        fallback=query.origin_code,
+    )
+    destination_code = _actual_city_code(
+        last_flight,
+        direction="arrival",
+        fallback=query.destination_code,
+    )
+    depart_date = _actual_depart_date(
+        first_flight.get("departureDateTime")
+    )
 
     return _CtripFlightOffer(
         data_provider="ctrip",
         seller_name="携程",
         flight_no="/".join(flight_numbers),
         airline="/".join(airlines),
-        origin_city=query.origin_city,
-        origin_code=query.origin_code,
-        destination_city=query.destination_city,
-        destination_code=query.destination_code,
-        depart_date=query.depart_date,
+        origin_city=_actual_city_name(origin_code, query.origin_city),
+        origin_code=origin_code,
+        destination_city=_actual_city_name(
+            destination_code,
+            query.destination_city,
+        ),
+        destination_code=destination_code,
+        depart_date=depart_date,
         depart_time=_time_value(first_flight.get("departureDateTime")),
         arrive_time=_time_value(last_flight.get("arrivalDateTime")),
         duration_minutes=_duration_minutes(flights),
@@ -116,6 +163,58 @@ def _parse_itinerary(
         has_baggage=None,
         price_status=PriceStatus.priced,
     )
+
+
+def _actual_city_code(
+    flight: Mapping[str, Any],
+    *,
+    direction: str,
+    fallback: str,
+) -> str:
+    for field in _CITY_CODE_FIELDS[direction]:
+        code = _normalized_code(flight.get(field))
+        if code is not None:
+            return code
+
+    for field in _AIRPORT_CODE_FIELDS[direction]:
+        code = _normalized_code(flight.get(field))
+        if code is None:
+            continue
+        location = _CATALOG.resolve_location(code)
+        return (
+            location.provider_code("ctrip")
+            if location is not None
+            else code
+        )
+    return fallback.upper()
+
+
+def _normalized_code(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.strip().upper()
+    if not code:
+        return None
+    if len(code) != 3 or not code.isascii() or not code.isalpha():
+        raise CtripBatchSearchParseError("flight route code is invalid")
+    return code
+
+
+def _actual_city_name(code: str, fallback: str) -> str:
+    location = _CATALOG.resolve_location(code)
+    return location.city_name if location is not None else fallback
+
+
+def _actual_depart_date(value: Any) -> str:
+    if not isinstance(value, str) or len(value) < 10:
+        raise CtripBatchSearchParseError("departure date is missing")
+    candidate = value[:10]
+    try:
+        return date.fromisoformat(candidate).isoformat()
+    except ValueError as exc:
+        raise CtripBatchSearchParseError(
+            "departure date is invalid"
+        ) from exc
 
 
 def _lowest_economy_adult_price(price_list: Any) -> int | None:

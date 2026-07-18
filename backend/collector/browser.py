@@ -7,7 +7,7 @@ import re
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,6 +18,7 @@ from backend.application.contracts.collector import CollectorErrorCode
 DEFAULT_PROFILE_DIR = Path.home() / ".faresniper" / "ctrip-profile"
 CTRIP_HOME_URL = "https://www.ctrip.com/"
 _ROUTE_CODE_PATTERN = re.compile(r"[A-Za-z]{3}\Z")
+_AUTH_COOKIE_NAMES = frozenset({"cticket", "login_uid"})
 
 BATCH_SEARCH_INTERCEPT_SCRIPT = """
 (function() {
@@ -238,7 +239,21 @@ class CtripBrowser:
             driver = self._driver_for(headless=False)
             getattr(driver, "get")(CTRIP_HOME_URL)
             wait_for_user()
-            return detect_page_error(driver)
+            probe_date = (
+                datetime.now(ZoneInfo("Asia/Shanghai")).date()
+                + timedelta(days=30)
+            )
+            probe_url = (
+                "https://flights.ctrip.com/online/list/oneway-bjs-sha"
+                f"?depdate={probe_date.isoformat()}"
+            )
+            getattr(driver, "get")(probe_url)
+            page_error = detect_page_error(driver)
+            if page_error is not None:
+                return page_error
+            if not self._has_authenticated_session(driver):
+                return CollectorErrorCode.login_required
+            return None
         except Exception as exc:
             if exc.__class__.__module__.startswith("selenium"):
                 return CollectorErrorCode.dependency_error
@@ -252,30 +267,63 @@ class CtripBrowser:
             while time.monotonic() < deadline:
                 page_error = detect_page_error(driver)
                 if page_error is not None:
-                    return CaptureResult(error_code=page_error)
+                    return self._capture_failure(page_error)
                 ready = getattr(driver, "execute_script")(
                     "return !!(window.__faresniperBatchSearchResponses && "
                     "window.__faresniperBatchSearchResponses.length);"
                 )
                 if ready:
                     payloads = self._extract_payloads(driver)
-                    return CaptureResult(
-                        payloads=payloads,
-                        error_code=(
-                            None if payloads else CollectorErrorCode.parse_error
-                        ),
-                    )
+                    if not payloads:
+                        return self._capture_failure(
+                            CollectorErrorCode.parse_error
+                        )
+                    return CaptureResult(payloads=payloads)
                 time.sleep(0.25)
-            return CaptureResult(
-                error_code=detect_page_error(driver)
-                or CollectorErrorCode.timeout
+            return self._capture_failure(
+                detect_page_error(driver) or CollectorErrorCode.timeout
             )
         except (ImportError, ModuleNotFoundError):
-            return CaptureResult(error_code=CollectorErrorCode.dependency_error)
+            return self._capture_failure(
+                CollectorErrorCode.dependency_error
+            )
         except (TypeError, ValueError, json.JSONDecodeError):
-            return CaptureResult(error_code=CollectorErrorCode.parse_error)
+            return self._capture_failure(CollectorErrorCode.parse_error)
         except Exception:
-            return CaptureResult(error_code=CollectorErrorCode.dependency_error)
+            return self._capture_failure(
+                CollectorErrorCode.dependency_error
+            )
+
+    @staticmethod
+    def _has_authenticated_session(driver: object) -> bool:
+        get_cookies = getattr(driver, "get_cookies", None)
+        if not callable(get_cookies):
+            return False
+        try:
+            cookies = get_cookies()
+        except Exception:
+            return False
+        if not isinstance(cookies, list):
+            return False
+        now = time.time()
+        for cookie in cookies:
+            if not isinstance(cookie, Mapping):
+                continue
+            name = str(cookie.get("name", "")).casefold()
+            if name not in _AUTH_COOKIE_NAMES or not cookie.get("value"):
+                continue
+            expiry = cookie.get("expiry")
+            if isinstance(expiry, (int, float)) and expiry <= now:
+                continue
+            return True
+        return False
+
+    def _capture_failure(
+        self,
+        error_code: CollectorErrorCode,
+    ) -> CaptureResult:
+        self._close_sync()
+        return CaptureResult(error_code=error_code)
 
     @staticmethod
     def _extract_payloads(driver: object) -> list[dict[str, Any]]:

@@ -157,6 +157,10 @@ class CollectorRunner:
             offers: list[FlightOffer] = []
             for payload in capture.payloads:
                 offers.extend(parse_batch_search(payload, query))
+            if not self._offers_match_job(offers, job):
+                raise CtripBatchSearchParseError(
+                    "batchSearch result does not match claimed job"
+                )
         except (CtripBatchSearchParseError, FlightQueryValidationError):
             return await self._fail_once(
                 job_id,
@@ -179,6 +183,23 @@ class CollectorRunner:
         await self.api.complete(job_id, normalized)
         return RunResult(status="success", result_count=len(normalized))
 
+    @staticmethod
+    def _offers_match_job(
+        offers: list[FlightOffer],
+        job: object,
+    ) -> bool:
+        expected_origin = str(getattr(job, "origin_code", "")).upper()
+        expected_destination = str(
+            getattr(job, "destination_code", "")
+        ).upper()
+        expected_date = str(getattr(job, "depart_date", ""))
+        return all(
+            offer.origin_code.upper() == expected_origin
+            and offer.destination_code.upper() == expected_destination
+            and offer.depart_date == expected_date
+            for offer in offers
+        )
+
     async def _fail_once(
         self,
         job_id: str,
@@ -187,4 +208,3 @@ class CollectorRunner:
         retry_at = self._now() + timedelta(minutes=5)
         await self.api.fail(job_id, error_code, retry_at)
         return RunResult(status=error_code.value)
-

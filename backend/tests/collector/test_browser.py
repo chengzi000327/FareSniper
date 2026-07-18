@@ -116,11 +116,22 @@ async def test_login_is_visible_and_uses_dedicated_profile(tmp_path):
     calls: dict[str, object] = {}
 
     class Driver:
+        current_url = "https://www.ctrip.com/"
+        title = "携程旅行"
+        page_source = ""
+
         def execute_cdp_cmd(self, *_args):
             pass
 
         def get(self, url):
-            calls["url"] = url
+            calls.setdefault("urls", []).append(url)
+            self.current_url = url
+
+        def get_cookies(self):
+            return [{"name": "cticket", "value": "opaque-session"}]
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text="航班列表")
 
         def quit(self):
             calls["quit"] = True
@@ -133,11 +144,161 @@ async def test_login_is_visible_and_uses_dedicated_profile(tmp_path):
     await browser.login(wait_for_user=lambda: calls.setdefault("waited", True))
     await browser.close()
 
-    assert calls["url"] == "https://www.ctrip.com/"
+    assert calls["urls"][0] == "https://www.ctrip.com/"
+    assert "flights.ctrip.com/online/list/oneway-bjs-sha" in calls["urls"][1]
     assert calls["waited"] is True
     assert all("--headless" not in arg for arg in calls["arguments"])
     assert f"--user-data-dir={tmp_path.resolve()}" in calls["arguments"]
     assert calls["quit"] is True
+
+
+@pytest.mark.asyncio
+async def test_generic_logged_out_homepage_is_not_authenticated(tmp_path):
+    class Driver:
+        current_url = "https://www.ctrip.com/"
+        title = "携程旅行"
+        page_source = ""
+
+        def execute_cdp_cmd(self, *_args):
+            pass
+
+        def get(self, url):
+            self.current_url = url
+
+        def get_cookies(self):
+            return [{"name": "anonymous-id", "value": "not-auth"}]
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text="航班列表")
+
+        def quit(self):
+            pass
+
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        driver_factory=lambda **_kwargs: Driver(),
+    )
+    try:
+        status = await browser.login(wait_for_user=lambda: None)
+    finally:
+        await browser.close()
+
+    assert status is CollectorErrorCode.login_required
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_url", "failure_title", "expected"),
+    [
+        (
+            "https://passport.ctrip.com/user/login",
+            "携程登录",
+            CollectorErrorCode.login_required,
+        ),
+        (
+            "https://flights.ctrip.com/online/list",
+            "安全验证",
+            CollectorErrorCode.captcha_required,
+        ),
+    ],
+)
+async def test_capture_page_failure_releases_profile_and_recreates_driver(
+    tmp_path,
+    failure_url,
+    failure_title,
+    expected,
+):
+    drivers = []
+
+    class Driver:
+        page_source = ""
+
+        def __init__(self, number):
+            self.number = number
+            self.current_url = ""
+            self.title = ""
+            self.quit_calls = 0
+
+        def execute_cdp_cmd(self, *_args):
+            pass
+
+        def get(self, url):
+            if self.number == 1:
+                self.current_url = failure_url
+                self.title = failure_title
+            else:
+                self.current_url = url
+                self.title = "机票"
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text=self.title)
+
+        def execute_script(self, script):
+            if script.startswith("return !!"):
+                return True
+            return json.dumps(
+                [json.dumps({"data": {"flightItineraryList": []}})]
+            )
+
+        def quit(self):
+            self.quit_calls += 1
+
+    def factory(**_kwargs):
+        driver = Driver(len(drivers) + 1)
+        drivers.append(driver)
+        return driver
+
+    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    first = await browser.capture(_job())
+    second = await browser.capture(_job())
+    await browser.close()
+
+    assert first.error_code is expected
+    assert len(drivers) == 2
+    assert drivers[0].quit_calls == 1
+    assert second.error_code is None
+
+
+@pytest.mark.asyncio
+async def test_capture_dependency_failure_releases_cached_driver(tmp_path):
+    drivers = []
+
+    class Driver:
+        def __init__(self, should_fail):
+            self.should_fail = should_fail
+            self.current_url = ""
+            self.title = ""
+            self.page_source = ""
+            self.quit_calls = 0
+
+        def execute_cdp_cmd(self, *_args):
+            pass
+
+        def get(self, url):
+            if self.should_fail:
+                raise RuntimeError("browser session failed")
+            self.current_url = "https://passport.ctrip.com/user/login"
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text="请先登录")
+
+        def quit(self):
+            self.quit_calls += 1
+
+    def factory(**_kwargs):
+        driver = Driver(should_fail=not drivers)
+        drivers.append(driver)
+        return driver
+
+    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    first = await browser.capture(_job())
+    second = await browser.capture(_job())
+    await browser.close()
+
+    assert first.error_code is CollectorErrorCode.dependency_error
+    assert len(drivers) == 2
+    assert drivers[0].quit_calls == 1
+    assert second.error_code is CollectorErrorCode.login_required
 
 
 def test_captured_payloads_are_decoded_without_logging_raw_content():

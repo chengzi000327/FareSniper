@@ -4,6 +4,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+from backend.application.contracts.collector import CollectorErrorCode
+from backend.collector import cli
+
 
 def test_cli_import_does_not_initialize_backend_settings_early():
     result = subprocess.run(
@@ -52,3 +57,30 @@ def test_collector_requirements_are_isolated_from_railway_runtime():
     assert "selenium" not in runtime.casefold()
     assert "-r requirements.txt" in collector
     assert "selenium>=4.22,<5.0" in collector
+
+
+@pytest.mark.asyncio
+async def test_failed_login_removes_existing_confirmation_marker(
+    tmp_path,
+    monkeypatch,
+):
+    marker = tmp_path / cli.LOGIN_MARKER
+    marker.touch()
+
+    class LoggedOutBrowser:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def login(self):
+            return CollectorErrorCode.login_required
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(cli, "_profile_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "CtripBrowser", LoggedOutBrowser)
+
+    result = await cli._login()
+
+    assert result == 1
+    assert not marker.exists()

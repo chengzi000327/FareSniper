@@ -101,7 +101,10 @@ def _new_client() -> CollectorApiClient:
 
 
 async def _login() -> int:
-    browser = CtripBrowser(profile_dir=_profile_dir())
+    profile = _profile_dir()
+    marker = profile / LOGIN_MARKER
+    marker.unlink(missing_ok=True)
+    browser = CtripBrowser(profile_dir=profile)
     try:
         error = await browser.login()
     finally:
@@ -109,7 +112,6 @@ async def _login() -> int:
     if error is not None:
         print(f"登录未完成：{error.value}")
         return 1
-    marker = _profile_dir() / LOGIN_MARKER
     marker.touch(mode=0o600, exist_ok=True)
     print("携程专用 profile 已确认。")
     return 0

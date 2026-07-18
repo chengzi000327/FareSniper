@@ -28,7 +28,19 @@ def ctrip_payload():
         Path(__file__).parents[1]
         / "fixtures/providers/ctrip_batch_search.json"
     )
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    flight = payload["data"]["flightItineraryList"][0][
+        "flightSegments"
+    ][0]["flightList"][0]
+    flight.update(
+        {
+            "departureCityCode": "BJS",
+            "arrivalCityCode": "SHA",
+            "departureDateTime": "2099-08-08 08:00:00",
+            "arrivalDateTime": "2099-08-08 10:20:00",
+        }
+    )
+    return payload
 
 
 class FakeApi:
@@ -162,6 +174,39 @@ async def test_parser_error_fails_once(job):
     assert result.status == "parse_error"
     assert len(api.fail_calls) == 1
     assert api.complete_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("departureCityCode", "CAN"),
+        ("arrivalCityCode", "CAN"),
+        ("departureDateTime", "2099-08-07 08:00:00"),
+    ],
+)
+async def test_mismatched_payload_scope_fails_without_upload(
+    job,
+    ctrip_payload,
+    field,
+    value,
+):
+    flight = ctrip_payload["data"]["flightItineraryList"][0][
+        "flightSegments"
+    ][0]["flightList"][0]
+    flight[field] = value
+    api = FakeApi(job)
+    runner = CollectorRunner(
+        api,
+        FakeBrowser(CaptureResult(payloads=[ctrip_payload])),
+    )
+
+    result = await runner.run_once()
+
+    assert result.status == "parse_error"
+    assert api.complete_calls == []
+    assert len(api.fail_calls) == 1
+    assert api.fail_calls[0][1] is CollectorErrorCode.parse_error
 
 
 @pytest.mark.asyncio
