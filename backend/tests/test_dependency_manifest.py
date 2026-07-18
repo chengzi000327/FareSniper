@@ -16,6 +16,23 @@ def test_backend_requirements_include_plan_dependencies():
         assert name in req, f"missing dependency in backend/requirements.txt: {name}"
 
 
+def _requirements(path: str) -> list[str]:
+    return [
+        line.strip()
+        for line in Path(path).read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def test_selenium_is_isolated_to_the_mac_collector_manifest():
+    runtime = _requirements("backend/requirements.txt")
+    collector = _requirements("backend/requirements-collector.txt")
+
+    assert not any(line.casefold().startswith("selenium") for line in runtime)
+    assert collector.count("selenium>=4.22,<5.0") == 1
+    assert collector[0] == "-r requirements.txt"
+
+
 def test_backend_requires_validated_langsmith_conditional_tracing_runtime():
     requirements = [
         line.strip()
@@ -58,10 +75,12 @@ def test_nixpacks_pins_flyai_cli_and_node():
     assert '"..."' in text
     assert "gcc" in text
     assert "backend/requirements.txt" in text
-    assert "backend/third_party/flights_monitor/requirements.txt" in text
+    assert "backend/third_party/flights_monitor/requirements.txt" not in text
     assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
     assert "npx" not in text
     assert "flyai config set" not in text
+    assert "chromium" not in text.casefold()
+    assert "chromedriver" not in text.casefold()
 
     import tomllib
 
@@ -94,11 +113,13 @@ def test_backend_dockerfile_has_complete_shared_runtime():
 
     assert "FROM node:22" in text
     assert "FROM python:3.13" in text
-    assert "chromium" in text
-    assert "chromium-driver" in text
+    assert "chromium" not in text.casefold()
+    assert "chromedriver" not in text.casefold()
+    assert "CHROME_BIN" not in text
+    assert "CHROMEDRIVER_PATH" not in text
     assert "WORKDIR /app" in text
     assert "backend/requirements.txt" in text
-    assert "backend/third_party/flights_monitor/requirements.txt" in text
+    assert "backend/third_party/flights_monitor/requirements.txt" not in text
     assert "npm install -g @fly-ai/flyai-cli@1.0.16" in text
     assert "npx" not in text
     assert "flyai config set" not in text
@@ -168,6 +189,7 @@ def test_env_example_has_safe_flight_provider_defaults():
     assert values["FLYAI_API_KEY"] == ""
     assert values["FLYAI_CLI_PATH"] == "flyai"
     assert values["SERPAPI_API_KEY"] == ""
+    assert values["CTRIP_COLLECTOR_TOKEN"] == ""
     assert values["VARIFLIGHT_API_KEY"] == ""
     assert values["FLIGHT_PROVIDER_TIMEOUT_SECONDS"] == "10"
     assert values["CTRIP_SNAPSHOT_TTL_MINUTES"] == "75"

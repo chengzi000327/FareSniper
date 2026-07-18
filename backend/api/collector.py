@@ -26,6 +26,7 @@ from backend.schemas.collector import (
     ClaimRequest,
     ClaimResponse,
     CollectorJobResponse,
+    CollectorStatusResponse,
     CompleteRequest,
     FailRequest,
     HeartbeatRequest,
@@ -122,6 +123,47 @@ async def heartbeat(request: HeartbeatRequest) -> Response:
         request.status,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/status",
+    response_model=CollectorStatusResponse,
+    dependencies=[Depends(require_collector_token)],
+)
+async def collector_status(
+    origin_code: str,
+    destination_code: str,
+    depart_date: str,
+) -> CollectorStatusResponse:
+    if (
+        not re.fullmatch(r"[A-Z0-9]{3,8}", origin_code)
+        or not re.fullmatch(r"[A-Z0-9]{3,8}", destination_code)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="invalid collector request",
+        )
+    try:
+        snapshot = await flight_demand_repo.read_collector_verification_status(
+            origin_code=origin_code,
+            destination_code=destination_code,
+            depart_date=depart_date,
+            heartbeat_timeout_seconds=(
+                settings.ctrip_collector_heartbeat_timeout_seconds
+            ),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="invalid collector request",
+        ) from None
+    return CollectorStatusResponse(
+        collector_online=snapshot.collector_online,
+        last_heartbeat_at=snapshot.last_heartbeat_at,
+        last_success_at=snapshot.last_success_at,
+        job_status=snapshot.job_status,
+        job_updated_at=snapshot.job_updated_at,
+    )
 
 
 @router.post(

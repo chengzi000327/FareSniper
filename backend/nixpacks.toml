@@ -1,12 +1,12 @@
 [phases.setup]
-nixPkgs = ["...", "chromium", "chromedriver", "nodejs_22", "python313", "gcc"]
+nixPkgs = ["...", "nodejs_22", "python313", "gcc"]
 
 [phases.install]
 dependsOn = ["setup"]
 paths = ["/opt/venv/bin"]
 cmds = [
   "python -m venv --copies /opt/venv",
-  "/opt/venv/bin/pip install -r backend/requirements.txt -r backend/third_party/flights_monitor/requirements.txt",
+  "/opt/venv/bin/pip install -r backend/requirements.txt",
   "npm install -g @fly-ai/flyai-cli@1.0.16"
 ]
 

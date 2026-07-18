@@ -78,6 +78,14 @@ def test_railway_configs_only_use_supported_keys():
         assert set(config["deploy"]) <= allowed_deploy
 
 
+def test_railway_start_commands_never_launch_or_import_browser_collector():
+    forbidden = ("collector", "selenium", "chrome", "chromium", "browser")
+
+    for name in CONFIG_PATHS:
+        command = str(_config(name)["deploy"].get("startCommand", "")).casefold()
+        assert not any(term in command for term in forbidden), (name, command)
+
+
 def test_deployment_docs_define_dashboard_contract_and_safety_limits():
     railway_docs = Path("docs/deployment/RAILWAY.md").read_text()
     readme = Path("README.md").read_text()
@@ -108,3 +116,56 @@ def test_deployment_docs_define_dashboard_contract_and_safety_limits():
     assert "root `railway.toml`" not in combined
     assert "根目录的 [`railway.toml`]" not in combined
     assert "nixpacks build . --config backend/nixpacks.toml" in railway_docs
+    assert "alembic -c backend/alembic.ini current --check-heads" in railway_docs
+
+
+def test_deployment_docs_keep_collector_secrets_out_of_worker_variables():
+    railway_docs = Path("docs/deployment/RAILWAY.md").read_text()
+    backend_block = railway_docs.split("## Backend Variables", 1)[1].split(
+        "## Worker Variables", 1
+    )[0]
+    worker_block = railway_docs.split("## Worker Variables", 1)[1].split(
+        "## Frontend Variables", 1
+    )[0]
+    worker_env = worker_block.split("```dotenv", 1)[1].split("```", 1)[0]
+
+    assert "CTRIP_COLLECTOR_TOKEN=" in backend_block
+    assert "FLYAI_API_KEY=" in backend_block
+    assert "SERPAPI_API_KEY=" in backend_block
+    assert "CTRIP_COLLECTOR_TOKEN" not in worker_env
+    assert "FLYAI_API_KEY" not in worker_env
+    assert "SERPAPI_API_KEY" not in worker_env
+    assert "CHROME" not in worker_env.upper()
+    assert "COOKIE" not in worker_env.upper()
+
+
+def test_mac_collector_runbook_covers_install_operations_and_recovery():
+    runbook = Path("docs/deployment/MAC_CTRIP_COLLECTOR.md").read_text()
+
+    for required in (
+        "scripts/install_macos_collector.sh",
+        "doctor",
+        "login",
+        "--no-proxy-server",
+        "Clash Verge",
+        "launchctl print",
+        "collector.log",
+        "CTRIP_COLLECTOR_TOKEN",
+        "CAPTCHA",
+        "睡眠",
+        "scripts/uninstall_macos_collector.sh",
+        "~/.faresniper/ctrip-profile",
+        "保留在本机",
+    ):
+        assert required in runbook
+
+
+def test_readme_describes_all_china_airports_and_mac_collection_boundary():
+    readme = Path("README.md").read_text()
+
+    assert "270" in readme
+    assert "18" in readme
+    assert "288" in readme
+    assert "Mac" in readme
+    assert "Railway 不运行 Chrome" in readme
+    assert "docs/deployment/MAC_CTRIP_COLLECTOR.md" in readme

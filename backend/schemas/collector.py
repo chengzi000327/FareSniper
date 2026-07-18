@@ -181,6 +181,14 @@ class HeartbeatRequest(CollectorRequest):
     status: str = Field(min_length=1, max_length=32)
 
 
+class CollectorStatusResponse(BaseModel):
+    collector_online: bool
+    last_heartbeat_at: datetime | None = None
+    last_success_at: datetime | None = None
+    job_status: Literal["missing", "pending", "leased", "retry", "completed"]
+    job_updated_at: datetime | None = None
+
+
 class CollectorOffer(CollectorRequest):
     data_provider: Literal["ctrip_snapshot"]
     seller_name: Literal["携程"]

@@ -113,6 +113,15 @@ class CollectorJob:
         )
 
 
+@dataclass(frozen=True)
+class CollectorVerificationStatus:
+    collector_online: bool
+    last_heartbeat_at: datetime | None
+    last_success_at: datetime | None
+    job_status: str
+    job_updated_at: datetime | None
+
+
 class LeaseOwnershipError(RuntimeError):
     pass
 
@@ -369,6 +378,70 @@ async def record_heartbeat(
             )
         )
         await session.commit()
+
+
+async def read_collector_verification_status(
+    *,
+    origin_code: str,
+    destination_code: str,
+    depart_date: str,
+    heartbeat_timeout_seconds: int,
+) -> CollectorVerificationStatus:
+    validate_canonical_depart_date(depart_date)
+    if heartbeat_timeout_seconds <= 0:
+        raise ValueError("heartbeat timeout must be positive")
+
+    now = datetime.now(timezone.utc)
+    async with get_session() as session:
+        node = (
+            await session.execute(
+                select(CollectorNodeRow).order_by(
+                    CollectorNodeRow.last_heartbeat.desc()
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        job = (
+            await session.execute(
+                select(FlightSearchDemandRow)
+                .where(
+                    FlightSearchDemandRow.origin_code == origin_code,
+                    FlightSearchDemandRow.destination_code == destination_code,
+                    FlightSearchDemandRow.depart_date == depart_date,
+                )
+                .order_by(
+                    FlightSearchDemandRow.demand_hour.desc(),
+                    FlightSearchDemandRow.updated_at.desc(),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    heartbeat = _as_utc(node.last_heartbeat) if node is not None else None
+    last_success = _as_utc(node.last_success) if node is not None else None
+    job_updated_at = _as_utc(job.updated_at) if job is not None else None
+    online = bool(
+        heartbeat is not None
+        and heartbeat
+        >= now - timedelta(seconds=heartbeat_timeout_seconds)
+    )
+    status = str(job.status) if job is not None else "missing"
+    if status not in {"pending", "leased", "retry", "completed"}:
+        status = "missing"
+    return CollectorVerificationStatus(
+        collector_online=online,
+        last_heartbeat_at=heartbeat,
+        last_success_at=last_success,
+        job_status=status,
+        job_updated_at=job_updated_at,
+    )
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _verify_live_lease(

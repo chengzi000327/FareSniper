@@ -382,6 +382,63 @@ async def test_heartbeat_records_node_through_repository(
 
 
 @pytest.mark.asyncio
+async def test_status_reports_sanitized_collector_and_scoped_job_state(
+    monkeypatch, collector_client, collector_headers
+):
+    checked_at = datetime(2099, 7, 19, 12, 0, tzinfo=timezone.utc)
+    calls = []
+
+    async def read_collector_verification_status(**scope):
+        calls.append(scope)
+        return SimpleNamespace(
+            collector_online=True,
+            last_heartbeat_at=checked_at,
+            last_success_at=checked_at,
+            job_status="completed",
+            job_updated_at=checked_at,
+        )
+
+    monkeypatch.setattr(
+        collector_api,
+        "flight_demand_repo",
+        SimpleNamespace(
+            read_collector_verification_status=(
+                read_collector_verification_status
+            )
+        ),
+        raising=False,
+    )
+
+    response = await collector_client.get(
+        "/internal/collector/status",
+        params={
+            "origin_code": "AAT",
+            "destination_code": "SYX",
+            "depart_date": "2099-08-01",
+        },
+        headers=collector_headers,
+    )
+
+    assert response.status_code == 200
+    assert calls == [
+        {
+            "origin_code": "AAT",
+            "destination_code": "SYX",
+            "depart_date": "2099-08-01",
+            "heartbeat_timeout_seconds": 180,
+        }
+    ]
+    assert response.json() == {
+        "collector_online": True,
+        "last_heartbeat_at": "2099-07-19T12:00:00Z",
+        "last_success_at": "2099-07-19T12:00:00Z",
+        "job_status": "completed",
+        "job_updated_at": "2099-07-19T12:00:00Z",
+    }
+    assert "node_id" not in response.text
+
+
+@pytest.mark.asyncio
 async def test_complete_maps_snapshot_wire_identity_to_trusted_ctrip_offer(
     monkeypatch, collector_client, collector_headers
 ):
