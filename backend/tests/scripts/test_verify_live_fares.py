@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
+from copy import deepcopy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
@@ -46,7 +47,11 @@ def _fake_backend(
     statuses: tuple[str, ...] = ("completed",),
     query_overrides: dict[str, Any] | None = None,
     deal_overrides: dict[str, Any] | None = None,
+    winner_overrides: dict[str, Any] | None = None,
     row_overrides: dict[str, Any] | None = None,
+    duplicate_winner: bool = False,
+    first_without_ctrip: bool = False,
+    append_valid_deal: bool = False,
     analysis_min: int = 1688,
     recommendation_text: str = "平台展示价最低：¥1688。",
 ) -> Iterator[tuple[str, dict[str, Any]]]:
@@ -99,10 +104,24 @@ def _fake_backend(
                 "date_start": "2099-08-01",
             }
             query.update(query_overrides or {})
+            winner = {
+                "id": "flyai-winning-row",
+                "data_provider": "flyai",
+                "name": "飞猪",
+                "price": 1688,
+                "currency": "CNY",
+                "url": "https://market.m.taobao.com/app/trip/flight-search/pages/index",
+                "provider_status": "success",
+                "price_status": "priced",
+                "data_freshness": "fresh",
+                "lowest": True,
+            }
+            winner.update(winner_overrides or {})
             row = {
+                "id": "ctrip-proof-row",
                 "data_provider": "ctrip_snapshot",
                 "name": "携程",
-                "price": 1688,
+                "price": 1999,
                 "currency": "CNY",
                 "url": "https://flights.ctrip.com/booking/CZ5704",
                 "provider_status": (
@@ -111,23 +130,32 @@ def _fake_backend(
                 "data_freshness": freshness,
             }
             row.update(row_overrides or {})
-            deal = {
+            pristine_deal = {
                 "flight_no": "CZ5704",
                 "origin_code": "AAT",
                 "destination_code": "SYX",
                 "depart_date": "2099-08-01",
+                "winning_price_id": "flyai-winning-row",
                 "price": 1688,
                 "lowest_price": 1688,
                 "total_price": 1688,
                 "currency": "CNY",
-                "prices": [row],
+                "prices": [winner, row],
             }
+            if duplicate_winner:
+                pristine_deal["prices"].append(deepcopy(winner))
+            deal = deepcopy(pristine_deal)
+            if first_without_ctrip:
+                deal["prices"] = [deepcopy(winner)]
             deal.update(deal_overrides or {})
+            deals = [deal]
+            if append_valid_deal:
+                deals.append(pristine_deal)
             self._json(
                 200,
                 {
                     "query": query,
-                    "deals": [deal],
+                    "deals": deals,
                     "analysis": {"min_price": analysis_min},
                     "recommendation": {"text": recommendation_text},
                 },
@@ -223,7 +251,7 @@ def test_live_verifier_searches_only_to_trigger_and_verify_after_polling():
     ]
     assert "collector=online" in result.stdout
     assert "job=completed" in result.stdout
-    assert "ctrip_price=CNY 1688" in result.stdout
+    assert "ctrip_price=CNY 1999" in result.stdout
     assert SECRET_JWT not in result.stdout + result.stderr
     assert SECRET_COLLECTOR not in result.stdout + result.stderr
     assert "https://flights.ctrip.com" not in result.stdout
@@ -236,6 +264,15 @@ def test_live_verifier_accepts_real_renderer_single_cny_amount_format():
         result = _run(*_live_args(base_url), env=_secret_env())
 
     assert result.returncode == 0, result.stderr
+    assert state["search_count"] == 2
+
+
+def test_live_verifier_accepts_flyai_winner_and_higher_ctrip_proof_price():
+    with _fake_backend() as (base_url, state):
+        result = _run(*_live_args(base_url), env=_secret_env())
+
+    assert result.returncode == 0, result.stderr
+    assert "ctrip_price=CNY 1999" in result.stdout
     assert state["search_count"] == 2
 
 
@@ -259,29 +296,62 @@ def test_live_verifier_require_fresh_rejects_after_one_final_search():
         ),
         (
             {"deal_overrides": {"origin_code": "HAK"}},
-            "Ctrip deal scope does not match request",
+            "first displayed card does not match request",
         ),
         (
             {"deal_overrides": {"depart_date": "2099-08-02"}},
-            "Ctrip deal scope does not match request",
-        ),
-        (
-            {
-                "deal_overrides": {
-                    "price": None,
-                    "lowest_price": None,
-                    "total_price": None,
-                }
-            },
-            "displayed card price does not match analysis minimum",
+            "first displayed card does not match request",
         ),
         (
             {"analysis_min": 1699},
-            "displayed card price does not match analysis minimum",
+            "first displayed card price does not match winner",
         ),
         (
             {"recommendation_text": "平台展示价最低：¥1699。"},
             "recommendation price does not match displayed card",
+        ),
+        (
+            {"deal_overrides": {"winning_price_id": None}},
+            "first displayed card has invalid winning row",
+        ),
+        (
+            {"deal_overrides": {"winning_price_id": ""}},
+            "first displayed card has invalid winning row",
+        ),
+        (
+            {"deal_overrides": {"winning_price_id": "missing-row"}},
+            "first displayed card has invalid winning row",
+        ),
+        (
+            {"duplicate_winner": True},
+            "first displayed card has invalid winning row",
+        ),
+        (
+            {"winner_overrides": {"price": 1700}},
+            "first displayed card price does not match winner",
+        ),
+        (
+            {"deal_overrides": {"lowest_price": 1700}},
+            "first displayed card price does not match winner",
+        ),
+        (
+            {"deal_overrides": {"total_price": 1700}},
+            "first displayed card price does not match winner",
+        ),
+        (
+            {
+                "deal_overrides": {"currency": "USD"},
+                "recommendation_text": "平台展示价最低：USD 1688。",
+            },
+            "first displayed card currency does not match winner",
+        ),
+        (
+            {"winner_overrides": {"currency": "USD"}},
+            "first displayed card currency does not match winner",
+        ),
+        (
+            {"row_overrides": {"currency": ""}},
+            "scoped Ctrip price not observed",
         ),
     ],
 )
@@ -294,6 +364,47 @@ def test_live_verifier_rejects_query_scope_card_and_text_mismatches(
 
     assert result.returncode == 1
     assert expected_error in result.stderr
+    assert state["search_count"] == 2
+
+
+def test_live_verifier_rejects_nested_price_without_first_card_headline():
+    with _fake_backend(
+        deal_overrides={
+            "price": None,
+            "lowest_price": None,
+            "total_price": None,
+        },
+        row_overrides={"price": 1688},
+    ) as (base_url, state):
+        result = _run(*_live_args(base_url), env=_secret_env())
+
+    assert result.returncode == 1
+    assert "first displayed card price does not match winner" in result.stderr
+    assert state["search_count"] == 2
+
+
+def test_live_verifier_rejects_later_match_when_first_card_scope_is_wrong():
+    with _fake_backend(
+        deal_overrides={"origin_code": "HAK"},
+        first_without_ctrip=True,
+        append_valid_deal=True,
+    ) as (base_url, state):
+        result = _run(*_live_args(base_url), env=_secret_env())
+
+    assert result.returncode == 1
+    assert "first displayed card does not match request" in result.stderr
+    assert state["search_count"] == 2
+
+
+def test_live_verifier_accepts_ctrip_proof_on_later_scoped_deal():
+    with _fake_backend(
+        first_without_ctrip=True,
+        append_valid_deal=True,
+    ) as (base_url, state):
+        result = _run(*_live_args(base_url), env=_secret_env())
+
+    assert result.returncode == 0, result.stderr
+    assert "ctrip_price=CNY 1999" in result.stdout
     assert state["search_count"] == 2
 
 

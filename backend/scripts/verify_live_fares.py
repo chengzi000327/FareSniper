@@ -110,6 +110,13 @@ def _positive_int(value: object) -> int | None:
     return value
 
 
+def _currency_code(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.strip().upper()
+    return code if len(code) == 3 and code.isalpha() else None
+
+
 def _validate_response_query(
     payload: dict[str, Any], query: FlightQuery
 ) -> None:
@@ -130,6 +137,7 @@ def _valid_ctrip_row(row: object) -> dict[str, Any] | None:
     if not isinstance(row, dict) or row.get("data_provider") != "ctrip_snapshot":
         return None
     price = _positive_int(row.get("price"))
+    currency = _currency_code(row.get("currency"))
     url = row.get("url")
     try:
         parsed = urlsplit(url) if isinstance(url, str) else None
@@ -137,6 +145,7 @@ def _valid_ctrip_row(row: object) -> dict[str, Any] | None:
         return None
     if (
         price is None
+        or currency is None
         or parsed is None
         or parsed.scheme != "https"
         or parsed.hostname != "flights.ctrip.com"
@@ -145,6 +154,29 @@ def _valid_ctrip_row(row: object) -> dict[str, Any] | None:
     ):
         return None
     return row
+
+
+def _deal_matches_query(deal: dict[str, Any], query: FlightQuery) -> bool:
+    return (
+        deal.get("origin_code"),
+        deal.get("destination_code"),
+        deal.get("depart_date"),
+    ) == (
+        query.origin_code,
+        query.destination_code,
+        query.depart_date,
+    )
+
+
+def _row_matches_query(row: dict[str, Any], query: FlightQuery) -> bool:
+    return all(
+        field not in row or row[field] == expected
+        for field, expected in (
+            ("origin_code", query.origin_code),
+            ("destination_code", query.destination_code),
+            ("depart_date", query.depart_date),
+        )
+    )
 
 
 def _is_fresh(row: dict[str, Any]) -> bool:
@@ -157,6 +189,87 @@ def _is_fresh(row: dict[str, Any]) -> bool:
 def _recommendation_has_amount(text: str, currency: str, price: int) -> bool:
     token = f"¥{price}" if currency == "CNY" else f"{currency} {price}"
     return re.search(rf"(?<!\d){re.escape(token)}(?!\d)", text) is not None
+
+
+def _validate_first_displayed_card(
+    payload: dict[str, Any],
+    query: FlightQuery,
+    minimum: int,
+) -> None:
+    deals = payload.get("deals")
+    if (
+        not isinstance(deals, list)
+        or not deals
+        or not isinstance(deals[0], dict)
+    ):
+        raise VerificationError("search response has no first displayed card")
+    deal = deals[0]
+    if not _deal_matches_query(deal, query):
+        raise VerificationError("first displayed card does not match request")
+
+    winning_id = deal.get("winning_price_id")
+    rows = deal.get("prices")
+    if not isinstance(winning_id, str) or not winning_id.strip():
+        raise VerificationError("first displayed card has invalid winning row")
+    if not isinstance(rows, list):
+        raise VerificationError("first displayed card has invalid winning row")
+    winners = [
+        row
+        for row in rows
+        if isinstance(row, dict) and row.get("id") == winning_id
+    ]
+    if len(winners) != 1:
+        raise VerificationError("first displayed card has invalid winning row")
+
+    winner = winners[0]
+    winner_price = _positive_int(winner.get("price"))
+    winner_currency = _currency_code(winner.get("currency"))
+    deal_currency = _currency_code(deal.get("currency"))
+    if winner_currency is None or deal_currency != winner_currency:
+        raise VerificationError(
+            "first displayed card currency does not match winner"
+        )
+    if (
+        winner_price is None
+        or _positive_int(deal.get("price")) != winner_price
+        or minimum != winner_price
+    ):
+        raise VerificationError("first displayed card price does not match winner")
+    for field in ("lowest_price", "total_price"):
+        value = deal.get(field)
+        if value is not None and _positive_int(value) != winner_price:
+            raise VerificationError(
+                "first displayed card price does not match winner"
+            )
+
+    recommendation = payload.get("recommendation")
+    text = recommendation.get("text") if isinstance(recommendation, dict) else ""
+    if not isinstance(text, str) or not _recommendation_has_amount(
+        text, winner_currency, winner_price
+    ):
+        raise VerificationError(
+            "recommendation price does not match displayed card"
+        )
+
+
+def _scoped_ctrip_rows(
+    payload: dict[str, Any], query: FlightQuery
+) -> list[dict[str, Any]]:
+    scoped: list[dict[str, Any]] = []
+    deals = payload.get("deals")
+    if not isinstance(deals, list):
+        return scoped
+    for deal in deals:
+        if not isinstance(deal, dict) or not _deal_matches_query(deal, query):
+            continue
+        rows = deal.get("prices")
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            valid = _valid_ctrip_row(row)
+            if valid is not None and _row_matches_query(valid, query):
+                scoped.append(valid)
+    return scoped
 
 
 def _validate_final_response(
@@ -175,52 +288,10 @@ def _validate_final_response(
     if minimum is None:
         raise VerificationError("search response has no numeric minimum price")
 
-    selected: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-    for deal in payload.get("deals") or []:
-        if not isinstance(deal, dict):
-            continue
-        ctrip_rows = [
-            valid
-            for row in deal.get("prices") or []
-            if (valid := _valid_ctrip_row(row)) is not None
-        ]
-        if not ctrip_rows:
-            continue
-        if (
-            deal.get("origin_code"),
-            deal.get("destination_code"),
-            deal.get("depart_date"),
-        ) != (
-            query.origin_code,
-            query.destination_code,
-            query.depart_date,
-        ):
-            raise VerificationError("Ctrip deal scope does not match request")
-        for row in ctrip_rows:
-            for field, expected in (
-                ("origin_code", query.origin_code),
-                ("destination_code", query.destination_code),
-                ("depart_date", query.depart_date),
-            ):
-                if field in row and row[field] != expected:
-                    raise VerificationError(
-                        "Ctrip deal scope does not match request"
-                    )
-        if _positive_int(deal.get("price")) == minimum:
-            selected.append((deal, ctrip_rows))
-
-    if not selected:
-        raise VerificationError(
-            "displayed card price does not match analysis minimum"
-        )
-
-    deal, ctrip_rows = selected[0]
-    for field in ("lowest_price", "total_price"):
-        value = deal.get(field)
-        if value is not None and _positive_int(value) != minimum:
-            raise VerificationError(
-                "displayed card price does not match analysis minimum"
-            )
+    _validate_first_displayed_card(payload, query, minimum)
+    ctrip_rows = _scoped_ctrip_rows(payload, query)
+    if not ctrip_rows:
+        raise VerificationError("scoped Ctrip price not observed")
     eligible = (
         [row for row in ctrip_rows if _is_fresh(row)]
         if require_fresh
@@ -231,19 +302,8 @@ def _validate_final_response(
             raise VerificationError("fresh Ctrip price not observed")
         raise VerificationError("scoped Ctrip price not observed")
 
-    recommendation = payload.get("recommendation")
-    text = recommendation.get("text") if isinstance(recommendation, dict) else ""
-    currency = str(deal.get("currency") or "").upper()
-    if (
-        not isinstance(text, str)
-        or not currency
-        or not _recommendation_has_amount(text, currency, minimum)
-    ):
-        raise VerificationError(
-            "recommendation price does not match displayed card"
-        )
     ctrip_row = min(eligible, key=lambda row: int(row["price"]))
-    return int(ctrip_row["price"]), str(ctrip_row.get("currency") or currency)
+    return int(ctrip_row["price"]), str(_currency_code(ctrip_row["currency"]))
 
 
 def _remaining_seconds(deadline: float) -> float:
