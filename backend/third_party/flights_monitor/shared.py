@@ -90,7 +90,7 @@ def resolve_city(city_name_or_code):
     ref = resolve_airport(city_name_or_code)
     if ref is not None:
         return (ref.code, ref.city)
-    return (city_name_or_code, city_name_or_code)
+    raise ValueError("无法识别城市或机场")
 
 
 @lru_cache(maxsize=1)

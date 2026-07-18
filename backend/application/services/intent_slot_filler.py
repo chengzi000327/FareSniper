@@ -59,9 +59,20 @@ class _LocationMention:
     start: int
     end: int
     value: str
+    city_id: str
+    is_airport: bool
 
 
-def _build_location_terms() -> tuple[str, ...]:
+@dataclass(frozen=True)
+class _LocationTerm:
+    text: str
+    value: str
+    city_id: str
+    is_airport: bool
+    is_ascii_code: bool
+
+
+def _build_location_terms() -> tuple[_LocationTerm, ...]:
     terms: set[str] = set()
     for city in _CATALOG.cities:
         terms.update((city.name, *city.aliases, *city.provider_codes.values()))
@@ -78,7 +89,37 @@ def _build_location_terms() -> tuple[str, ...]:
             )
     terms.update(CITY_TO_AIRPORT)
     terms.update(AIRPORT_TO_CITY)
-    return tuple(sorted(terms, key=lambda value: (-len(value), value)))
+    resolved: list[_LocationTerm] = []
+    for term in terms:
+        location = _CATALOG.resolve_location(term)
+        if location is not None:
+            value = location.airport_iata or location.city_name
+            city_id = location.city_id
+            is_airport = location.airport_iata is not None
+        else:
+            ref = resolve_airport(term)
+            if ref is None:
+                continue
+            upper = term.upper()
+            is_airport = upper in ref.airport_ids
+            value = upper if is_airport else ref.city
+            city_id = f"international:{ref.code.lower()}"
+        resolved.append(
+            _LocationTerm(
+                text=term,
+                value=value,
+                city_id=city_id,
+                is_airport=is_airport,
+                is_ascii_code=(
+                    term.isascii()
+                    and term.isalpha()
+                    and len(term) in (3, 4)
+                ),
+            )
+        )
+    return tuple(
+        sorted(resolved, key=lambda item: (-len(item.text), item.text))
+    )
 
 
 _LOCATION_TERMS = _build_location_terms()
@@ -105,8 +146,6 @@ def fill_slots(
     merged = merge_slot_bundle(base, extracted)
     if merged.intent is None and intent_match:
         merged = replace(merged, intent=intent_match.intent_name)
-    elif merged.intent is None and looks_like_flight_search(text, merged):
-        merged = replace(merged, intent="search_flight")
     return merged
 
 
@@ -124,7 +163,10 @@ def extract_slots(
     definitions = intent_definitions or DEFAULT_INTENTS
     intent_match = match_intent(normalized, definitions, current)
     intent_name = matched_intent or (intent_match.intent_name if intent_match else None)
-    origin, destination = extract_route_locations(normalized, current)
+    mentions = _extract_location_mentions(normalized)
+    origin, destination = _infer_origin_destination(
+        normalized, mentions, current
+    )
     depart_date = _extract_depart_date(normalized, today=today)
     budget = _extract_budget(normalized)
     target_price = _extract_target_price(normalized)
@@ -132,7 +174,11 @@ def extract_slots(
 
     return SlotBundle(
         intent=intent_name
-        or ("search_flight" if looks_like_flight_search(normalized, current) else None),
+        or (
+            "search_flight"
+            if _looks_like_flight_search(normalized, current, mentions)
+            else None
+        ),
         origin=origin,
         destination=destination,
         depart_date=depart_date,
@@ -240,15 +286,24 @@ def build_clarify_question(slots: SlotBundle | None, missing: list[str]) -> str:
 def looks_like_flight_search(text: str, slots: SlotBundle | None = None) -> bool:
     """Classify whether the current turn belongs to the flight-search intent."""
     normalized = _normalize_text(text)
+    mentions = _extract_location_mentions(normalized)
+    return _looks_like_flight_search(normalized, slots, mentions)
+
+
+def _looks_like_flight_search(
+    normalized: str,
+    slots: SlotBundle | None,
+    mentions: list[_LocationMention],
+) -> bool:
     if slots and slots.intent == "search_flight":
         return True
     if slots and slots.intent and slots.intent != "search_flight":
         return False
     if any(keyword in normalized for keyword in FLIGHT_KEYWORDS):
         return True
-    if len(_extract_cities(normalized)) >= 2:
+    if len(_collapse_location_mentions(mentions)) >= 2:
         return True
-    if _extract_depart_date(normalized) and _extract_cities(normalized):
+    if _extract_depart_date(normalized) and mentions:
         return True
     return False
 
@@ -299,18 +354,24 @@ def _extract_cities(text: str) -> list[str]:
 def _extract_location_mentions(text: str) -> list[_LocationMention]:
     candidates: list[_LocationMention] = []
     for term in _LOCATION_TERMS:
-        for match in re.finditer(re.escape(term), text, flags=re.IGNORECASE):
-            location = _CATALOG.resolve_location(term)
-            if location is not None:
-                value = location.airport_iata or location.city_name
-            else:
-                ref = resolve_airport(term)
-                if ref is None:
-                    continue
-                upper = term.upper()
-                value = upper if upper in ref.airport_ids else ref.city
+        pattern = re.escape(term.text)
+        if term.is_ascii_code:
+            pattern = rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])"
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            if (
+                term.is_ascii_code
+                and not match.group(0).isupper()
+                and not _has_route_code_context(text, match.start(), match.end())
+            ):
+                continue
             candidates.append(
-                _LocationMention(match.start(), match.end(), value)
+                _LocationMention(
+                    start=match.start(),
+                    end=match.end(),
+                    value=term.value,
+                    city_id=term.city_id,
+                    is_airport=term.is_airport,
+                )
             )
 
     selected: list[_LocationMention] = []
@@ -326,19 +387,44 @@ def _extract_location_mentions(text: str) -> list[_LocationMention]:
     return selected
 
 
+def _has_route_code_context(text: str, start: int, end: int) -> bool:
+    route_syntax = r"(?:从|自|由|到|去|飞|回|->|→|-)"
+    return bool(
+        re.search(rf"{route_syntax}\s*$", text[:start])
+        or re.match(rf"\s*{route_syntax}", text[end:])
+    )
+
+
+def _collapse_location_mentions(
+    mentions: list[_LocationMention],
+) -> list[_LocationMention]:
+    collapsed: list[_LocationMention] = []
+    for mention in mentions:
+        if collapsed and collapsed[-1].city_id == mention.city_id:
+            if mention.is_airport and not collapsed[-1].is_airport:
+                collapsed[-1] = mention
+            continue
+        collapsed.append(mention)
+    return collapsed
+
+
 def extract_route_locations(
     text: str, accumulated: SlotBundle | None = None
 ) -> tuple[str | None, str | None]:
     current = accumulated or SlotBundle()
-    cities = _extract_cities(text)
-    return _infer_origin_destination(text, cities, current)
+    mentions = _extract_location_mentions(text)
+    return _infer_origin_destination(text, mentions, current)
 
 
 def _infer_origin_destination(
-    text: str, cities: list[str], accumulated: SlotBundle
+    text: str,
+    mentions: list[_LocationMention],
+    accumulated: SlotBundle,
 ) -> tuple[str | None, str | None]:
-    origin = _extract_marked_city(text, ORIGIN_MARKERS)
-    destination = _extract_marked_city(text, DESTINATION_MARKERS)
+    collapsed = _collapse_location_mentions(mentions)
+    cities = [mention.value for mention in collapsed]
+    origin = _extract_marked_city(text, ORIGIN_MARKERS, mentions)
+    destination = _extract_marked_city(text, DESTINATION_MARKERS, mentions)
 
     if origin and destination and origin == destination and len(cities) > 1:
         destination = next((city for city in cities if city != origin), destination)
@@ -362,10 +448,19 @@ def _infer_origin_destination(
     return origin, destination
 
 
-def _extract_marked_city(text: str, markers: tuple[str, ...]) -> str | None:
-    for mention in _extract_location_mentions(text):
+def _extract_marked_city(
+    text: str,
+    markers: tuple[str, ...],
+    mentions: list[_LocationMention],
+) -> str | None:
+    for index, mention in enumerate(mentions):
         prefix = text[: mention.start]
         if any(re.search(rf"{re.escape(marker)}\s*$", prefix) for marker in markers):
+            for candidate in mentions[index + 1 :]:
+                if candidate.city_id != mention.city_id:
+                    break
+                if candidate.is_airport:
+                    return candidate.value
             return mention.value
     return None
 

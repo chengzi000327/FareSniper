@@ -6,6 +6,8 @@ from enum import Enum
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
+from pydantic import field_serializer
+
 from backend.application.contracts.flight_provider import (
     FlightQuery as ProviderFlightQuery,
 )
@@ -35,6 +37,19 @@ class FlightQuery(ProviderFlightQuery):
     destination: ResolvedLocation
     route_region: RouteRegion
 
+    @field_serializer("origin", "destination")
+    def serialize_location(
+        self, location: ResolvedLocation
+    ) -> dict[str, object]:
+        return {
+            "city_id": location.city_id,
+            "city_name": location.city_name,
+            "region_group": location.region_group,
+            "city_codes": dict(location.city_codes),
+            "airport_iata": location.airport_iata,
+            "airport_icao": location.airport_icao,
+        }
+
 
 _CATALOG = AirportCatalog.load_default()
 _CHINA_REGION_GROUPS = {"mainland", "hong_kong", "macau", "taiwan"}
@@ -62,7 +77,12 @@ def _international_location(value: str) -> ResolvedLocation | None:
     ref = resolve_airport(value)
     if ref is None or _CATALOG.resolve_location(value) is not None:
         return None
-    airport_iata = ref.airport_ids[0] if len(ref.airport_ids) == 1 else None
+    normalized = value.strip().upper()
+    airport_iata = (
+        normalized
+        if normalized in ref.airport_ids
+        else ref.airport_ids[0] if len(ref.airport_ids) == 1 else None
+    )
     codes = MappingProxyType(
         {
             "ctrip": ref.code,

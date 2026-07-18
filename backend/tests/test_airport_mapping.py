@@ -1,6 +1,8 @@
 import importlib
 from pathlib import Path
 
+import pytest
+
 from backend.utils.airport_codes import (
     CITY_TO_AIRPORT,
     code_to_city,
@@ -46,6 +48,9 @@ def test_flights_monitor_resolves_catalog_city_and_airport_alias(monkeypatch) ->
 
     assert shared.resolve_city("阿勒泰") == ("AAT", "阿勒泰")
     assert shared.resolve_city("北京大兴机场") == ("BJS", "北京")
+
+    with pytest.raises(ValueError, match="无法识别城市或机场"):
+        shared.resolve_city("not a real location")
 
 
 def test_recommendation_route_labels_use_catalog() -> None:

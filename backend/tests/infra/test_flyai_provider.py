@@ -164,6 +164,29 @@ async def test_search_preserves_explicit_airport_in_provider_arguments(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_search_preserves_exact_international_airports(monkeypatch):
+    calls = []
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return FIXTURE.read_bytes(), b""
+
+    async def fake_create(*args, **kwargs):
+        calls.append(args)
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    query = build_flight_query("HND", "GMP", "2099-08-01")
+
+    result = await FlyAIProvider(api_key="secret").search(query)
+
+    assert calls[0][3:7] == ("HND", "--destination", "GMP", "--dep-date")
+    assert result.status is ProviderStatus.success
+
+
+@pytest.mark.asyncio
 async def test_child_environment_is_a_minimal_allowlist(monkeypatch):
     calls = []
     monkeypatch.setenv("DATABASE_URL", "db-secret-sentinel")

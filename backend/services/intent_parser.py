@@ -115,8 +115,9 @@ class IntentParser:
         }
 
     def _parse_heuristic(self, text: str) -> dict[str, Any]:
-        origin, origin_code = _extract_city(text, is_origin=True)
-        destination, dest_code = _extract_city(text, is_origin=False)
+        origin_value, destination_value = extract_route_locations(text)
+        origin, origin_code = _resolved_location(origin_value)
+        destination, dest_code = _resolved_location(destination_value)
         date_start, date_end = _extract_dates(text)
         budget = _extract_budget(text)
         constraints = _extract_constraints(text)
@@ -170,9 +171,7 @@ def _today() -> date:
     return datetime.now(tz=timezone.utc).date()
 
 
-def _extract_city(text: str, is_origin: bool) -> tuple[str | None, str | None]:
-    origin, destination = extract_route_locations(text)
-    value = origin if is_origin else destination
+def _resolved_location(value: str | None) -> tuple[str | None, str | None]:
     location = resolve_location_ref(value)
     if location is None:
         return None, None

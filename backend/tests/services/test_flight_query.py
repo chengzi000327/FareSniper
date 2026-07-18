@@ -1,8 +1,10 @@
+import json
 from datetime import date
 
 import pytest
 
 from backend.application.services.flight_query import (
+    FlightQuery,
     FlightQueryError,
     FlightQueryValidationError,
     RouteRegion,
@@ -81,3 +83,39 @@ def test_explicit_airport_keeps_single_airport_constraint():
     assert query.origin.airport_iata == "PKX"
     assert query.origin_airport_ids == ["PKX"]
     assert query.origin_code == "BJS"
+
+
+@pytest.mark.parametrize(
+    ("airport_code", "city_name"),
+    [("HND", "东京"), ("JFK", "纽约"), ("GMP", "首尔")],
+)
+def test_exact_international_iata_keeps_single_airport_constraint(
+    airport_code, city_name
+):
+    query = build_flight_query(
+        airport_code, "北京", "2099-08-01", today=date(2026, 7, 19)
+    )
+
+    assert query.origin.city_name == city_name
+    assert query.origin.airport_iata == airport_code
+    assert query.origin_airport_ids == [airport_code]
+
+
+@pytest.mark.parametrize(
+    ("origin", "destination"),
+    [("北京大兴机场", "黔江"), ("HND", "JFK")],
+)
+def test_enriched_query_json_round_trip(origin, destination):
+    query = build_flight_query(
+        origin, destination, "2099-08-01", today=date(2026, 7, 19)
+    )
+
+    encoded = query.model_dump_json()
+    payload = json.loads(encoded)
+    restored = FlightQuery.model_validate_json(encoded)
+
+    assert isinstance(payload["origin"]["city_codes"], dict)
+    assert payload["route_region"] == query.route_region.value
+    assert restored.origin == query.origin
+    assert restored.destination == query.destination
+    assert restored.origin_airport_ids == query.origin_airport_ids
