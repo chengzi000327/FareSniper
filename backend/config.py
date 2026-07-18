@@ -53,7 +53,12 @@ class Settings(BaseSettings):
     flyai_cli_path: str = Field(default="flyai")
     serpapi_api_key: str = Field(default="")
     flight_provider_timeout_seconds: float = Field(default=10.0)
+    ctrip_collector_token: str = Field(default="")
     ctrip_snapshot_ttl_minutes: int = Field(default=75)
+    ctrip_collector_heartbeat_timeout_seconds: int = Field(
+        default=180, gt=0
+    )
+    ctrip_collector_lease_seconds: int = Field(default=180, gt=0)
     ctrip_refresh_batch_size: int = Field(default=20)
     ctrip_collection_timeout_seconds: float = Field(default=90.0, gt=0)
     ctrip_request_delay_min_seconds: float = Field(default=2.0)

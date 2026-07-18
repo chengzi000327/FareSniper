@@ -1,0 +1,141 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated, Literal
+from urllib.parse import urlsplit
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+)
+
+from backend.application.contracts.collector import CollectorErrorCode
+from backend.application.contracts.flight_provider import (
+    FlightOffer,
+    PriceStatus,
+)
+from backend.application.services.flight_dates import (
+    validate_canonical_depart_date,
+)
+
+
+class CollectorRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class ClaimRequest(CollectorRequest):
+    node_id: str = Field(min_length=1, max_length=128)
+
+
+class CollectorJobResponse(BaseModel):
+    job_id: str
+    origin_code: str
+    destination_code: str
+    depart_date: str
+    source: str
+    priority: int
+    attempts: int
+    lease_expires_at: datetime
+
+
+class ClaimResponse(BaseModel):
+    job: CollectorJobResponse | None
+
+
+class HeartbeatRequest(CollectorRequest):
+    node_id: str = Field(min_length=1, max_length=128)
+    version: str = Field(min_length=1, max_length=64)
+    status: str = Field(min_length=1, max_length=32)
+
+
+class CollectorOffer(CollectorRequest):
+    data_provider: Literal["ctrip_snapshot"]
+    seller_name: Literal["携程"]
+    flight_no: str = Field(min_length=1, max_length=64)
+    airline: str = Field(default="", max_length=128)
+    origin_city: str = Field(min_length=1, max_length=128)
+    origin_code: str = Field(min_length=1, max_length=16)
+    destination_city: str = Field(min_length=1, max_length=128)
+    destination_code: str = Field(min_length=1, max_length=16)
+    depart_date: str
+    depart_time: str = Field(default="", max_length=16)
+    arrive_time: str = Field(default="", max_length=16)
+    duration_minutes: Annotated[StrictInt, Field(ge=0)] | None = None
+    stops: Annotated[StrictInt, Field(ge=0)] = 0
+    cabin: str | None = Field(default=None, max_length=32)
+    currency: Literal["CNY"]
+    display_price: Annotated[StrictInt, Field(gt=0)]
+    booking_url: str | None = None
+
+    @field_validator("depart_date")
+    @classmethod
+    def validate_depart_date(cls, value: str) -> str:
+        return validate_canonical_depart_date(value)
+
+    @field_validator("booking_url")
+    @classmethod
+    def validate_ctrip_booking_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = urlsplit(value)
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("invalid booking URL") from exc
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != "flights.ctrip.com"
+            or parsed.username is not None
+            or parsed.password is not None
+            or port is not None
+        ):
+            raise ValueError("invalid booking URL")
+        return value
+
+    def to_internal_offer(self) -> FlightOffer:
+        return FlightOffer(
+            data_provider="ctrip",
+            seller_name="携程",
+            flight_no=self.flight_no,
+            airline=self.airline,
+            origin_city=self.origin_city,
+            origin_code=self.origin_code,
+            destination_city=self.destination_city,
+            destination_code=self.destination_code,
+            depart_date=self.depart_date,
+            depart_time=self.depart_time,
+            arrive_time=self.arrive_time,
+            duration_minutes=self.duration_minutes,
+            stops=self.stops,
+            cabin=self.cabin,
+            currency="CNY",
+            base_price=None,
+            tax=None,
+            baggage_fee=None,
+            total_price=self.display_price,
+            has_baggage=None,
+            price_status=PriceStatus.priced,
+            booking_url=self.booking_url,
+            raw_reference=None,
+        )
+
+
+class CompleteRequest(CollectorRequest):
+    node_id: str = Field(min_length=1, max_length=128)
+    offers: list[CollectorOffer] = Field(max_length=500)
+
+
+class FailRequest(CollectorRequest):
+    node_id: str = Field(min_length=1, max_length=128)
+    error_code: CollectorErrorCode
+    retry_at: datetime
+
+    @field_validator("retry_at")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("retry_at must be timezone-aware")
+        return value
