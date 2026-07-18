@@ -176,7 +176,9 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
         if not segments:
             continue
 
-        price = _parse_price(item.get("adultPrice"))
+        price = _parse_price(item.get("ticketPrice"))
+        if price is None:
+            price = _parse_price(item.get("adultPrice"))
         jump_url = item.get("jumpUrl")
         booking_url = jump_url if _is_https_url(jump_url) else None
         if price is None and booking_url is None:

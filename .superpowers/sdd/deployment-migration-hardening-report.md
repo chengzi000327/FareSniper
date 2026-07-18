@@ -1,0 +1,525 @@
+# Deployment Migration Hardening Report
+
+## Status
+
+`DONE_WITH_CONCERNS`
+
+Implementation commit:
+`4801b6ac141b4b65cf752b29ba9a7a0312d52886`
+
+Base commit:
+`9ba056ef7ab0c99dab6c2427beee2a48da85bf4e`
+
+Branch:
+`codex/deployment-migration-hardening`
+
+No Railway environment, production system, secrets, production URL, or database
+was accessed or modified.
+
+## Implementation
+
+- `20260716_provider_snapshots.py` now reflects the current schema and adds
+  each provider column only when absent.
+- It creates `ix_platform_price_provider_flight` and
+  `ix_flight_search_demands_due` only when absent.
+- It creates `flight_search_demands` only when absent. An existing table is not
+  recreated, renamed, truncated, rewritten, or otherwise subjected to a row
+  operation.
+- `20260718_provider_inventory_observations.py` creates the full table and named
+  non-negative `item_count` check on a fresh schema.
+- When the inventory table already exists, it is preserved. A missing named
+  check is added, an equivalent reflected definition is accepted, and a
+  conflicting definition with the required name aborts without mutation.
+- Both revision downgrades are explicitly irreversible and abort before any
+  bind, inspection, schema operation, row operation, or revision decrement.
+
+## TDD Evidence
+
+### RED
+
+The focused tests were written before either production migration was edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+FFFFF.FF                                                                 [100%]
+7 failed, 1 passed in 0.12s
+```
+
+The seven expected failures demonstrated:
+
+- duplicate provider-column additions on partially and fully pre-created
+  schemas;
+- duplicate provider and demand index creation;
+- recreation of an existing `flight_search_demands` table;
+- recreation of an existing `provider_inventory_observations` table instead of
+  adding its missing named check;
+- recreation when the named check was already present; and
+- unconditional downgrade operations when owned objects were absent.
+
+### GREEN
+
+Command after the minimal production edits:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+........                                                                 [100%]
+8 passed in 0.09s
+```
+
+The fake Alembic operation recorder models rows on pre-created tables; a
+duplicate `create_table` replaces those modeled rows. The GREEN preservation
+assertions therefore verify that the existing-table paths do not recreate the
+tables or alter the modeled rows.
+
+## Verification
+
+### Focused and relevant non-database backend tests
+
+Command:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper' \
+TEST_DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper_test' \
+python3 -m pytest -q \
+  backend/tests/migrations/test_provider_migration_hardening.py \
+  backend/tests/test_railway_config.py \
+  backend/tests/test_dependency_manifest.py \
+  backend/tests/infra/test_db_single_source.py \
+  backend/tests/infra/test_db_base.py::test_base_metadata_exposed \
+  backend/tests/infra/test_db_base.py::test_engine_is_async
+```
+
+The dummy localhost URLs permit model imports only. This test selection does
+not connect to a database.
+
+Observed output:
+
+```text
+..........................                                               [100%]
+26 passed in 0.12s
+```
+
+### Existing Alembic head/static migration tests
+
+Command:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper' \
+TEST_DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper_test' \
+python3 -m pytest -q \
+  backend/tests/test_alembic_head.py::test_alembic_history_lists_init \
+  backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head \
+  backend/tests/test_alembic_head.py::test_alembic_registers_task4_repositories \
+  backend/tests/test_alembic_head.py::test_demand_metadata_matches_migration_keys \
+  backend/tests/test_alembic_head.py::test_platform_price_metadata_matches_provider_index
+```
+
+Observed output:
+
+```text
+.F...                                                                    [100%]
+FAILED backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head
+1 failed, 4 passed in 0.42s
+```
+
+The failure is pre-existing at the required base commit. The assertion expects
+`20260716_provider_snapshots (head)`, while the already-committed inventory
+migration makes the actual single head:
+
+```bash
+python3 -m alembic -c backend/alembic.ini heads
+```
+
+```text
+20260718_provider_inventory (head)
+```
+
+`backend/tests/test_alembic_head.py` was not changed because this task's owned
+test scope was limited to focused migration-hardening tests.
+
+### Static checks
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260716_provider_snapshots.py \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Observed output: both commands exited `0` with no output.
+
+`black` and `ruff` were not installed in the available Python environment, so
+no formatter/linter result is claimed.
+
+Database-backed migration and repository tests were not run because the task
+explicitly prohibited modifying a database. No `alembic current`, `stamp`,
+`upgrade`, or `downgrade` command was executed.
+
+## Changed Files
+
+- `backend/tests/migrations/test_provider_migration_hardening.py`
+- `backend/db/migrations/versions/20260716_provider_snapshots.py`
+- `backend/db/migrations/versions/20260718_provider_inventory_observations.py`
+- `.superpowers/sdd/deployment-migration-hardening-report.md`
+
+## Self-Review
+
+- Confirmed every provider column is gated independently by reflected column
+  names.
+- Confirmed both required indexes are gated independently by reflected index
+  names.
+- Confirmed both early-created table paths avoid `create_table` and preserve
+  modeled rows.
+- Confirmed the inventory repair checks the exact required constraint name and
+  creates only that check when missing.
+- Confirmed fresh inventory creation still includes the named non-negative
+  check.
+- Confirmed no row SQL, table rename, truncation, credential, URL, or production
+  data was added.
+- Confirmed both downgrades are explicitly irreversible and abort before any
+  schema, row, or Alembic version change.
+- Reviewed the scoped diff against all requirements and found no unaddressed
+  implementation requirement.
+
+## Concerns
+
+1. The existing Alembic head test is stale and remains red: it expects the
+   previous revision even though the repository has exactly one newer head.
+2. No PostgreSQL-backed migration execution was performed because the task
+   prohibited database modification. Verification is pure unit/static plus
+   non-connecting backend tests.
+
+## Independent Review Fix
+
+This addendum records the follow-up patch for all four findings in
+`.superpowers/sdd/deployment-migration-hardening-review.md`. Both provider
+revision downgrades are explicitly irreversible and abort before obtaining a
+bind, inspecting schema, or issuing any Alembic operation.
+
+### Resolution
+
+- `20260716_provider_snapshots.downgrade()` raises immediately, preventing both
+  destructive DDL and an Alembic revision decrement.
+- `20260718_provider_inventory_observations.downgrade()` raises immediately for
+  the same reason.
+- Focused upgrade-then-downgrade tests use populated pre-created demand,
+  platform-price, and inventory schemas. They assert the exception, zero
+  Alembic operations, and exact deep equality of schema and rows.
+- Inventory check reflection now compares both the exact required name and its
+  `sqltext` definition.
+- Equivalent non-negative forms are accepted by an anchored operand parser that
+  preserves quoted identifier contents, applies PostgreSQL folding only to the
+  unquoted identifier, and permits supported numeric casts only on literal zero.
+- A required-name check with any other definition raises before schema or row
+  mutation. An absent required-name check is still created normally.
+
+### Review-Fix RED
+
+The new regression tests were run before either production migration was
+edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+........F.FFFF                                                           [100%]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_provider_downgrade_aborts_without_touching_precreated_schema_or_rows
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_downgrade_aborts_without_touching_precreated_schema_or_rows
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_downgrade_aborts_before_touching_an_empty_schema[provider_migration-20260716_provider_snapshots.py]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_downgrade_aborts_before_touching_an_empty_schema[inventory_migration-20260718_provider_inventory_observations.py]
+5 failed, 9 passed in 0.13s
+```
+
+The failures were the intended missing behavior: mismatched constraint SQL did
+not raise, and both downgrades still executed instead of aborting.
+
+### Review-Fix GREEN
+
+Command:
+
+```bash
+python3 -m pytest -q --tb=no backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Exact output:
+
+```text
+..............                                                           [100%]
+14 passed in 0.08s
+```
+
+### Alembic Static Tests
+
+Command:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper' \
+TEST_DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper_test' \
+python3 -m pytest -q --tb=no \
+  backend/tests/test_alembic_head.py::test_alembic_history_lists_init \
+  backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head \
+  backend/tests/test_alembic_head.py::test_alembic_registers_task4_repositories \
+  backend/tests/test_alembic_head.py::test_demand_metadata_matches_migration_keys \
+  backend/tests/test_alembic_head.py::test_platform_price_metadata_matches_provider_index
+```
+
+Exact output:
+
+```text
+.F...                                                                    [100%]
+=========================== short test summary info ============================
+FAILED backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head
+1 failed, 4 passed in 0.39s
+```
+
+The same pre-existing stale assertion remains: it expects
+`20260716_provider_snapshots (head)`, while the repository's actual single head
+is `20260718_provider_inventory (head)`. The static test file is outside this
+review-fix scope.
+
+### Static Checks
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260716_provider_snapshots.py \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Exact output: no output; both commands exited `0`.
+
+### Review-Fix Self-Review
+
+- Confirmed each downgrade's first and only statement is an exception, so no
+  DDL, row operation, schema inspection, or version decrement can occur.
+- Confirmed upgrade-then-downgrade regression tests preserve populated
+  pre-created schema and rows byte-for-byte at the modeled state level.
+- Confirmed correct, missing, and mismatched exact-name constraint definitions
+  have focused coverage.
+- Confirmed a mismatched definition records zero Alembic operations and leaves
+  rows and schema unchanged.
+- Confirmed parsing rejects `item_count >= -1`, preserves quoted identifier
+  contents, and accepts only harmless parenthesized, zero-cast, and reversed
+  equivalent forms.
+- Confirmed the patch contains no credentials, deployment URLs, production
+  data, or database-facing command.
+
+### Remaining Concerns
+
+1. The unrelated Alembic head assertion remains stale and red.
+2. PostgreSQL-backed execution was not run because database modification was
+   explicitly prohibited. All review-fix verification is pure unit/static and
+   non-connecting.
+
+## Constraint Validator Re-review Fix
+
+This final addendum addresses the remaining operand-cast finding. The validator
+now uses a fully anchored comparison grammar and validates the two operands
+independently. It never erases a cast from `item_count`. Parentheses and quoting
+around that identifier are harmless; any other token on the column operand is
+rejected. Numeric casts may be peeled only from literal zero, including in the
+equivalent reversed form `0 <= item_count`.
+
+### Validator RED
+
+The two casted-column regressions were added and run before production code was
+edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+...........FF.....                                                       [100%]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation[item_count::smallint >= 0]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation[item_count::numeric(1, 0) >= 0]
+2 failed, 16 passed in 0.12s
+```
+
+Both failures showed that the prior global cast normalization accepted a
+non-equivalent cast on the column operand.
+
+### Validator GREEN
+
+Command:
+
+```bash
+python3 -m pytest -q --tb=no backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Exact output:
+
+```text
+..................                                                       [100%]
+18 passed in 0.08s
+```
+
+### Validator Static Tests
+
+Command:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper' \
+TEST_DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper_test' \
+python3 -m pytest -q --tb=no \
+  backend/tests/test_alembic_head.py::test_alembic_history_lists_init \
+  backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head \
+  backend/tests/test_alembic_head.py::test_alembic_registers_task4_repositories \
+  backend/tests/test_alembic_head.py::test_demand_metadata_matches_migration_keys \
+  backend/tests/test_alembic_head.py::test_platform_price_metadata_matches_provider_index
+```
+
+Exact output:
+
+```text
+.F...                                                                    [100%]
+=========================== short test summary info ============================
+FAILED backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head
+1 failed, 4 passed in 0.38s
+```
+
+The failure remains the pre-existing stale expectation of the previous head.
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Exact output: no output; both commands exited `0`.
+
+### Validator Self-Review
+
+- Confirmed the comparison regex is anchored with `fullmatch()` across the
+  entire reflected definition without deleting quoted identifier contents.
+- Confirmed the `item_count` operand accepts only harmless enclosing
+  parentheses and rejects every cast, including `::smallint` and
+  `::numeric(1,0)`.
+- Confirmed the zero operand accepts only literal `0` plus supported numeric
+  casts applied to that literal.
+- Confirmed both `item_count >= 0` and the reversed `0 <= item_count` grammar
+  validate their operands in the correct roles.
+- Confirmed mismatches still abort with zero Alembic operations and unchanged
+  modeled rows/schema.
+- Confirmed the top-level report now coherently describes both revisions as
+  explicitly irreversible.
+- Confirmed no database, Railway environment, secret, deployment URL, or
+  production data was accessed or added.
+
+### Validator Remaining Concerns
+
+1. The unrelated Alembic head assertion remains stale and red.
+2. PostgreSQL-backed execution was not run because all database access and
+   modification were explicitly prohibited.
+
+## Quoted Identifier Final Fix
+
+This final pass replaces global SQL lowercasing, whitespace deletion, and quote
+deletion with quote-preserving operand parsing. Unquoted `item_count` uses
+PostgreSQL's case-folding semantics. A quoted identifier is accepted only when
+its token is exactly `"item_count"`; quoted uppercase, embedded whitespace, and
+escaped-quote variants are mismatches.
+
+### Quoted Identifier RED
+
+The quoted mismatch tests were added and run before production code was edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+..............FFF.....                                                   [100%]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation["ITEM_COUNT" >= 0]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation["item_ count" >= 0]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation["item_""count" >= 0]
+3 failed, 19 passed in 0.12s
+```
+
+Each failure showed global normalization accepting a distinct quoted
+PostgreSQL identifier as if it were the real unquoted `item_count` column.
+
+### Quoted Identifier GREEN
+
+Command:
+
+```bash
+python3 -m pytest -q --tb=no backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Exact output:
+
+```text
+......................                                                   [100%]
+22 passed in 0.09s
+```
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Exact output: no output; both commands exited `0`.
+
+### Quoted Identifier Final Self-Review
+
+- Confirmed there is no global lowercase, whitespace, or quote deletion in the
+  reflected SQL validator.
+- Confirmed outer-parenthesis scanning tracks quoted regions and PostgreSQL
+  escaped double quotes without changing identifier contents.
+- Confirmed unquoted `item_count` is matched case-insensitively as PostgreSQL
+  folds it, while the only accepted quoted token is exactly `"item_count"`.
+- Confirmed `"ITEM_COUNT"`, `"item_ count"`, and `"item_""count"` all raise the
+  mismatch error with zero Alembic operations and unchanged modeled schema and
+  rows.
+- Confirmed every cast on the column operand remains rejected.
+- Confirmed harmless parentheses, supported casts on literal zero, and the
+  reversed `0 <= item_count` form remain accepted.
+- Confirmed both revision downgrades remain explicitly irreversible.
+- Confirmed no database, Railway environment, secret, deployment URL, or
+  production data was accessed or added.
+
+### Final Remaining Concerns
+
+1. The unrelated Alembic head assertion remains stale from the base branch.
+2. PostgreSQL-backed execution was not run because database access and
+   modification were explicitly prohibited.

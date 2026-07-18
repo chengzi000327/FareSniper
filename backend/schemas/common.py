@@ -151,14 +151,26 @@ class DealCardDto(BaseModel):
             if price.id != self.winning_price_id
         ):
             raise ValueError("every nonwinning row must have lowest=false")
+        fresh_winner = (
+            winner.price_status is PriceStatus.priced
+            and winner.provider_status is ProviderStatus.success
+            and winner.data_freshness == "fresh"
+        )
+        stale_ctrip_winner = (
+            winner.data_provider == "ctrip_snapshot"
+            and winner.price_status is PriceStatus.stale
+            and winner.provider_status is ProviderStatus.stale
+            and winner.data_freshness == "stale"
+            and winner.url is not None
+        )
         if (
             winner.lowest is not True
             or winner.price is None
-            or winner.price_status is not PriceStatus.priced
-            or winner.provider_status is not ProviderStatus.success
-            or winner.data_freshness != "fresh"
+            or not (fresh_winner or stale_ctrip_winner)
         ):
-            raise ValueError("winning row must be fresh, priced, and successful")
+            raise ValueError(
+                "winning row must be fresh and successful or a stale Ctrip snapshot"
+            )
         if (
             self.platform != winner.name
             or self.currency != winner.currency
