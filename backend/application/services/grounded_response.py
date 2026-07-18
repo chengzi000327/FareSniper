@@ -62,48 +62,55 @@ def _primary_currency(deals: Sequence[Mapping[str, Any]]) -> str:
     return "CNY"
 
 
+def _winning_price_row(deal: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    winning_price_id = deal.get("winning_price_id")
+    if not isinstance(winning_price_id, str) or not winning_price_id.strip():
+        return None
+    matches = [
+        item
+        for item in deal.get("prices") or ()
+        if isinstance(item, Mapping) and item.get("id") == winning_price_id
+    ]
+    if len(matches) != 1:
+        raise ValueError("winning price id must resolve to exactly one row")
+    return matches[0]
+
+
 def _display_price(
-    deal: Mapping[str, Any], currency: str
-) -> tuple[int | None, str]:
-    eligible: list[tuple[int, str]] = []
-    deal_currency = _currency(deal.get("currency")) or currency
-    if deal_currency == currency:
+    deal: Mapping[str, Any], default_currency: str
+) -> tuple[int | None, str, Mapping[str, Any] | None]:
+    deal_currency = _currency(deal.get("currency")) or default_currency
+    winner = _winning_price_row(deal)
+    if winner is None:
         for key in ("display_price", "price", "total_price", "lowest_price"):
             price = _numeric_price(deal.get(key))
             if price is not None:
-                eligible.append((price, deal_currency))
+                return price, deal_currency, None
+        return None, deal_currency, None
 
-    for item in deal.get("prices") or ():
-        if not isinstance(item, Mapping):
-            continue
-        if item.get("provider_status") in _INELIGIBLE_PROVIDER_STATUSES:
-            continue
-        item_currency = _currency(item.get("currency")) or currency
-        if item_currency != currency:
-            continue
-        price = _numeric_price(item.get("price"))
-        if price is not None:
-            eligible.append((price, item_currency))
-    return (
-        min(eligible, key=lambda item: item[0])
-        if eligible
-        else (None, deal_currency)
+    if winner.get("provider_status") in _INELIGIBLE_PROVIDER_STATUSES:
+        raise ValueError("winning price row is not eligible")
+    price = _numeric_price(winner.get("price"))
+    winner_currency = _currency(winner.get("currency"))
+    if price is None or winner_currency is None:
+        raise ValueError("winning price row must have a valid amount and currency")
+    if _currency(deal.get("currency")) not in (None, winner_currency):
+        raise ValueError("winning price currency must match the card headline")
+    for key in ("display_price", "price", "total_price", "lowest_price"):
+        headline_price = _numeric_price(deal.get(key))
+        if headline_price is not None and headline_price != price:
+            raise ValueError("winning price must match the card headline")
+    return price, winner_currency, winner
+
+
+def _has_stale_price(
+    deal: Mapping[str, Any], winner: Mapping[str, Any] | None
+) -> bool:
+    selected = winner if winner is not None else deal
+    return any(
+        selected.get(key) == "stale"
+        for key in ("data_freshness", "price_status", "provider_status")
     )
-
-
-def _has_stale_price(deal: Mapping[str, Any]) -> bool:
-    if deal.get("data_freshness") == "stale":
-        return True
-    for item in deal.get("prices") or ():
-        if not isinstance(item, Mapping) or _numeric_price(item.get("price")) is None:
-            continue
-        if (
-            item.get("data_freshness") == "stale"
-            or item.get("price_status") == "stale"
-            or item.get("provider_status") == "stale"
-        ):
-            return True
-    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,7 +157,7 @@ def build_response_facts(
     currency = _primary_currency(snapshot)
     response_rows: list[ResponseRow] = []
     for deal in snapshot:
-        display_price, display_currency = _display_price(deal, currency)
+        display_price, display_currency, winner = _display_price(deal, currency)
         response_rows.append(
             ResponseRow(
                 flight_no=str(deal.get("flight_no") or "待确认"),
@@ -158,7 +165,7 @@ def build_response_facts(
                 arrive_time=str(deal.get("arrive_time") or "待确认"),
                 display_price=display_price,
                 currency=display_currency,
-                is_stale=_has_stale_price(deal),
+                is_stale=_has_stale_price(deal, winner),
                 card=_freeze(deal),
             )
         )

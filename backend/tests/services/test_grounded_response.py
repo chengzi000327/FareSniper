@@ -52,19 +52,23 @@ def test_markdown_preserves_first_deal_and_uses_stale_display_price():
         _deal("JD5121", 650, depart_time="08:00", arrive_time="10:00"),
         _deal(
             "JD5577",
-            None,
+            620,
             depart_time="11:00",
             arrive_time="13:20",
             freshness="stale",
             prices=[
                 {
+                    "id": "ctrip-JD5577-20260720",
                     "price": 620,
                     "currency": "CNY",
+                    "price_status": "stale",
+                    "provider_status": "stale",
                     "data_freshness": "stale",
                 }
             ],
         ),
     ]
+    deals[1]["winning_price_id"] = "ctrip-JD5577-20260720"
 
     markdown = render_flight_markdown(build_response_facts(deals, budget=500))
     first_row = "| JD5121 | 08:00 | 10:00 | ¥650 |"
@@ -77,48 +81,81 @@ def test_markdown_preserves_first_deal_and_uses_stale_display_price():
     assert "可设置 ¥500 价格提醒" in markdown
 
 
-def test_display_price_compares_fresh_top_level_fields_with_stale_ctrip_row():
+def test_display_price_uses_exact_winning_row_not_cheaper_nested_inventory():
     deal = _deal(
         "JD5121",
-        700,
+        550,
         freshness="fresh",
         prices=[
             {
-                "id": "ctrip-JD5121-20260720",
-                "name": "携程",
-                "price": 620,
+                "id": "flyai-JD5121-20260720",
+                "name": "飞猪",
+                "price": 550,
                 "currency": "CNY",
-                "lowest": False,
-                "price_status": "stale",
-                "provider_status": "stale",
-                "data_provider": "ctrip",
-                "data_freshness": "stale",
+                "lowest": True,
+                "price_status": "priced",
+                "provider_status": "success",
+                "data_provider": "flyai",
+                "data_freshness": "fresh",
             },
             {
-                "id": "disabled-JD5121-20260720",
-                "name": "不可用平台",
-                "price": 100,
+                "id": "ctrip-JD5121-20260720",
+                "name": "携程",
+                "price": 500,
                 "currency": "CNY",
-                "provider_status": "disabled",
+                "lowest": False,
+                "price_status": "priced",
+                "provider_status": "success",
+                "data_provider": "ctrip_snapshot",
+                "data_freshness": "fresh",
+            },
+            {
+                "id": "stale-JD5121-20260720",
+                "name": "过期平台",
+                "price": 400,
+                "currency": "CNY",
+                "price_status": "stale",
+                "provider_status": "stale",
+                "data_provider": "serpapi_google_flights",
+                "data_freshness": "stale",
             },
         ],
     )
     deal.update(
         {
-            "display_price": 740,
-            "lowest_price": 680,
-            "total_price": 710,
-            "winning_price_id": "fresh-JD5121-20260720",
+            "lowest_price": 550,
+            "total_price": 550,
+            "winning_price_id": "flyai-JD5121-20260720",
         }
     )
 
-    facts = build_response_facts([deal], budget=650)
+    facts = build_response_facts([deal], budget=525)
 
-    assert facts.rows[0].display_price == 620
-    assert facts.minimum_display_price == 620
-    assert facts.within_budget is True
-    assert facts.has_stale_prices is True
-    assert "平台展示价最低：¥620" in render_flight_markdown(facts)
+    assert facts.rows[0].display_price == 550
+    assert facts.minimum_display_price == 550
+    assert facts.within_budget is False
+    assert facts.has_stale_prices is False
+    assert "平台展示价最低：¥550" in render_flight_markdown(facts)
+
+
+def test_winning_row_must_match_card_headline_and_currency():
+    deal = _deal(
+        "JD5121",
+        550,
+        prices=[
+            {
+                "id": "winner",
+                "price": 560,
+                "currency": "CNY",
+                "provider_status": "success",
+                "data_freshness": "fresh",
+            }
+        ],
+    )
+    deal["winning_price_id"] = "winner"
+
+    with pytest.raises(ValueError, match="winning price"):
+        build_response_facts([deal], budget=None)
 
 
 def test_nested_price_keeps_selected_amount_and_currency_atomic():
@@ -128,11 +165,12 @@ def test_nested_price_keeps_selected_amount_and_currency_atomic():
             "flight_no": "JD5577",
             "depart_time": "11:00",
             "arrive_time": "13:20",
-            "price": 80,
-            "lowest_price": 80,
-            "total_price": 80,
-            "currency": "USD",
-            "data_freshness": "fresh",
+            "price": 620,
+            "lowest_price": 620,
+            "total_price": 620,
+            "currency": "CNY",
+            "data_freshness": "stale",
+            "winning_price_id": "ctrip-JD5577-20260720",
             "prices": [
                 {
                     "id": "ctrip-JD5577-20260720",

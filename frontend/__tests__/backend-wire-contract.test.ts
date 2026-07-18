@@ -43,15 +43,15 @@ test("parses the committed backend progressive payload without contract drift", 
     (row) => row.data_provider === "ctrip_snapshot"
   );
   expect(winner).toMatchObject({
-    name: "飞猪",
-    price: 580,
+    name: "携程",
+    price: 500,
     lowest: true,
     data_freshness: "fresh",
   });
   expect(snapshot).toMatchObject({
     name: "携程",
     price: 500,
-    lowest: false,
+    lowest: true,
   });
   expect(deal?.platform).toBe(winner?.name);
   expect(deal?.total_price).toBe(winner?.price);
@@ -63,8 +63,9 @@ test("parses the committed backend progressive payload without contract drift", 
       .filter((row) => row.id !== deal.winning_price_id)
       .every((row) => row.lowest === false)
   ).toBe(true);
-  expect(deal?.booking_url).toContain(
-    "?offer=fixture-token-not-secret&channel=web"
-  );
+  expect(deal?.booking_url).toBe("https://ctrip.example.test/reference");
+  expect(deal?.prices.some((row) =>
+    row.url?.endsWith("?offer=fixture-token-not-secret&channel=web")
+  )).toBe(true);
   expect(response?.session_id).toBe("fixture-session");
 });

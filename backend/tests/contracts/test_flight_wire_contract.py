@@ -55,8 +55,8 @@ def test_backend_fixture_preserves_https_deep_link_query_and_currency() -> None:
         for row in result_deal["prices"]
         if row["data_provider"] == "ctrip_snapshot"
     )
-    assert winner["name"] == result_deal["platform"] == "飞猪"
-    assert winner["price"] == result_deal["total_price"] == 580
+    assert winner["name"] == result_deal["platform"] == "携程"
+    assert winner["price"] == result_deal["total_price"] == 500
     assert winner["url"] == result_deal["booking_url"]
     assert winner["lowest"] is True
     assert winner["data_freshness"] == result_deal["data_freshness"] == "fresh"
@@ -67,4 +67,4 @@ def test_backend_fixture_preserves_https_deep_link_query_and_currency() -> None:
         if row["id"] != result_deal["winning_price_id"]
     )
     assert snapshot["price"] == 500
-    assert snapshot["lowest"] is False
+    assert snapshot["lowest"] is True

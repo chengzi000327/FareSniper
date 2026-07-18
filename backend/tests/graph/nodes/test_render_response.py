@@ -157,13 +157,23 @@ async def test_deal_response_grounds_all_price_and_budget_fields_in_final_facts(
                 {
                     "flight_no": "JD5121",
                     "price": 700,
-                    "lowest_price": 680,
-                    "total_price": 710,
+                    "lowest_price": 700,
+                    "total_price": 700,
                     "currency": "CNY",
                     "data_freshness": "fresh",
                     "winning_price_id": "fresh-JD5121",
                     "prices": [
                         {
+                            "id": "fresh-JD5121",
+                            "name": "飞猪",
+                            "price": 700,
+                            "currency": "CNY",
+                            "price_status": "priced",
+                            "provider_status": "success",
+                            "data_freshness": "fresh",
+                        },
+                        {
+                            "id": "stale-JD5121",
                             "name": "携程",
                             "price": 620,
                             "currency": "CNY",
@@ -188,9 +198,9 @@ async def test_deal_response_grounds_all_price_and_budget_fields_in_final_facts(
 
     assert response.query["budget"] == 500
     assert response.analysis == {
-        "min_price": 620,
+        "min_price": 700,
         "max_price": 800,
-        "avg_price": 710,
+        "avg_price": 750,
         "currency": "CNY",
         "avg_90d": None,
         "lower_than_avg": None,
@@ -203,7 +213,7 @@ async def test_deal_response_grounds_all_price_and_budget_fields_in_final_facts(
     assert response.recommendation["action"] == "watch"
     assert response.recommendation["confidence"] == "medium"
     assert response.recommendation["signals"] == []
-    assert "平台展示价最低：¥620" in response.recommendation["text"]
+    assert "平台展示价最低：¥700" in response.recommendation["text"]
     assert "可设置 ¥500 价格提醒" in response.recommendation["text"]
     assert "¥680" not in response.recommendation["text"]
     assert "符合你的心理价位" not in response.recommendation["text"]
