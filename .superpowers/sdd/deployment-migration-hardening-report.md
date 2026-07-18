@@ -222,9 +222,9 @@ bind, inspecting schema, or issuing any Alembic operation.
   Alembic operations, and exact deep equality of schema and rows.
 - Inventory check reflection now compares both the exact required name and its
   `sqltext` definition.
-- Equivalent non-negative forms are accepted after bounded normalization of
-  whitespace, parentheses, identifier quoting, common integer/numeric casts,
-  and comparison direction.
+- Equivalent non-negative forms are accepted by an anchored operand parser that
+  preserves quoted identifier contents, applies PostgreSQL folding only to the
+  unquoted identifier, and permits supported numeric casts only on literal zero.
 - A required-name check with any other definition raises before schema or row
   mutation. An absent required-name check is still created normally.
 
@@ -322,8 +322,9 @@ Exact output: no output; both commands exited `0`.
   have focused coverage.
 - Confirmed a mismatched definition records zero Alembic operations and leaves
   rows and schema unchanged.
-- Confirmed normalization rejects `item_count >= -1` and accepts reflected
-  parenthesized, quoted, cast, and reversed equivalent forms.
+- Confirmed parsing rejects `item_count >= -1`, preserves quoted identifier
+  contents, and accepts only harmless parenthesized, zero-cast, and reversed
+  equivalent forms.
 - Confirmed the patch contains no credentials, deployment URLs, production
   data, or database-facing command.
 
@@ -421,7 +422,7 @@ Exact output: no output; both commands exited `0`.
 ### Validator Self-Review
 
 - Confirmed the comparison regex is anchored with `fullmatch()` across the
-  entire reflected definition after only whitespace and quote normalization.
+  entire reflected definition without deleting quoted identifier contents.
 - Confirmed the `item_count` operand accepts only harmless enclosing
   parentheses and rejects every cast, including `::smallint` and
   `::numeric(1,0)`.
@@ -440,4 +441,85 @@ Exact output: no output; both commands exited `0`.
 
 1. The unrelated Alembic head assertion remains stale and red.
 2. PostgreSQL-backed execution was not run because all database access and
+   modification were explicitly prohibited.
+
+## Quoted Identifier Final Fix
+
+This final pass replaces global SQL lowercasing, whitespace deletion, and quote
+deletion with quote-preserving operand parsing. Unquoted `item_count` uses
+PostgreSQL's case-folding semantics. A quoted identifier is accepted only when
+its token is exactly `"item_count"`; quoted uppercase, embedded whitespace, and
+escaped-quote variants are mismatches.
+
+### Quoted Identifier RED
+
+The quoted mismatch tests were added and run before production code was edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+..............FFF.....                                                   [100%]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation["ITEM_COUNT" >= 0]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation["item_ count" >= 0]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation["item_""count" >= 0]
+3 failed, 19 passed in 0.12s
+```
+
+Each failure showed global normalization accepting a distinct quoted
+PostgreSQL identifier as if it were the real unquoted `item_count` column.
+
+### Quoted Identifier GREEN
+
+Command:
+
+```bash
+python3 -m pytest -q --tb=no backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Exact output:
+
+```text
+......................                                                   [100%]
+22 passed in 0.09s
+```
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Exact output: no output; both commands exited `0`.
+
+### Quoted Identifier Final Self-Review
+
+- Confirmed there is no global lowercase, whitespace, or quote deletion in the
+  reflected SQL validator.
+- Confirmed outer-parenthesis scanning tracks quoted regions and PostgreSQL
+  escaped double quotes without changing identifier contents.
+- Confirmed unquoted `item_count` is matched case-insensitively as PostgreSQL
+  folds it, while the only accepted quoted token is exactly `"item_count"`.
+- Confirmed `"ITEM_COUNT"`, `"item_ count"`, and `"item_""count"` all raise the
+  mismatch error with zero Alembic operations and unchanged modeled schema and
+  rows.
+- Confirmed every cast on the column operand remains rejected.
+- Confirmed harmless parentheses, supported casts on literal zero, and the
+  reversed `0 <= item_count` form remain accepted.
+- Confirmed both revision downgrades remain explicitly irreversible.
+- Confirmed no database, Railway environment, secret, deployment URL, or
+  production data was accessed or added.
+
+### Final Remaining Concerns
+
+1. The unrelated Alembic head assertion remains stale from the base branch.
+2. PostgreSQL-backed execution was not run because database access and
    modification were explicitly prohibited.

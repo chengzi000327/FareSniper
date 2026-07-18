@@ -19,36 +19,59 @@ depends_on: Union[str, Sequence[str], None] = None
 
 _ITEM_COUNT_CHECK_NAME = "ck_provider_inventory_observation_item_count"
 _COMPARISON_RE = re.compile(
-    r"^(?P<left>.+?)(?P<operator>>=|<=)(?P<right>.+)$"
+    r"^\s*(?P<left>.+?)\s*(?P<operator>>=|<=)\s*(?P<right>.+?)\s*$",
+    re.DOTALL,
 )
 _ZERO_CAST_RE = re.compile(
-    r"^(?P<operand>.+)::"
-    r"(?:smallint|integer|bigint|numeric(?:\(\d+(?:,\d+)?\))?)$"
+    r"^(?P<operand>.+?)\s*::\s*"
+    r"(?:smallint|integer|bigint|numeric"
+    r"(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?)\s*$",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
-def _strip_outer_parentheses(expression: str) -> str:
-    while expression.startswith("(") and expression.endswith(")"):
-        depth = 0
-        for index, character in enumerate(expression):
+def _outer_parentheses_wrap_expression(expression: str) -> bool:
+    if not expression.startswith("(") or not expression.endswith(")"):
+        return False
+    depth = 0
+    in_quotes = False
+    index = 0
+    while index < len(expression):
+        character = expression[index]
+        if character == '"':
+            if (
+                in_quotes
+                and index + 1 < len(expression)
+                and expression[index + 1] == '"'
+            ):
+                index += 2
+                continue
+            in_quotes = not in_quotes
+        elif not in_quotes:
             if character == "(":
                 depth += 1
             elif character == ")":
                 depth -= 1
-                if depth == 0:
-                    if index != len(expression) - 1:
-                        return expression
-                    expression = expression[1:-1]
-                    break
                 if depth < 0:
-                    return expression
-        else:
-            return expression
+                    return False
+                if depth == 0:
+                    return index == len(expression) - 1
+        index += 1
+    return False
+
+
+def _strip_outer_parentheses(expression: str) -> str:
+    expression = expression.strip()
+    while _outer_parentheses_wrap_expression(expression):
+        expression = expression[1:-1].strip()
     return expression
 
 
 def _is_item_count_operand(expression: str) -> bool:
-    return _strip_outer_parentheses(expression) == "item_count"
+    expression = _strip_outer_parentheses(expression)
+    if expression == '"item_count"':
+        return True
+    return re.fullmatch(r"item_count", expression, re.IGNORECASE) is not None
 
 
 def _is_zero_operand(expression: str) -> bool:
@@ -61,9 +84,8 @@ def _is_zero_operand(expression: str) -> bool:
 def _is_nonnegative_item_count_check(sqltext: object) -> bool:
     if not isinstance(sqltext, str):
         return False
-    normalized = re.sub(r"\s+", "", sqltext.lower()).replace('"', "")
     comparison = _COMPARISON_RE.fullmatch(
-        _strip_outer_parentheses(normalized)
+        _strip_outer_parentheses(sqltext)
     )
     if comparison is None:
         return False

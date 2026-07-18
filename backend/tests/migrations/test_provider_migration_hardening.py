@@ -264,6 +264,7 @@ def test_inventory_upgrade_adds_only_missing_check_to_precreated_table(
     "sqltext",
     [
         "item_count >= 0",
+        "ITEM_COUNT >= 0",
         "(item_count >= 0)",
         '((("item_count") >= (0)::integer))',
         "0 <= item_count",
@@ -303,6 +304,9 @@ def test_inventory_upgrade_accepts_equivalent_named_check_definitions(
         "item_count >= -1",
         "item_count::smallint >= 0",
         "item_count::numeric(1, 0) >= 0",
+        '"ITEM_COUNT" >= 0',
+        '"item_ count" >= 0',
+        '"item_""count" >= 0',
     ],
 )
 def test_inventory_upgrade_rejects_mismatched_named_check_without_mutation(
