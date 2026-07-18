@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     delete,
     func,
     select,
@@ -52,6 +53,12 @@ class PlatformPriceSnapshot(Base):
             "ix_platform_price_provider_flight",
             "data_provider",
             "flight_snapshot_id",
+        ),
+        UniqueConstraint(
+            "flight_snapshot_id",
+            "data_provider",
+            "platform",
+            name="uq_platform_price_provider_seller",
         ),
         {"extend_existing": True},
     )
@@ -150,14 +157,69 @@ def _provider_refresh_scope(
 def _deduplicate_provider_prices(
     flight: dict[str, Any], default_currency: str
 ) -> list[dict[str, Any]]:
-    by_seller_currency: dict[tuple[str, str], dict[str, Any]] = {}
+    by_seller: dict[str, dict[str, Any]] = {}
     for price in flight.get("prices", []):
         currency = str(price.get("currency") or default_currency).upper()
-        key = (str(price["platform"]), currency)
-        existing = by_seller_currency.get(key)
-        if existing is None or int(price["price"]) < int(existing["price"]):
-            by_seller_currency[key] = {**price, "currency": currency}
-    return list(by_seller_currency.values())
+        seller = str(price["platform"])
+        candidate = {**price, "currency": currency}
+        existing = by_seller.get(seller)
+        if existing is None:
+            by_seller[seller] = candidate
+        elif currency == default_currency and existing["currency"] != currency:
+            by_seller[seller] = candidate
+        elif currency == existing["currency"] and int(price["price"]) < int(
+            existing["price"]
+        ):
+            by_seller[seller] = candidate
+    return list(by_seller.values())
+
+
+def _offer_to_provider_flight(offer: object) -> dict[str, Any]:
+    if hasattr(offer, "model_dump"):
+        values = offer.model_dump(mode="json")  # type: ignore[attr-defined]
+    elif isinstance(offer, dict):
+        values = dict(offer)
+    else:
+        raise TypeError("provider offer must be a FlightOffer or mapping")
+
+    total_price = values.get("total_price", values.get("display_price"))
+    if isinstance(total_price, bool) or not isinstance(total_price, int):
+        raise ValueError("provider offers require an integer total_price")
+    if total_price <= 0:
+        raise ValueError("provider offers require a positive total_price")
+
+    duration_minutes = values.get("duration_minutes")
+    raw_reference = values.get("raw_reference")
+    return {
+        "flight_no": values["flight_no"],
+        "airline": values.get("airline") or "",
+        "origin_code": values["origin_code"],
+        "destination_code": values["destination_code"],
+        "depart_date": values["depart_date"],
+        "dep_time": values.get("depart_time") or "",
+        "arr_time": values.get("arrive_time") or "",
+        "duration": (
+            f"{duration_minutes}分钟"
+            if duration_minutes is not None
+            else ""
+        ),
+        "stops": int(values.get("stops") or 0),
+        "currency": str(values.get("currency") or "CNY").upper(),
+        "prices": [
+            {
+                "platform": values["seller_name"],
+                "price": total_price,
+                "currency": values.get("currency") or "CNY",
+                "url": values.get("booking_url") or "",
+                "raw_payload": (
+                    {"raw_reference": raw_reference}
+                    if raw_reference is not None
+                    else None
+                ),
+                "price_status": values.get("price_status") or "priced",
+            }
+        ],
+    }
 
 
 def _display_currency(prices: list[PlatformPriceSnapshot]) -> str | None:
@@ -239,6 +301,10 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
                     PlatformPriceSnapshot.data_provider == "legacy",
                 )
             )
+            default_currency = str(f.get("currency") or "CNY").upper()
+            legacy_prices = _deduplicate_provider_prices(
+                f, default_currency
+            )
             price_rows = [
                 {
                     "id": f"{sid}-{idx}",
@@ -255,7 +321,7 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
                     "price_status": p.get("price_status", "priced"),
                     "expires_at": now + CACHE_TTL,
                 }
-                for idx, p in enumerate(f.get("prices", []))
+                for idx, p in enumerate(legacy_prices)
             ]
             if price_rows:
                 await s.execute(
@@ -272,7 +338,22 @@ async def upsert_provider_flights(
     origin_code: str | None = None,
     destination_code: str | None = None,
     depart_date: str | None = None,
+    _session: Any = None,
 ) -> None:
+    if _session is None:
+        async with get_session() as session:
+            await upsert_provider_flights(
+                provider,
+                flights,
+                ttl_minutes,
+                origin_code=origin_code,
+                destination_code=destination_code,
+                depart_date=depart_date,
+                _session=session,
+            )
+            await session.commit()
+        return
+
     scope = _provider_refresh_scope(
         flights,
         origin_code=origin_code,
@@ -281,109 +362,136 @@ async def upsert_provider_flights(
     )
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=ttl_minutes)
-    async with get_session() as s:
-        route_lock = _advisory_lock_key("|".join((provider, *scope)))
-        await s.execute(select(func.pg_advisory_xact_lock(route_lock)))
-        scoped_snapshot_ids = select(FlightSnapshot.id).where(
-            FlightSnapshot.origin_code == scope[0],
-            FlightSnapshot.destination_code == scope[1],
-            FlightSnapshot.depart_date == scope[2],
+    s = _session
+    route_lock = _advisory_lock_key("|".join((provider, *scope)))
+    await s.execute(select(func.pg_advisory_xact_lock(route_lock)))
+    scoped_snapshot_ids = select(FlightSnapshot.id).where(
+        FlightSnapshot.origin_code == scope[0],
+        FlightSnapshot.destination_code == scope[1],
+        FlightSnapshot.depart_date == scope[2],
+    )
+    await s.execute(
+        delete(PlatformPriceSnapshot).where(
+            PlatformPriceSnapshot.data_provider == provider,
+            PlatformPriceSnapshot.flight_snapshot_id.in_(
+                scoped_snapshot_ids
+            ),
         )
-        await s.execute(
-            delete(PlatformPriceSnapshot).where(
-                PlatformPriceSnapshot.data_provider == provider,
-                PlatformPriceSnapshot.flight_snapshot_id.in_(
-                    scoped_snapshot_ids
-                ),
-            )
-        )
-        for f in flights:
-            sid = _snapshot_id(f)
-            values = {
-                "id": sid,
-                "origin_code": f["origin_code"],
-                "destination_code": f["destination_code"],
-                "depart_date": f["depart_date"],
-                "flight_no": f["flight_no"],
-                "airline": f.get("airline", ""),
-                "dep_time": f.get("dep_time", ""),
-                "arr_time": f.get("arr_time", ""),
-                "duration": f.get("duration", ""),
-                "stops": int(f.get("stops", 0)),
-                "lowest_price": _lowest_price(f),
-                "history_avg_90d": f.get("history_avg_90d"),
-                "history_low_90d": f.get("history_low_90d"),
-                "crawled_at": now,
-                "expires_at": expires_at,
-            }
-            stmt = pg_insert(FlightSnapshot.__table__).values(**values)
-            await s.execute(
-                stmt.on_conflict_do_update(
-                    index_elements=[FlightSnapshot.id],
-                    set_={
-                        "airline": values["airline"],
-                        "arr_time": values["arr_time"],
-                        "duration": values["duration"],
-                        "stops": values["stops"],
-                    },
-                )
-            )
-            default_currency = str(f.get("currency") or "CNY").upper()
-            provider_prices = _deduplicate_provider_prices(
-                f, default_currency
-            )
-            price_rows = [
-                {
-                    "id": _provider_price_id(
-                        sid, provider, p["platform"], p["currency"]
-                    ),
-                    "flight_snapshot_id": sid,
-                    "platform": p["platform"],
-                    "price": int(p["price"]),
-                    "url": p.get("url", ""),
-                    "raw_payload": p.get("raw_payload"),
-                    "crawled_at": now,
-                    "data_provider": provider,
-                    "currency": p["currency"],
-                    "price_status": p.get("price_status", "priced"),
-                    "expires_at": expires_at,
-                }
-                for p in provider_prices
-            ]
-            if price_rows:
-                await s.execute(
-                    pg_insert(PlatformPriceSnapshot.__table__).values(
-                        price_rows
-                    )
-                )
-        observation_values = {
-            "provider": provider,
-            "origin_code": scope[0],
-            "destination_code": scope[1],
-            "depart_date": scope[2],
-            "observed_at": now,
+    )
+    for f in flights:
+        sid = _snapshot_id(f)
+        values = {
+            "id": sid,
+            "origin_code": f["origin_code"],
+            "destination_code": f["destination_code"],
+            "depart_date": f["depart_date"],
+            "flight_no": f["flight_no"],
+            "airline": f.get("airline", ""),
+            "dep_time": f.get("dep_time", ""),
+            "arr_time": f.get("arr_time", ""),
+            "duration": f.get("duration", ""),
+            "stops": int(f.get("stops", 0)),
+            "lowest_price": _lowest_price(f),
+            "history_avg_90d": f.get("history_avg_90d"),
+            "history_low_90d": f.get("history_low_90d"),
+            "crawled_at": now,
             "expires_at": expires_at,
-            "item_count": len(flights),
         }
-        observation_stmt = pg_insert(
-            ProviderInventoryObservation.__table__
-        ).values(**observation_values)
+        stmt = pg_insert(FlightSnapshot.__table__).values(**values)
         await s.execute(
-            observation_stmt.on_conflict_do_update(
-                index_elements=[
-                    ProviderInventoryObservation.provider,
-                    ProviderInventoryObservation.origin_code,
-                    ProviderInventoryObservation.destination_code,
-                    ProviderInventoryObservation.depart_date,
-                ],
+            stmt.on_conflict_do_update(
+                index_elements=[FlightSnapshot.id],
                 set_={
-                    "observed_at": now,
-                    "expires_at": expires_at,
-                    "item_count": len(flights),
+                    "airline": values["airline"],
+                    "arr_time": values["arr_time"],
+                    "duration": values["duration"],
+                    "stops": values["stops"],
                 },
             )
         )
-        await s.commit()
+        default_currency = str(f.get("currency") or "CNY").upper()
+        provider_prices = _deduplicate_provider_prices(f, default_currency)
+        price_rows = [
+            {
+                "id": _provider_price_id(
+                    sid, provider, p["platform"], p["currency"]
+                ),
+                "flight_snapshot_id": sid,
+                "platform": p["platform"],
+                "price": int(p["price"]),
+                "url": p.get("url", ""),
+                "raw_payload": p.get("raw_payload"),
+                "crawled_at": now,
+                "data_provider": provider,
+                "currency": p["currency"],
+                "price_status": p.get("price_status", "priced"),
+                "expires_at": expires_at,
+            }
+            for p in provider_prices
+        ]
+        if price_rows:
+            price_stmt = pg_insert(
+                PlatformPriceSnapshot.__table__
+            ).values(price_rows)
+            await s.execute(
+                price_stmt.on_conflict_do_update(
+                    constraint="uq_platform_price_provider_seller",
+                    set_={
+                        "price": price_stmt.excluded.price,
+                        "url": price_stmt.excluded.url,
+                        "raw_payload": price_stmt.excluded.raw_payload,
+                        "crawled_at": price_stmt.excluded.crawled_at,
+                        "currency": price_stmt.excluded.currency,
+                        "price_status": price_stmt.excluded.price_status,
+                        "expires_at": price_stmt.excluded.expires_at,
+                    },
+                )
+            )
+    observation_values = {
+        "provider": provider,
+        "origin_code": scope[0],
+        "destination_code": scope[1],
+        "depart_date": scope[2],
+        "observed_at": now,
+        "expires_at": expires_at,
+        "item_count": len(flights),
+    }
+    observation_stmt = pg_insert(
+        ProviderInventoryObservation.__table__
+    ).values(**observation_values)
+    await s.execute(
+        observation_stmt.on_conflict_do_update(
+            index_elements=[
+                ProviderInventoryObservation.provider,
+                ProviderInventoryObservation.origin_code,
+                ProviderInventoryObservation.destination_code,
+                ProviderInventoryObservation.depart_date,
+            ],
+            set_={
+                "observed_at": now,
+                "expires_at": expires_at,
+                "item_count": len(flights),
+            },
+        )
+    )
+
+
+async def upsert_provider_offers(
+    provider: str,
+    offers: list[object],
+    ttl_minutes: int,
+    *,
+    _session: Any = None,
+) -> None:
+    if not offers:
+        return
+    flights = [_offer_to_provider_flight(offer) for offer in offers]
+    await upsert_provider_flights(
+        provider,
+        flights,
+        ttl_minutes,
+        _session=_session,
+    )
 
 
 async def read_deals_latest(
@@ -511,7 +619,6 @@ async def read_deals(*, origin_code: str, destination_code: str, depart_date: st
 
 
 async def read_provider_deals(
-    *,
     provider: str,
     origin_code: str,
     destination_code: str,

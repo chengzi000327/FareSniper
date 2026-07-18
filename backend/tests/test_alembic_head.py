@@ -12,7 +12,10 @@ import sys
 from pathlib import Path
 
 from backend.config import settings
-from backend.infrastructure.db.flight_demand_repo import FlightSearchDemandRow
+from backend.infrastructure.db.flight_demand_repo import (
+    CollectorNodeRow,
+    FlightSearchDemandRow,
+)
 from backend.infrastructure.db.flight_snapshot_repo import PlatformPriceSnapshot
 
 
@@ -56,7 +59,7 @@ def test_alembic_has_exactly_one_head():
         check=True,
     )
     heads = [line for line in proc.stdout.splitlines() if "(head)" in line]
-    assert heads == ["20260716_provider_snapshots (head)"]
+    assert heads == ["20260718_ctrip_collector (head)"]
 
 
 def test_alembic_registers_task4_repositories():
@@ -82,7 +85,7 @@ def test_demand_metadata_matches_migration_keys():
     constraint = next(
         item
         for item in table.constraints
-        if item.name == "uq_flight_search_demand_route_date"
+        if item.name == "uq_flight_search_demand_hour"
     )
     index = next(
         item
@@ -94,11 +97,34 @@ def test_demand_metadata_matches_migration_keys():
         "origin_code",
         "destination_code",
         "depart_date",
+        "demand_hour",
     ]
     assert [column.name for column in index.columns] == [
         "active",
-        "next_run_at",
+        "status",
+        "next_attempt_at",
         "priority",
+    ]
+
+    assert {
+        "status",
+        "attempts",
+        "next_attempt_at",
+        "lease_owner",
+        "lease_expires_at",
+        "last_error",
+        "created_at",
+        "updated_at",
+    } <= set(table.columns.keys())
+
+
+def test_collector_node_metadata_matches_migration():
+    assert list(CollectorNodeRow.__table__.columns.keys()) == [
+        "node_id",
+        "version",
+        "status",
+        "last_heartbeat",
+        "last_success",
     ]
 
 
@@ -112,4 +138,14 @@ def test_platform_price_metadata_matches_provider_index():
     assert [column.name for column in index.columns] == [
         "data_provider",
         "flight_snapshot_id",
+    ]
+    seller_key = next(
+        item
+        for item in PlatformPriceSnapshot.__table__.constraints
+        if item.name == "uq_platform_price_provider_seller"
+    )
+    assert [column.name for column in seller_key.columns] == [
+        "flight_snapshot_id",
+        "data_provider",
+        "platform",
     ]
