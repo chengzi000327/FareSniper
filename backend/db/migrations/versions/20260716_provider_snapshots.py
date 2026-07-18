@@ -111,40 +111,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    inspector = sa.inspect(op.get_bind())
-    table_names = set(inspector.get_table_names())
-
-    if "flight_search_demands" in table_names:
-        demand_indexes = {
-            index["name"]
-            for index in inspector.get_indexes("flight_search_demands")
-        }
-        if "ix_flight_search_demands_due" in demand_indexes:
-            op.drop_index(
-                "ix_flight_search_demands_due",
-                table_name="flight_search_demands",
-            )
-        op.drop_table("flight_search_demands")
-
-    if "platform_price_snapshots" in table_names:
-        platform_indexes = {
-            index["name"]
-            for index in inspector.get_indexes("platform_price_snapshots")
-        }
-        if "ix_platform_price_provider_flight" in platform_indexes:
-            op.drop_index(
-                "ix_platform_price_provider_flight",
-                table_name="platform_price_snapshots",
-            )
-        platform_columns = {
-            column["name"]
-            for column in inspector.get_columns("platform_price_snapshots")
-        }
-        for column_name in (
-            "expires_at",
-            "price_status",
-            "currency",
-            "data_provider",
-        ):
-            if column_name in platform_columns:
-                op.drop_column("platform_price_snapshots", column_name)
+    raise RuntimeError(
+        "20260716_provider_snapshots is irreversible: existing provider "
+        "schema and flight search demand data may predate Alembic"
+    )

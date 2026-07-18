@@ -6,6 +6,7 @@ Create Date: 2026-07-18 00:00:00.000000
 """
 from __future__ import annotations
 
+import re
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -15,6 +16,21 @@ revision: str = "20260718_provider_inventory"
 down_revision: Union[str, Sequence[str], None] = "20260716_provider_snapshots"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
+
+_ITEM_COUNT_CHECK_NAME = "ck_provider_inventory_observation_item_count"
+
+
+def _is_nonnegative_item_count_check(sqltext: object) -> bool:
+    if not isinstance(sqltext, str):
+        return False
+    normalized = re.sub(r"\s+", "", sqltext.lower()).replace('"', "")
+    normalized = re.sub(
+        r"::(?:smallint|integer|bigint|numeric(?:\(\d+(?:,\d+)?\))?)",
+        "",
+        normalized,
+    )
+    normalized = normalized.replace("(", "").replace(")", "")
+    return normalized in {"item_count>=0", "0<=item_count"}
 
 
 def upgrade() -> None:
@@ -31,29 +47,37 @@ def upgrade() -> None:
             sa.Column("item_count", sa.Integer(), nullable=False),
             sa.CheckConstraint(
                 "item_count >= 0",
-                name="ck_provider_inventory_observation_item_count",
+                name=_ITEM_COUNT_CHECK_NAME,
             ),
         )
         return
 
-    check_constraints = {
-        constraint["name"]
-        for constraint in inspector.get_check_constraints(
-            "provider_inventory_observations"
-        )
-    }
-    if (
-        "ck_provider_inventory_observation_item_count"
-        not in check_constraints
-    ):
+    check_constraints = inspector.get_check_constraints(
+        "provider_inventory_observations"
+    )
+    named_check = next(
+        (
+            constraint
+            for constraint in check_constraints
+            if constraint.get("name") == _ITEM_COUNT_CHECK_NAME
+        ),
+        None,
+    )
+    if named_check is None:
         op.create_check_constraint(
-            "ck_provider_inventory_observation_item_count",
+            _ITEM_COUNT_CHECK_NAME,
             "provider_inventory_observations",
             "item_count >= 0",
+        )
+    elif not _is_nonnegative_item_count_check(named_check.get("sqltext")):
+        raise RuntimeError(
+            f"{_ITEM_COUNT_CHECK_NAME} has a mismatched definition; "
+            "refusing to alter the existing table"
         )
 
 
 def downgrade() -> None:
-    inspector = sa.inspect(op.get_bind())
-    if "provider_inventory_observations" in inspector.get_table_names():
-        op.drop_table("provider_inventory_observations")
+    raise RuntimeError(
+        "20260718_provider_inventory is irreversible: provider inventory "
+        "schema and data may predate Alembic"
+    )

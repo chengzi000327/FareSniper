@@ -206,3 +206,134 @@ explicitly prohibited modifying a database. No `alembic current`, `stamp`,
    object exists but cannot determine whether Alembic or an earlier
    `Base.metadata.create_all()` originally created it. The recovery procedure
    is upgrade-only; a downgrade would still reverse present revision objects.
+
+## Independent Review Fix
+
+This addendum records the follow-up patch for all four findings in
+`.superpowers/sdd/deployment-migration-hardening-review.md`. It supersedes
+Concern 3 above: both provider revision downgrades are now explicitly
+irreversible and abort before obtaining a bind, inspecting schema, or issuing
+any Alembic operation.
+
+### Resolution
+
+- `20260716_provider_snapshots.downgrade()` raises immediately, preventing both
+  destructive DDL and an Alembic revision decrement.
+- `20260718_provider_inventory_observations.downgrade()` raises immediately for
+  the same reason.
+- Focused upgrade-then-downgrade tests use populated pre-created demand,
+  platform-price, and inventory schemas. They assert the exception, zero
+  Alembic operations, and exact deep equality of schema and rows.
+- Inventory check reflection now compares both the exact required name and its
+  `sqltext` definition.
+- Equivalent non-negative forms are accepted after bounded normalization of
+  whitespace, parentheses, identifier quoting, common integer/numeric casts,
+  and comparison direction.
+- A required-name check with any other definition raises before schema or row
+  mutation. An absent required-name check is still created normally.
+
+### Review-Fix RED
+
+The new regression tests were run before either production migration was
+edited.
+
+Command:
+
+```bash
+python3 -m pytest -q backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Observed output:
+
+```text
+........F.FFFF                                                           [100%]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_upgrade_rejects_mismatched_named_check_without_mutation
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_provider_downgrade_aborts_without_touching_precreated_schema_or_rows
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_inventory_downgrade_aborts_without_touching_precreated_schema_or_rows
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_downgrade_aborts_before_touching_an_empty_schema[provider_migration-20260716_provider_snapshots.py]
+FAILED backend/tests/migrations/test_provider_migration_hardening.py::test_downgrade_aborts_before_touching_an_empty_schema[inventory_migration-20260718_provider_inventory_observations.py]
+5 failed, 9 passed in 0.13s
+```
+
+The failures were the intended missing behavior: mismatched constraint SQL did
+not raise, and both downgrades still executed instead of aborting.
+
+### Review-Fix GREEN
+
+Command:
+
+```bash
+python3 -m pytest -q --tb=no backend/tests/migrations/test_provider_migration_hardening.py
+```
+
+Exact output:
+
+```text
+..............                                                           [100%]
+14 passed in 0.08s
+```
+
+### Alembic Static Tests
+
+Command:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper' \
+TEST_DATABASE_URL='postgresql+asyncpg://test:test@127.0.0.1:1/faresniper_test' \
+python3 -m pytest -q --tb=no \
+  backend/tests/test_alembic_head.py::test_alembic_history_lists_init \
+  backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head \
+  backend/tests/test_alembic_head.py::test_alembic_registers_task4_repositories \
+  backend/tests/test_alembic_head.py::test_demand_metadata_matches_migration_keys \
+  backend/tests/test_alembic_head.py::test_platform_price_metadata_matches_provider_index
+```
+
+Exact output:
+
+```text
+.F...                                                                    [100%]
+=========================== short test summary info ============================
+FAILED backend/tests/test_alembic_head.py::test_alembic_has_exactly_one_head
+1 failed, 4 passed in 0.39s
+```
+
+The same pre-existing stale assertion remains: it expects
+`20260716_provider_snapshots (head)`, while the repository's actual single head
+is `20260718_provider_inventory (head)`. The static test file is outside this
+review-fix scope.
+
+### Static Checks
+
+Commands:
+
+```bash
+python3 -m py_compile \
+  backend/db/migrations/versions/20260716_provider_snapshots.py \
+  backend/db/migrations/versions/20260718_provider_inventory_observations.py \
+  backend/tests/migrations/test_provider_migration_hardening.py
+git diff --check
+```
+
+Exact output: no output; both commands exited `0`.
+
+### Review-Fix Self-Review
+
+- Confirmed each downgrade's first and only statement is an exception, so no
+  DDL, row operation, schema inspection, or version decrement can occur.
+- Confirmed upgrade-then-downgrade regression tests preserve populated
+  pre-created schema and rows byte-for-byte at the modeled state level.
+- Confirmed correct, missing, and mismatched exact-name constraint definitions
+  have focused coverage.
+- Confirmed a mismatched definition records zero Alembic operations and leaves
+  rows and schema unchanged.
+- Confirmed normalization rejects `item_count >= -1` and accepts reflected
+  parenthesized, quoted, cast, and reversed equivalent forms.
+- Confirmed the patch contains no credentials, deployment URLs, production
+  data, or database-facing command.
+
+### Remaining Concerns
+
+1. The unrelated Alembic head assertion remains stale and red.
+2. PostgreSQL-backed execution was not run because database modification was
+   explicitly prohibited. All review-fix verification is pure unit/static and
+   non-connecting.
