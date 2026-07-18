@@ -315,13 +315,21 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   const nonwinnersHaveExplicitFalse = prices.every(
     (price) => price.id === value.winning_price_id || price.lowest === false
   );
+  const freshWinner =
+    winner.price_status === "priced" &&
+    winner.provider_status === "success" &&
+    winner.data_freshness === "fresh";
+  const staleCtripWinner =
+    winner.data_provider === "ctrip_snapshot" &&
+    winner.price_status === "stale" &&
+    winner.provider_status === "stale" &&
+    winner.data_freshness === "stale" &&
+    isCompleteHttpsUrl(winner.url);
   return (
     nonwinnersHaveExplicitFalse &&
     winner.lowest === true &&
     winner.price !== null &&
-    winner.price_status === "priced" &&
-    winner.provider_status === "success" &&
-    winner.data_freshness === "fresh" &&
+    (freshWinner || staleCtripWinner) &&
     value.platform === winner.name &&
     value.currency === winner.currency &&
     value.price === winner.price &&

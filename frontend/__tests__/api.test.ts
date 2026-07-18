@@ -624,3 +624,55 @@ test("stream accepts an explicit false lowest state for a nonwinner", async () =
     searchApi.stream({ session_id: null, message: "hi" }, () => undefined)
   ).resolves.toEqual(response);
 });
+
+test("stream accepts a stale Ctrip snapshot winner and rejects other stale providers", async () => {
+  const staleCtrip = validPriceItem({
+    id: "ctrip-stale-cny",
+    name: "携程",
+    price: 500,
+    lowest: true,
+    price_status: "stale",
+    provider_status: "stale",
+    data_provider: "ctrip_snapshot",
+    data_freshness: "stale",
+    url: "https://ctrip.example.test/book",
+    expires_at: "2000-01-01T00:00:00+00:00",
+  });
+  const deal = validDeal({
+    platform: "携程",
+    price: 500,
+    lowest_price: 500,
+    total_price: 500,
+    winning_price_id: "ctrip-stale-cny",
+    prices: [staleCtrip],
+    booking_url: "https://ctrip.example.test/book",
+    h5_fallback_url: "https://ctrip.example.test/book",
+    data_freshness: "stale",
+    inventory_expires_at: "2000-01-01T00:00:00+00:00",
+  });
+  const response = completeResponse({ deals: [deal] });
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents(completeEvent(response))
+  );
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, () => undefined)
+  ).resolves.toEqual(response);
+
+  const staleOtherProvider = validDeal({
+    ...deal,
+    prices: [
+      {
+        ...staleCtrip,
+        data_provider: "serpapi_google_flights",
+      },
+    ],
+  });
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    streamEvents(completeEvent(completeResponse({ deals: [staleOtherProvider] })))
+  );
+
+  await expect(
+    searchApi.stream({ session_id: null, message: "hi" }, () => undefined)
+  ).rejects.toThrow("invalid stream event");
+});

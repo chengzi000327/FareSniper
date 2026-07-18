@@ -283,7 +283,62 @@ test("uses the backend winning row for badge, seller copy, and booking action", 
   );
 });
 
-test("gates realtime copy and booking when inventory freshness is unknown", () => {
+test("renders a stale Ctrip winner without realtime copy", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2099-08-01"
+      basePrice={500}
+      totalPrice={500}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="携程"
+      bookingUrl="https://ctrip.example.test/book"
+      winningPriceId="ctrip-stale-cny"
+      dataFreshness="stale"
+      inventoryExpiresAt="2000-01-01T00:00:00+00:00"
+      prices={[
+        priceRow({
+          id: "ctrip-stale-cny",
+          name: "携程",
+          price: 500,
+          lowest: true,
+          price_status: "stale",
+          provider_status: "stale",
+          data_provider: "ctrip_snapshot",
+          data_freshness: "stale",
+          url: "https://ctrip.example.test/book",
+          expires_at: "2000-01-01T00:00:00+00:00",
+        }),
+        priceRow({
+          id: "live-flyai",
+          name: "飞猪",
+          price: 560,
+          price_status: "priced",
+          provider_status: "success",
+          data_provider: "flyai",
+          data_freshness: "fresh",
+        }),
+      ]}
+    />
+  );
+
+  expect(within(screen.getByText("携程").parentElement!).getByText("¥500")).toBeInTheDocument();
+  expect(screen.getByText("¥560")).toBeInTheDocument();
+  expect(within(screen.getByText("携程").parentElement!).getByText("最低")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
+    "href",
+    "https://ctrip.example.test/book",
+  );
+  expect(screen.queryByText("价格可能已更新")).not.toBeInTheDocument();
+  expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
+  expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
+});
+
+test("keeps a numeric unknown-freshness row visible without realtime claims", () => {
   render(
     <DiscoveryCardContent
       from="北京"
@@ -313,7 +368,7 @@ test("gates realtime copy and booking when inventory freshness is unknown", () =
     />
   );
 
-  expect(screen.getByText("更新时间未知")).toBeInTheDocument();
+  expect(within(screen.getByText("携程").parentElement!).getByText("¥500")).toBeInTheDocument();
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
   expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
   expect(screen.queryByText(/最优解/)).not.toBeInTheDocument();
@@ -322,7 +377,7 @@ test("gates realtime copy and booking when inventory freshness is unknown", () =
   expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
 });
 
-test("gates realtime copy and booking after the winning inventory expiry", () => {
+test("gates realtime copy while retaining a selected booking after inventory expiry", () => {
   render(
     <DiscoveryCardContent
       from="北京"
@@ -356,12 +411,14 @@ test("gates realtime copy and booking after the winning inventory expiry", () =>
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
   expect(screen.queryByText("全网多端实时同步")).not.toBeInTheDocument();
   expect(screen.queryByText(/最优解/)).not.toBeInTheDocument();
-  expect(screen.queryByText("最低")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
-  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+  expect(screen.getByText("最低")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
+    "href",
+    "https://booking.example.test/expired"
+  );
 });
 
-test("rerenders at expiry and gates winner and row links while mounted", () => {
+test("rerenders at expiry and gates realtime winner and row links while mounted", () => {
   vi.useFakeTimers();
   const now = new Date("2099-08-01T00:00:00+00:00");
   const expiry = new Date(now.getTime() + 1_000).toISOString();
@@ -413,8 +470,11 @@ test("rerenders at expiry and gates winner and row links while mounted", () => {
   });
 
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.getByText("最低")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
+    "href",
+    "https://booking.example.test/winner"
+  );
   expect(screen.queryByRole("link", { name: "查看实时价" })).not.toBeInTheDocument();
 });
 
@@ -462,7 +522,10 @@ test("rechecks expiry on focus and visibility and cleans lifecycle resources", (
   expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
 
   fireEvent(document, new Event("visibilitychange"));
-  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "前往预订" })).toHaveAttribute(
+    "href",
+    "https://booking.example.test/winner"
+  );
   expect(vi.getTimerCount()).toBe(0);
 
   unmount();

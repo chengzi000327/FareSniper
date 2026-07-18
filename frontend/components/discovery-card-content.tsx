@@ -145,25 +145,43 @@ export function DiscoveryCardContent({
     inventoryExpiresAt,
     ...prices.map((price) => price.expires_at),
   ])
-  const isRealtimeWinner = (price: PriceItem) =>
-    price.id === winningPriceId &&
-    price.provider_status === 'success' &&
-    price.price_status === 'priced' &&
-    price.data_freshness === 'fresh' &&
+  const isSelectedWinner = (price: PriceItem) => {
+    const freshWinner =
+      price.provider_status === 'success' &&
+      price.price_status === 'priced' &&
+      price.data_freshness === 'fresh'
+    const staleCtripWinner =
+      price.data_provider === 'ctrip_snapshot' &&
+      price.provider_status === 'stale' &&
+      price.price_status === 'stale' &&
+      price.data_freshness === 'stale'
+
+    return (
+      price.id === winningPriceId &&
+      price.price !== null &&
+      computedTotal !== null &&
+      price.price === computedTotal &&
+      price.currency === currency &&
+      price.name === platform &&
+      price.data_freshness === dataFreshness &&
+      (freshWinner || staleCtripWinner)
+    )
+  }
+  const selectedWinner = prices.find(isSelectedWinner)
+  const hasSelectedWinner = selectedWinner !== undefined
+  const hasRealtimeWinner =
+    selectedWinner !== undefined &&
+    selectedWinner.provider_status === 'success' &&
+    selectedWinner.price_status === 'priced' &&
+    selectedWinner.data_freshness === 'fresh' &&
     dataFreshness === 'fresh' &&
     isExpiryCurrent(inventoryExpiresAt, expiryNow) &&
-    isExpiryCurrent(price.expires_at, expiryNow) &&
-    price.price !== null &&
-    computedTotal !== null &&
-    price.price === computedTotal &&
-    price.currency === currency &&
-    price.name === platform
-  const winningPrice = prices.find(isRealtimeWinner)
-  const hasVerifiedLowestPrice = winningPrice !== undefined
+    isExpiryCurrent(selectedWinner.expires_at, expiryNow)
   const safeBookingUrl =
-    winningPrice &&
+    hasSelectedWinner &&
+    selectedWinner &&
     isHttpsUrl(bookingUrl) &&
-    bookingUrl === winningPrice.url
+    bookingUrl === selectedWinner.url
       ? bookingUrl
       : null
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
@@ -187,7 +205,7 @@ export function DiscoveryCardContent({
             <p className={`font-medium text-brand-muted ${compact ? 'text-xs' : 'text-sm'}`}>
               {placeholder
                 ? '待查询 · 正在获取数据'
-                : hasVerifiedLowestPrice
+                : hasRealtimeWinner
                   ? `直飞特惠 · ${date || '实时价格'}`
                   : `航班价格参考${date ? ` · ${date}` : ''}`}
             </p>
@@ -258,10 +276,10 @@ export function DiscoveryCardContent({
           </span>
         </div>
 
-        <div className={`flex items-start gap-3 rounded-2xl px-4 py-2 ${hasVerifiedLowestPrice ? 'border border-green-100/60 bg-green-50/60' : 'border border-brand-text/5 bg-brand-bg/40'}`}>
+        <div className={`flex items-start gap-3 rounded-2xl px-4 py-2 ${hasRealtimeWinner ? 'border border-green-100/60 bg-green-50/60' : 'border border-brand-text/5 bg-brand-bg/40'}`}>
           <ShieldCheck className="mt-0.5 h-4 w-4 text-green-600" />
-          <p className={`text-sm leading-6 ${hasVerifiedLowestPrice ? 'text-green-800' : 'text-brand-muted'}`}>
-            {hasVerifiedLowestPrice ? (
+          <p className={`text-sm leading-6 ${hasRealtimeWinner ? 'text-green-800' : 'text-brand-muted'}`}>
+            {hasRealtimeWinner ? (
               <>
                 AI 监测：该价格为综合行李后的全网<span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
                 <span className="font-bold text-brand-orange">{platform}</span> 下单。
@@ -276,12 +294,12 @@ export function DiscoveryCardContent({
       <div className={`${sectionGap} rounded-2xl border border-brand-text/5 bg-brand-bg/40 ${compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'}`}>
         <div className="mb-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className={`h-2 w-2 rounded-full bg-brand-orange ${hasVerifiedLowestPrice ? 'animate-pulse' : ''}`} />
+            <div className={`h-2 w-2 rounded-full bg-brand-orange ${hasRealtimeWinner ? 'animate-pulse' : ''}`} />
             <span className="text-xs font-bold text-brand-muted sm:text-sm">
-              {hasVerifiedLowestPrice ? '全网多端实时同步' : '多端价格参考'}
+              {hasRealtimeWinner ? '全网多端实时同步' : '多端价格参考'}
             </span>
           </div>
-          {hasVerifiedLowestPrice ? (
+          {hasRealtimeWinner ? (
             <span className="rounded-md border border-brand-orange/20 bg-white/60 px-2 py-1 text-[11px] font-bold text-brand-orange">
               实时底价
             </span>
@@ -289,7 +307,7 @@ export function DiscoveryCardContent({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           {prices.map((price) => {
-            const lowest = isRealtimeWinner(price)
+            const lowest = hasSelectedWinner && price === selectedWinner
             const freshnessMessage =
               price.data_freshness === 'unknown'
                 ? '更新时间未知'
@@ -301,6 +319,10 @@ export function DiscoveryCardContent({
                 ? freshnessMessage
                 : statusText[price.provider_status] ?? freshnessMessage
             const rowPrice = formatCurrency(price.price, price.currency)
+            const displayedValue =
+              price.price !== null
+                ? rowPrice
+                : providerMessage ?? rowPrice
 
             return (
             <div key={price.id} className={`flex items-center justify-between ${lowest ? 'opacity-100' : 'opacity-45'}`}>
@@ -318,7 +340,7 @@ export function DiscoveryCardContent({
                   </a>
                 ) : (
                   <span className={`text-sm font-black sm:text-base ${lowest ? 'text-brand-orange' : 'text-brand-text'}`}>
-                    {providerMessage ?? (price.price_status === 'stale' ? '价格可能已更新' : rowPrice)}
+                    {displayedValue}
                   </span>
                 )}
               </div>
