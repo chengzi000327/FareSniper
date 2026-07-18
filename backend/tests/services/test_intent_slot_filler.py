@@ -11,6 +11,7 @@ from backend.application.services.intent_slot_filler import (
     missing_required_slots,
     slots_to_intent,
 )
+from backend.services.intent_parser import IntentParser
 
 
 def test_extracts_complete_route_with_relative_date():
@@ -106,3 +107,36 @@ def test_same_intent_fresh_match_keeps_session():
     flight = SlotBundle(intent="search_flight")
     match = match_intent("帮我查北京到上海的机票", DEFAULT_INTENTS, flight)
     assert match.intent_name == "search_flight"
+
+
+def test_catalog_aliases_fill_non_hot_route():
+    slots = fill_slots(
+        "明天从阿勒泰飞臺北", today=date(2026, 7, 19)
+    )
+
+    assert slots.origin == "阿勒泰"
+    assert slots.destination == "台北"
+    assert slots.depart_date == "2026-07-20"
+
+
+def test_explicit_airport_alias_survives_slot_filling():
+    slots = fill_slots(
+        "明天从北京大兴机场飞上海", today=date(2026, 7, 19)
+    )
+    intent = slots_to_intent(slots, "明天从北京大兴机场飞上海")
+
+    assert slots.origin == "PKX"
+    assert slots.destination == "上海"
+    assert intent.origin.city == "北京"
+    assert intent.origin.iata_code == "PKX"
+
+
+def test_legacy_intent_parser_uses_catalog_alias_and_airport_code():
+    parsed = IntentParser()._parse_heuristic(
+        "从北京大兴机场飞臺北"
+    )
+
+    assert parsed["origin"] == "北京"
+    assert parsed["origin_code"] == "PKX"
+    assert parsed["destination"] == "台北"
+    assert parsed["destination_code"] == "TPE"

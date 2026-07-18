@@ -125,9 +125,9 @@ async def test_search_uses_safe_arguments_and_inherited_key(monkeypatch):
         "/usr/local/bin/flyai",
         "search-flight",
         "--origin",
-        "北京",
+        "BJS",
         "--destination",
-        "上海",
+        "SHA",
         "--dep-date",
         "2099-08-01",
         "--sort-type",
@@ -137,6 +137,29 @@ async def test_search_uses_safe_arguments_and_inherited_key(monkeypatch):
     assert kwargs["env"]["PATH"] == os.environ["PATH"]
     assert "secret" not in args
     assert "shell" not in kwargs
+    assert result.status is ProviderStatus.success
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_explicit_airport_in_provider_arguments(monkeypatch):
+    calls = []
+
+    class FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return FIXTURE.read_bytes(), b""
+
+    async def fake_create(*args, **kwargs):
+        calls.append(args)
+        return FakeProcess()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    query = build_flight_query("北京大兴机场", "上海", "2099-08-01")
+
+    result = await FlyAIProvider(api_key="secret").search(query)
+
+    assert calls[0][3:7] == ("PKX", "--destination", "SHA", "--dep-date")
     assert result.status is ProviderStatus.success
 
 

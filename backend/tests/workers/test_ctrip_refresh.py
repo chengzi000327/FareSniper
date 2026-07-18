@@ -512,6 +512,32 @@ async def test_seed_ctrip_demands_uses_alert_and_hot_route_priorities(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_hot_route_seed_converts_catalog_locations_to_ctrip_codes(monkeypatch):
+    calls = []
+
+    async def fake_enqueue(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.list_active_alert_routes",
+        lambda: _async_value([]),
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.enqueue_demand", fake_enqueue
+    )
+    monkeypatch.setattr(
+        "backend.workers.ctrip_refresh.HOT_ROUTES",
+        [("北京大兴机场", "臺北")],
+    )
+
+    await seed_ctrip_demands()
+
+    assert len(calls) == 3
+    assert {call["origin_code"] for call in calls} == {"BJS"}
+    assert {call["destination_code"] for call in calls} == {"TPE"}
+
+
+@pytest.mark.asyncio
 async def test_seed_skips_malicious_alert_and_continues_all_routes(
     monkeypatch, caplog
 ):

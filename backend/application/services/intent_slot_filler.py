@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -21,7 +21,12 @@ from backend.application.services.intent_registry import (
     match_intent,
     required_slots_for,
 )
-from backend.utils.airport_codes import CITY_TO_AIRPORT, city_to_code
+from backend.application.services.airport_catalog import AirportCatalog
+from backend.utils.airport_codes import (
+    AIRPORT_TO_CITY,
+    CITY_TO_AIRPORT,
+    resolve_airport,
+)
 
 REQUIRED_SEARCH_SLOTS = ("origin", "destination", "depart_date")
 FLIGHT_KEYWORDS = tuple(
@@ -46,6 +51,37 @@ _CHINESE_NUMERALS = {
     "九": 9,
     "十": 10,
 }
+_CATALOG = AirportCatalog.load_default()
+
+
+@dataclass(frozen=True)
+class _LocationMention:
+    start: int
+    end: int
+    value: str
+
+
+def _build_location_terms() -> tuple[str, ...]:
+    terms: set[str] = set()
+    for city in _CATALOG.cities:
+        terms.update((city.name, *city.aliases, *city.provider_codes.values()))
+        for airport in city.airports:
+            terms.update(
+                value
+                for value in (
+                    airport.name,
+                    *airport.aliases,
+                    airport.iata,
+                    airport.icao,
+                )
+                if value
+            )
+    terms.update(CITY_TO_AIRPORT)
+    terms.update(AIRPORT_TO_CITY)
+    return tuple(sorted(terms, key=lambda value: (-len(value), value)))
+
+
+_LOCATION_TERMS = _build_location_terms()
 
 
 def fill_slots(
@@ -88,8 +124,7 @@ def extract_slots(
     definitions = intent_definitions or DEFAULT_INTENTS
     intent_match = match_intent(normalized, definitions, current)
     intent_name = matched_intent or (intent_match.intent_name if intent_match else None)
-    cities = _extract_cities(normalized)
-    origin, destination = _infer_origin_destination(normalized, cities, current)
+    origin, destination = extract_route_locations(normalized, current)
     depart_date = _extract_depart_date(normalized, today=today)
     budget = _extract_budget(normalized)
     target_price = _extract_target_price(normalized)
@@ -232,19 +267,71 @@ def _normalize_text(text: str) -> str:
     return (text or "").strip().replace("号", "日")
 
 
-def _location(city: str | None) -> LocationRef | None:
-    if not city:
+def resolve_location_ref(value: str | None) -> LocationRef | None:
+    if not value:
         return None
-    return LocationRef(city=city, iata_code=city_to_code(city))
+    location = _CATALOG.resolve_location(value)
+    if location is not None:
+        return LocationRef(
+            city=location.city_name,
+            iata_code=(
+                location.airport_iata or location.provider_code("ctrip")
+            ),
+        )
+    ref = resolve_airport(value)
+    if ref is None:
+        return None
+    airport_code = value.upper()
+    return LocationRef(
+        city=ref.city,
+        iata_code=(airport_code if airport_code in ref.airport_ids else ref.code),
+    )
+
+
+def _location(city: str | None) -> LocationRef | None:
+    return resolve_location_ref(city)
 
 
 def _extract_cities(text: str) -> list[str]:
-    positions: list[tuple[int, str]] = []
-    for city in CITY_TO_AIRPORT:
-        idx = text.find(city)
-        if idx >= 0:
-            positions.append((idx, city))
-    return [city for _, city in sorted(positions)]
+    return [mention.value for mention in _extract_location_mentions(text)]
+
+
+def _extract_location_mentions(text: str) -> list[_LocationMention]:
+    candidates: list[_LocationMention] = []
+    for term in _LOCATION_TERMS:
+        for match in re.finditer(re.escape(term), text, flags=re.IGNORECASE):
+            location = _CATALOG.resolve_location(term)
+            if location is not None:
+                value = location.airport_iata or location.city_name
+            else:
+                ref = resolve_airport(term)
+                if ref is None:
+                    continue
+                upper = term.upper()
+                value = upper if upper in ref.airport_ids else ref.city
+            candidates.append(
+                _LocationMention(match.start(), match.end(), value)
+            )
+
+    selected: list[_LocationMention] = []
+    occupied_until = -1
+    for candidate in sorted(
+        candidates,
+        key=lambda item: (item.start, -(item.end - item.start), item.value),
+    ):
+        if candidate.start < occupied_until:
+            continue
+        selected.append(candidate)
+        occupied_until = candidate.end
+    return selected
+
+
+def extract_route_locations(
+    text: str, accumulated: SlotBundle | None = None
+) -> tuple[str | None, str | None]:
+    current = accumulated or SlotBundle()
+    cities = _extract_cities(text)
+    return _infer_origin_destination(text, cities, current)
 
 
 def _infer_origin_destination(
@@ -276,12 +363,10 @@ def _infer_origin_destination(
 
 
 def _extract_marked_city(text: str, markers: tuple[str, ...]) -> str | None:
-    city_alt = "|".join(map(re.escape, CITY_TO_AIRPORT.keys()))
-    for marker in markers:
-        pattern = rf"{re.escape(marker)}\s*({city_alt})"
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
+    for mention in _extract_location_mentions(text):
+        prefix = text[: mention.start]
+        if any(re.search(rf"{re.escape(marker)}\s*$", prefix) for marker in markers):
+            return mention.value
     return None
 
 

@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 
 from backend.application.contracts.recommendations import RecCard, RecommendationsResponseDto
 from backend.application.contracts.flight_provider import is_complete_https_url
-from backend.application.services._routes import CITY_NAMES, HOT_ROUTES, ROUTE_TAGS
+from backend.application.services._routes import (
+    CITY_NAMES,
+    HOT_ROUTES,
+    ROUTE_TAGS,
+    route_city_name,
+)
 from backend.config import settings
 from backend.infrastructure.db.base import get_session
 from backend.infrastructure.db.flight_snapshot_repo import read_deals
@@ -400,8 +405,8 @@ def _build_card(
     sample_n: int,
 ) -> RecCard:
     now = _utc_now()
-    origin_name = CITY_NAMES.get(origin, origin)
-    dest_name = CITY_NAMES.get(dest, dest)
+    origin_name = route_city_name(origin)
+    dest_name = route_city_name(dest)
     tags = list(ROUTE_TAGS.get((origin, dest), []))
 
     discount_pct: int | None = None
