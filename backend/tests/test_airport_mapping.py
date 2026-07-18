@@ -1,4 +1,9 @@
-from backend.utils.airport_codes import CITY_TO_AIRPORT, code_to_city, city_to_code
+from backend.utils.airport_codes import (
+    CITY_TO_AIRPORT,
+    code_to_city,
+    city_to_code,
+    resolve_airport,
+)
 
 
 class TestCodeToCity:
@@ -23,3 +28,8 @@ class TestCityToCode:
 
     def test_unknown_city_returns_itself(self) -> None:
         assert city_to_code("火星") == "火星"
+
+
+def test_specific_airport_code_preserves_airport_constraint() -> None:
+    assert resolve_airport("SHA").airport_ids == ("SHA",)
+    assert resolve_airport("上海").airport_ids == ("PVG", "SHA")

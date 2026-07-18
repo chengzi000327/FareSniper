@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from types import MappingProxyType
 
+from backend.application.services.airport_catalog import AirportCatalog
+
 
 @dataclass(frozen=True)
 class AirportRef:
@@ -12,24 +14,17 @@ class AirportRef:
     mainland_china: bool
 
 
-_AIRPORT_CATALOG = (
-    AirportRef("北京", "BJS", ("PEK", "PKX"), True),
-    AirportRef("上海", "SHA", ("PVG", "SHA"), True),
-    AirportRef("广州", "CAN", ("CAN",), True),
-    AirportRef("深圳", "SZX", ("SZX",), True),
-    AirportRef("杭州", "HGH", ("HGH",), True),
-    AirportRef("成都", "CTU", ("CTU",), True),
-    AirportRef("重庆", "CKG", ("CKG",), True),
-    AirportRef("三亚", "SYX", ("SYX",), True),
-    AirportRef("昆明", "KMG", ("KMG",), True),
-    AirportRef("厦门", "XMN", ("XMN",), True),
-    AirportRef("西安", "XIY", ("XIY",), True),
-    AirportRef("南京", "NKG", ("NKG",), True),
-    AirportRef("武汉", "WUH", ("WUH",), True),
-    AirportRef("长沙", "CSX", ("CSX",), True),
-    AirportRef("香港", "HKG", ("HKG",), False),
-    AirportRef("澳门", "MFM", ("MFM",), False),
-    AirportRef("台北", "TPE", ("TPE",), False),
+_CATALOG = AirportCatalog.load_default()
+_CHINA_REFS = tuple(
+    AirportRef(
+        city=city.name,
+        code=city.provider_codes["ctrip"],
+        airport_ids=tuple(airport.iata for airport in city.airports),
+        mainland_china=city.region_group == "mainland",
+    )
+    for city in _CATALOG.cities
+)
+_INTERNATIONAL_REFS = (
     AirportRef("东京", "TYO", ("HND", "NRT"), False),
     AirportRef("大阪", "OSA", ("KIX",), False),
     AirportRef("首尔", "SEL", ("ICN", "GMP"), False),
@@ -41,30 +36,61 @@ _AIRPORT_CATALOG = (
     AirportRef("纽约", "NYC", ("JFK", "EWR", "LGA"), False),
     AirportRef("洛杉矶", "LAX", ("LAX",), False),
     AirportRef("悉尼", "SYD", ("SYD",), False),
-    AirportRef("乌鲁木齐", "URC", ("URC",), True),
-    AirportRef("哈尔滨", "HRB", ("HRB",), True),
-    AirportRef("青岛", "TAO", ("TAO",), True),
-    AirportRef("大连", "DLC", ("DLC",), True),
 )
-
+_AIRPORT_CATALOG = _CHINA_REFS + _INTERNATIONAL_REFS
 _AIRPORT_BY_CITY = MappingProxyType({ref.city: ref for ref in _AIRPORT_CATALOG})
 _AIRPORT_BY_CODE = MappingProxyType({ref.code: ref for ref in _AIRPORT_CATALOG})
+_INTERNATIONAL_BY_AIRPORT = MappingProxyType(
+    {
+        airport_id: ref
+        for ref in _INTERNATIONAL_REFS
+        for airport_id in ref.airport_ids
+    }
+)
 
 CITY_TO_AIRPORT = MappingProxyType(
     {ref.city: ref.code for ref in _AIRPORT_CATALOG}
 )
 AIRPORT_TO_CITY = MappingProxyType(
-    {ref.code: ref.city for ref in _AIRPORT_CATALOG}
+    {
+        code: ref.city
+        for ref in _AIRPORT_CATALOG
+        for code in (ref.code, *ref.airport_ids)
+    }
 )
 
 
 def resolve_airport(value: str) -> AirportRef | None:
-    return _AIRPORT_BY_CITY.get(value) or _AIRPORT_BY_CODE.get(value)
+    ref = _AIRPORT_BY_CITY.get(value)
+    if ref is not None:
+        return ref
+
+    location = _CATALOG.resolve_location(value)
+    if location is not None:
+        city_ref = _AIRPORT_BY_CITY[location.city_name]
+        if location.airport_iata:
+            return AirportRef(
+                city=city_ref.city,
+                code=city_ref.code,
+                airport_ids=(location.airport_iata,),
+                mainland_china=city_ref.mainland_china,
+            )
+        return city_ref
+    return _AIRPORT_BY_CODE.get(value.upper()) or _INTERNATIONAL_BY_AIRPORT.get(
+        value.upper()
+    )
 
 
 def code_to_city(code: str) -> str:
-    return AIRPORT_TO_CITY.get(code, code)
+    city = _CATALOG.code_to_city(code)
+    if city != code:
+        return city
+    ref = _AIRPORT_BY_CODE.get(code.upper()) or _INTERNATIONAL_BY_AIRPORT.get(
+        code.upper()
+    )
+    return ref.city if ref else code
 
 
 def city_to_code(city: str) -> str:
-    return CITY_TO_AIRPORT.get(city, city)
+    ref = resolve_airport(city)
+    return ref.code if ref else city
