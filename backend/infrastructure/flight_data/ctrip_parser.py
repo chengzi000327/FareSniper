@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
-from datetime import date
+from datetime import datetime
 from typing import Any
 
 from backend.application.contracts.flight_provider import (
@@ -39,9 +40,17 @@ _AIRPORT_CODE_FIELDS = {
         "arrivalAirportIataCode",
     ),
 }
+_DEPARTURE_DATETIME_PATTERN = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?\Z"
+)
 
 
 class CtripBatchSearchParseError(ValueError):
+    pass
+
+
+class _CtripScopeEvidenceError(CtripBatchSearchParseError):
     pass
 
 
@@ -61,6 +70,8 @@ def parse_batch_search(
     for itinerary in inventory:
         try:
             offer = _parse_itinerary(itinerary, query)
+        except _CtripScopeEvidenceError:
+            raise
         except CtripBatchSearchParseError:
             malformed_items += 1
             continue
@@ -126,12 +137,10 @@ def _parse_itinerary(
     origin_code = _actual_city_code(
         first_flight,
         direction="departure",
-        fallback=query.origin_code,
     )
     destination_code = _actual_city_code(
         last_flight,
         direction="arrival",
-        fallback=query.destination_code,
     )
     depart_date = _actual_depart_date(
         first_flight.get("departureDateTime")
@@ -169,34 +178,51 @@ def _actual_city_code(
     flight: Mapping[str, Any],
     *,
     direction: str,
-    fallback: str,
 ) -> str:
+    normalized_codes: set[str] = set()
     for field in _CITY_CODE_FIELDS[direction]:
         code = _normalized_code(flight.get(field))
-        if code is not None:
-            return code
+        if code is None:
+            continue
+        location = _CATALOG.resolve_location(code)
+        normalized_codes.add(
+            location.provider_code("ctrip")
+            if location is not None
+            else code
+        )
 
     for field in _AIRPORT_CODE_FIELDS[direction]:
         code = _normalized_code(flight.get(field))
         if code is None:
             continue
         location = _CATALOG.resolve_location(code)
-        return (
-            location.provider_code("ctrip")
-            if location is not None
-            else code
+        if location is None or location.airport_iata is None:
+            raise _CtripScopeEvidenceError(
+                "flight airport code is unknown"
+            )
+        normalized_codes.add(location.provider_code("ctrip"))
+
+    if not normalized_codes:
+        raise _CtripScopeEvidenceError(
+            f"{direction} route evidence is missing"
         )
-    return fallback.upper()
+    if len(normalized_codes) != 1:
+        raise _CtripScopeEvidenceError(
+            f"{direction} route evidence conflicts"
+        )
+    return next(iter(normalized_codes))
 
 
 def _normalized_code(value: Any) -> str | None:
-    if not isinstance(value, str):
+    if value is None:
         return None
+    if not isinstance(value, str):
+        raise _CtripScopeEvidenceError("flight route code is invalid")
     code = value.strip().upper()
     if not code:
         return None
     if len(code) != 3 or not code.isascii() or not code.isalpha():
-        raise CtripBatchSearchParseError("flight route code is invalid")
+        raise _CtripScopeEvidenceError("flight route code is invalid")
     return code
 
 
@@ -206,15 +232,18 @@ def _actual_city_name(code: str, fallback: str) -> str:
 
 
 def _actual_depart_date(value: Any) -> str:
-    if not isinstance(value, str) or len(value) < 10:
-        raise CtripBatchSearchParseError("departure date is missing")
-    candidate = value[:10]
+    if (
+        not isinstance(value, str)
+        or _DEPARTURE_DATETIME_PATTERN.fullmatch(value) is None
+    ):
+        raise _CtripScopeEvidenceError("departure date is missing")
     try:
-        return date.fromisoformat(candidate).isoformat()
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
-        raise CtripBatchSearchParseError(
+        raise _CtripScopeEvidenceError(
             "departure date is invalid"
         ) from exc
+    return parsed.date().isoformat()
 
 
 def _lowest_economy_adult_price(price_list: Any) -> int | None:

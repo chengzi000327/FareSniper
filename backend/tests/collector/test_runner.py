@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.application.contracts.collector import CollectorErrorCode
-from backend.collector.browser import CaptureResult
+from backend.collector.browser import CaptureResult, CtripBrowser
 from backend.collector.runner import CollectorRunner
 
 
@@ -44,8 +45,9 @@ def ctrip_payload():
 
 
 class FakeApi:
-    def __init__(self, job):
+    def __init__(self, job, events=None):
         self.job = job
+        self.events = events
         self.calls: list[tuple] = []
         self.complete_calls: list[tuple] = []
         self.fail_calls: list[tuple] = []
@@ -63,15 +65,19 @@ class FakeApi:
         self.complete_calls.append((job_id, offers))
 
     async def fail(self, job_id, error_code, retry_at):
+        if self.events is not None:
+            self.events.append("fail")
         self.calls.append(("fail", job_id, error_code))
         self.fail_calls.append((job_id, error_code, retry_at))
 
 
 class FakeBrowser:
-    def __init__(self, result):
+    def __init__(self, result, events=None):
         self.result = result
+        self.events = events
         self.active = 0
         self.max_active = 0
+        self.reset_calls = 0
 
     async def capture(self, _job):
         self.active += 1
@@ -80,6 +86,11 @@ class FakeBrowser:
             return self.result
         finally:
             self.active -= 1
+
+    async def reset_session(self):
+        self.reset_calls += 1
+        if self.events is not None:
+            self.events.append("reset")
 
 
 @pytest.mark.asyncio
@@ -163,10 +174,15 @@ async def test_empty_inventory_fails_without_overwriting_snapshot(
 
 @pytest.mark.asyncio
 async def test_parser_error_fails_once(job):
-    api = FakeApi(job)
+    events = []
+    api = FakeApi(job, events=events)
+    browser = FakeBrowser(
+        CaptureResult(payloads=[{"data": {}}]),
+        events=events,
+    )
     runner = CollectorRunner(
         api,
-        FakeBrowser(CaptureResult(payloads=[{"data": {}}])),
+        browser,
     )
 
     result = await runner.run_once()
@@ -174,6 +190,8 @@ async def test_parser_error_fails_once(job):
     assert result.status == "parse_error"
     assert len(api.fail_calls) == 1
     assert api.complete_calls == []
+    assert browser.reset_calls == 1
+    assert events == ["reset", "fail"]
 
 
 @pytest.mark.asyncio
@@ -195,10 +213,19 @@ async def test_mismatched_payload_scope_fails_without_upload(
         "flightSegments"
     ][0]["flightList"][0]
     flight[field] = value
-    api = FakeApi(job)
+    if field == "departureCityCode":
+        flight["departureAirportCode"] = value
+    elif field == "arrivalCityCode":
+        flight["arrivalAirportCode"] = value
+    events = []
+    api = FakeApi(job, events=events)
+    browser = FakeBrowser(
+        CaptureResult(payloads=[ctrip_payload]),
+        events=events,
+    )
     runner = CollectorRunner(
         api,
-        FakeBrowser(CaptureResult(payloads=[ctrip_payload])),
+        browser,
     )
 
     result = await runner.run_once()
@@ -207,6 +234,82 @@ async def test_mismatched_payload_scope_fails_without_upload(
     assert api.complete_calls == []
     assert len(api.fail_calls) == 1
     assert api.fail_calls[0][1] is CollectorErrorCode.parse_error
+    assert browser.reset_calls == 1
+    assert events == ["reset", "fail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_payload_kind", ["malformed", "mismatched"])
+async def test_runner_parse_failure_releases_real_driver_before_next_job(
+    tmp_path,
+    job,
+    ctrip_payload,
+    first_payload_kind,
+):
+    matching_payload = copy.deepcopy(ctrip_payload)
+    if first_payload_kind == "malformed":
+        first_payload = {"data": {}}
+    else:
+        first_payload = copy.deepcopy(ctrip_payload)
+        first_payload["data"]["flightItineraryList"][0][
+            "flightSegments"
+        ][0]["flightList"][0].update(
+            {
+                "departureCityCode": "CAN",
+                "departureAirportCode": "CAN",
+            }
+        )
+    payloads = [first_payload, matching_payload]
+    drivers = []
+
+    class Driver:
+        current_url = ""
+        title = "机票"
+        page_source = ""
+
+        def __init__(self, payload):
+            self.payload = payload
+            self.quit_calls = 0
+
+        def execute_cdp_cmd(self, *_args):
+            pass
+
+        def get(self, url):
+            self.current_url = url
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text="航班列表")
+
+        def execute_script(self, script):
+            if script.startswith("return !!"):
+                return True
+            return json.dumps([json.dumps(self.payload)])
+
+        def quit(self):
+            self.quit_calls += 1
+
+    def factory(**_kwargs):
+        driver = Driver(payloads[len(drivers)])
+        drivers.append(driver)
+        return driver
+
+    api = FakeApi(job)
+    browser = CtripBrowser(profile_dir=tmp_path, driver_factory=factory)
+    runner = CollectorRunner(api, browser)
+
+    first = await runner.run_once()
+    api.job = SimpleNamespace(**{**vars(job), "job_id": "job-2"})
+    second = await runner.run_once()
+
+    assert first.status == "parse_error"
+    assert drivers[0].quit_calls == 1
+    assert len(drivers) == 2
+    assert second.status == "success"
+    assert drivers[1].quit_calls == 0
+
+    await browser.close()
+
+    assert drivers[1].quit_calls == 1
 
 
 @pytest.mark.asyncio

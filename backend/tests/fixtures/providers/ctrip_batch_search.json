@@ -9,6 +9,10 @@
               {
                 "flightNo": "CA1835",
                 "marketAirlineName": "中国国航",
+                "departureCityCode": "BJS",
+                "departureAirportCode": "PEK",
+                "arrivalCityCode": "SHA",
+                "arrivalAirportCode": "SHA",
                 "departureDateTime": "2026-08-08 08:00:00",
                 "arrivalDateTime": "2026-08-08 10:20:00",
                 "duration": 140

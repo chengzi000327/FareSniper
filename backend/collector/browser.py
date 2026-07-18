@@ -198,8 +198,11 @@ class CtripBrowser:
     async def capture(self, job: object) -> CaptureResult:
         return await asyncio.to_thread(self._capture_sync, job)
 
-    async def close(self) -> None:
+    async def reset_session(self) -> None:
         await asyncio.to_thread(self._close_sync)
+
+    async def close(self) -> None:
+        await self.reset_session()
 
     def _create_driver(self, *, headless: bool) -> object:
         options = build_chrome_options(

@@ -44,6 +44,8 @@ class CollectorApi(Protocol):
 class CollectorBrowser(Protocol):
     async def capture(self, job: object) -> CaptureResult: ...
 
+    async def reset_session(self) -> None: ...
+
 
 @dataclass(frozen=True)
 class RunResult:
@@ -162,7 +164,7 @@ class CollectorRunner:
                     "batchSearch result does not match claimed job"
                 )
         except (CtripBatchSearchParseError, FlightQueryValidationError):
-            return await self._fail_once(
+            return await self._reset_and_fail(
                 job_id,
                 CollectorErrorCode.parse_error,
             )
@@ -208,3 +210,14 @@ class CollectorRunner:
         retry_at = self._now() + timedelta(minutes=5)
         await self.api.fail(job_id, error_code, retry_at)
         return RunResult(status=error_code.value)
+
+    async def _reset_and_fail(
+        self,
+        job_id: str,
+        error_code: CollectorErrorCode,
+    ) -> RunResult:
+        try:
+            await self.browser.reset_session()
+        except Exception:
+            pass
+        return await self._fail_once(job_id, error_code)
