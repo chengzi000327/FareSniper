@@ -111,6 +111,8 @@ async def test_empty_ctrip_refresh_is_not_observed_as_success(
 async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
     monkeypatch, stale, expected_status, expected_price_status
 ):
+    queued = []
+
     async def read_rows(**kwargs):
         return [
             {
@@ -142,9 +144,16 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
             }
         ], 600, stale
 
+    async def capture_demand(**kwargs):
+        queued.append(kwargs)
+
     monkeypatch.setattr(
         "backend.infrastructure.flight_data.providers.ctrip_snapshot.read_provider_deals",
         read_rows,
+    )
+    monkeypatch.setattr(
+        "backend.infrastructure.flight_data.providers.ctrip_snapshot.enqueue_demand",
+        capture_demand,
     )
     query = build_flight_query("北京", "上海", "2099-08-01")
 
@@ -163,6 +172,7 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
     assert offer.has_baggage is None
     assert offer.is_realtime is False
     assert offer.price_status is expected_price_status
+    assert len(queued) == int(stale)
 
 
 @pytest.mark.asyncio
@@ -363,12 +373,17 @@ async def test_stale_nonempty_snapshot_reactivates_expired_demand_without_duplic
     assert first.status is ProviderStatus.stale
     assert second.status is ProviderStatus.stale
     assert len(first.offers) == 1
-    assert len(demands) == 1
-    assert demands[0].active is True
-    assert demands[0].source == "recent_search"
-    assert demands[0].priority == 50
-    assert demands[0].last_requested_at == FrozenDateTime.current
-    assert demands[0].expires_at == FrozenDateTime.current + timedelta(days=7)
+    assert len(demands) == 2
+    active_demands = [demand for demand in demands if demand.active]
+    assert len(active_demands) == 1
+    refreshed = active_demands[0]
+    assert refreshed.demand_hour == FrozenDateTime.current.replace(
+        minute=0, second=0, microsecond=0
+    )
+    assert refreshed.source == "recent_search"
+    assert refreshed.priority == 50
+    assert refreshed.last_requested_at == FrozenDateTime.current
+    assert refreshed.expires_at == FrozenDateTime.current + timedelta(days=7)
 
 
 @pytest.mark.asyncio
