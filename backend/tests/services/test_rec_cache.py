@@ -1,43 +1,60 @@
+import json
+
 import pytest
+
+from backend.application.contracts.recommendations import RecCard
 from backend.application.services import recommendation_service as svc
 
 
 @pytest.mark.asyncio
-async def test_second_call_skips_db(seeded_pg, fake_redis, monkeypatch):
-    """缓存命中时不应再走 DB；用 spy 计数 _build_recommendations_uncached 的调用次数。"""
-    import backend.infrastructure.redis.session_store as ss
+async def test_second_call_reuses_the_shared_card_pool(fake_redis, monkeypatch):
+    build_calls = 0
 
-    monkeypatch.setattr(ss, "_pool", fake_redis)
+    async def build_pool():
+        nonlocal build_calls
+        build_calls += 1
+        return [RecCard(id="shared", title="北京→上海", reason="监控中")]
 
-    calls = {"n": 0}
-    real = svc._build_recommendations_uncached
+    async def identity_personalize(user_id, pool):
+        return list(pool), False
 
-    async def spy(uid):
-        calls["n"] += 1
-        return await real(uid)
-
-    monkeypatch.setattr(svc, "_build_recommendations_uncached", spy)
+    monkeypatch.setattr(svc, "_redis", lambda: fake_redis)
+    monkeypatch.setattr(svc, "_build_card_pool", build_pool)
+    monkeypatch.setattr(svc, "_personalize", identity_personalize)
 
     await svc.build_recommendations("u1")
     await svc.build_recommendations("u1")
-    assert calls["n"] == 1, "second call should hit redis cache, not DB"
+
+    assert build_calls == 1
+    raw = await fake_redis.get(svc.POOL_CACHE_KEY)
+    envelope = json.loads(raw or "null")
+    assert envelope["version"] == svc.POOL_CACHE_ENVELOPE_VERSION
+    assert envelope["cards"][0]["id"] == "shared"
 
 
 @pytest.mark.asyncio
-async def test_different_user_breaks_cache(seeded_pg, fake_redis, monkeypatch):
-    import backend.infrastructure.redis.session_store as ss
+async def test_different_users_share_build_but_personalize_separately(
+    fake_redis,
+    monkeypatch,
+):
+    build_calls = 0
+    personalized_users = []
 
-    monkeypatch.setattr(ss, "_pool", fake_redis)
+    async def build_pool():
+        nonlocal build_calls
+        build_calls += 1
+        return [RecCard(id="shared", title="北京→上海", reason="监控中")]
 
-    calls = {"n": 0}
-    real = svc._build_recommendations_uncached
+    async def capture_personalize(user_id, pool):
+        personalized_users.append(user_id)
+        return list(pool), False
 
-    async def spy(uid):
-        calls["n"] += 1
-        return await real(uid)
-
-    monkeypatch.setattr(svc, "_build_recommendations_uncached", spy)
+    monkeypatch.setattr(svc, "_redis", lambda: fake_redis)
+    monkeypatch.setattr(svc, "_build_card_pool", build_pool)
+    monkeypatch.setattr(svc, "_personalize", capture_personalize)
 
     await svc.build_recommendations("u_a")
     await svc.build_recommendations("u_b")
-    assert calls["n"] == 2
+
+    assert build_calls == 1
+    assert personalized_users == ["u_a", "u_b"]

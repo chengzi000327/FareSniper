@@ -52,13 +52,9 @@ async def build_recommendations(
     按 limit/offset 切片 → 计算 has_more/next_offset。
     """
     pool = await _get_card_pool()
-    renderable = [
-        card
-        for card in pool
-        if card.preview_deal is not None
-        and _is_future_departure(card.preview_deal.get("depart_date"))
-    ]
+    renderable = _revalidate_renderable_cards(pool, now=_utc_now())
     ordered, personalized = await _personalize(user_id, renderable)
+    ordered = _revalidate_renderable_cards(ordered, now=_utc_now())
 
     total = len(ordered)
     page = ordered[offset : offset + limit]
@@ -205,6 +201,20 @@ def _revalidate_card(card: RecCard, *, now: datetime) -> RecCard:
     return refreshed
 
 
+def _revalidate_renderable_cards(
+    cards: list[RecCard], *, now: datetime
+) -> list[RecCard]:
+    refreshed = [_revalidate_card(card, now=now) for card in cards]
+    return [
+        card
+        for card in refreshed
+        if card.preview_deal is not None
+        and _is_future_departure(
+            card.preview_deal.get("depart_date"), now=now
+        )
+    ]
+
+
 def _decode_cached_pool(raw: str, *, now: datetime) -> list[RecCard]:
     decoded = json.loads(raw)
     if isinstance(decoded, list):
@@ -247,11 +257,10 @@ def _bounded_cache_ttl(expiry: datetime | None, *, now: datetime) -> int:
 
 async def _get_card_pool() -> list[RecCard]:
     """Return a clock-revalidated global card pool from cache or storage."""
-    now = _utc_now()
     try:
         raw = await _redis().get(POOL_CACHE_KEY)
         if raw:
-            return _decode_cached_pool(raw, now=now)
+            return _decode_cached_pool(raw, now=_utc_now())
     except Exception:
         pass
 
@@ -280,7 +289,7 @@ async def _get_card_pool() -> list[RecCard]:
         )
     except Exception:
         pass
-    return pool
+    return [_revalidate_card(card, now=_utc_now()) for card in pool]
 
 
 async def _build_card_pool() -> list[RecCard]:
@@ -399,7 +408,7 @@ def _build_card(
     preview_deal: dict[str, Any] | None = None
     is_history_low = False
 
-    if deal and not _is_future_departure(deal.get("depart_date")):
+    if deal and not _is_future_departure(deal.get("depart_date"), now=now):
         deal = None
 
     if deal:
@@ -438,7 +447,7 @@ def _build_card(
         )
 
         platform_name, booking_url = _build_booking(
-            deal, winning_price, origin, dest
+            deal, winning_price, origin, dest, now=now
         )
 
         winning_price_id = (
@@ -579,14 +588,21 @@ def _compute_discount(deal: dict[str, Any], market_avg: int | None, sample_n: in
     return None
 
 
-def _is_future_departure(value: object) -> bool:
+def _is_future_departure(
+    value: object, *, now: datetime | None = None
+) -> bool:
     if not isinstance(value, str):
         return False
     try:
         departure = datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
         return False
-    return departure > datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    reference = now or _utc_now()
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    return departure > reference.astimezone(
+        ZoneInfo("Asia/Shanghai")
+    ).date()
 
 
 def _deal_currency(deal: dict[str, Any]) -> str | None:
@@ -699,12 +715,14 @@ def _build_booking(
     winning_price: dict[str, Any] | None,
     origin: str,
     dest: str,
+    *,
+    now: datetime,
 ) -> tuple[str, str | None]:
     """Generate a booking action from the explicit fresh winning row."""
     if (
         winning_price is None
         or _price_freshness(winning_price) != "fresh"
-        or not _is_future_departure(deal.get("depart_date"))
+        or not _is_future_departure(deal.get("depart_date"), now=now)
     ):
         return "", None
     platform_name = winning_price.get("platform", "")

@@ -32,7 +32,7 @@ def _duration_minutes(value: object) -> int | None:
     return int(match.group()) if match else None
 
 
-def _price_status(expires_at: object) -> PriceStatus:
+def _price_status(expires_at: object, *, now: datetime) -> PriceStatus:
     if not isinstance(expires_at, str) or not expires_at:
         return PriceStatus.stale
     try:
@@ -43,14 +43,23 @@ def _price_status(expires_at: object) -> PriceStatus:
         expiry = expiry.replace(tzinfo=timezone.utc)
     return (
         PriceStatus.stale
-        if expiry <= datetime.now(timezone.utc)
+        if expiry <= now
         else PriceStatus.priced
     )
 
 
 def ctrip_rows_to_offers(
-    rows: list[dict], query: FlightQuery, *, stale: bool
+    rows: list[dict],
+    query: FlightQuery,
+    *,
+    stale: bool,
+    now: datetime | None = None,
 ) -> list[FlightOffer]:
+    pass_now = now or datetime.now(timezone.utc)
+    if pass_now.tzinfo is None:
+        pass_now = pass_now.replace(tzinfo=timezone.utc)
+    else:
+        pass_now = pass_now.astimezone(timezone.utc)
     offers: list[FlightOffer] = []
     for row in rows:
         prices = row.get("prices") or []
@@ -101,7 +110,9 @@ def ctrip_rows_to_offers(
                 price_status=(
                     PriceStatus.stale
                     if stale
-                    else _price_status(price.get("expires_at"))
+                    else _price_status(
+                        price.get("expires_at"), now=pass_now
+                    )
                 ),
                 booking_url=price.get("url") or None,
                 fetched_at=price.get("crawled_at"),
@@ -155,8 +166,14 @@ class CtripSnapshotProvider:
                 ),
                 cache_age_seconds=age,
             )
-        offers = ctrip_rows_to_offers(rows, query, stale=stale)
-        if stale:
+        now = datetime.now(timezone.utc)
+        offers = ctrip_rows_to_offers(
+            rows, query, stale=stale, now=now
+        )
+        effective_stale = stale or bool(offers) and all(
+            offer.price_status is PriceStatus.stale for offer in offers
+        )
+        if effective_stale:
             await enqueue_demand(
                 origin_code=query.origin_code,
                 destination_code=query.destination_code,
@@ -167,7 +184,9 @@ class CtripSnapshotProvider:
         return ProviderResult(
             provider=self.name,
             status=(
-                ProviderStatus.stale if stale else ProviderStatus.success
+                ProviderStatus.stale
+                if effective_stale
+                else ProviderStatus.success
             ),
             offers=offers,
             cache_age_seconds=age,

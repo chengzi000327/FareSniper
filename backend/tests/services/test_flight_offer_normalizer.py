@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
+import pytest
+
 from backend.application.contracts.flight_provider import (
     FlightOffer,
     PriceStatus,
@@ -11,6 +15,7 @@ from backend.application.services.flight_offer_normalizer import (
     rank_deals,
 )
 from backend.application.services.flight_query import build_flight_query
+from backend.schemas.common import DealCardDto
 
 
 def _query():
@@ -30,6 +35,7 @@ def _offer(
     currency: str = "CNY",
     fetched_at: str | None = None,
     booking_url: str | None = None,
+    expires_at: str | None = None,
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=provider,
@@ -58,6 +64,7 @@ def _offer(
             else "https://book.example.test/flight"
         ),
         fetched_at=fetched_at,
+        expires_at=expires_at,
         is_realtime=realtime,
     )
 
@@ -240,6 +247,46 @@ def test_price_rows_keep_currency_and_separate_provider_from_price_status():
     assert deal["winning_price_id"] == deal["prices"][0]["id"]
     assert deal["prices"][0]["id"]
     assert "status" not in deal["prices"][0]
+
+
+@pytest.mark.parametrize(
+    ("expires_at", "expected_freshness", "has_winner"),
+    [
+        ("2099-07-31T23:59:59+00:00", "stale", False),
+        ("not-an-instant", "unknown", False),
+        (None, "fresh", True),
+    ],
+)
+def test_realtime_expiry_is_evaluated_with_one_injected_normalization_clock(
+    expires_at,
+    expected_freshness,
+    has_winner,
+):
+    now = datetime(2099, 8, 1, 0, 0, tzinfo=timezone.utc)
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="flyai",
+                    seller="飞猪",
+                    price=550,
+                    expires_at=expires_at,
+                )
+            ],
+        )
+    }
+
+    deal = offers_to_deals(_query(), results, now=now)[0]
+    validated = DealCardDto.model_validate(deal)
+
+    assert validated.prices[0].data_freshness == expected_freshness
+    assert validated.prices[0].expires_at == (
+        expires_at if expires_at and expires_at != "not-an-instant" else None
+    )
+    assert (validated.winning_price_id is not None) is has_winner
+    assert validated.prices[0].lowest is has_winner
 
 
 def test_unlike_currencies_are_not_compared_as_raw_amounts():

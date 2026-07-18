@@ -517,7 +517,6 @@ async def read_provider_deals(
     destination_code: str,
     depart_date: str,
 ) -> tuple[list[dict[str, Any]], int | None, bool]:
-    now = datetime.now(timezone.utc)
     async with get_session() as s:
         observation = (
             await s.execute(
@@ -547,15 +546,6 @@ async def read_provider_deals(
                 .distinct()
             )
         ).scalars().all()
-        if not snaps:
-            if observation is None:
-                return [], None, False
-            return (
-                [],
-                _observation_age_seconds(observation.observed_at, now),
-                observation.expires_at <= now,
-            )
-
         deals: list[dict[str, Any]] = []
         provider_rows: list[PlatformPriceSnapshot] = []
         for snap in snaps:
@@ -611,6 +601,16 @@ async def read_provider_deals(
                     "prices": price_items,
                 }
             )
+
+    now = datetime.now(timezone.utc)
+    if not snaps:
+        if observation is None:
+            return [], None, False
+        return (
+            [],
+            _observation_age_seconds(observation.observed_at, now),
+            observation.expires_at <= now,
+        )
 
     if observation is not None:
         age = _observation_age_seconds(observation.observed_at, now)

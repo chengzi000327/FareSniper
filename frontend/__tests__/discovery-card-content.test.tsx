@@ -1,5 +1,6 @@
 import React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, vi } from "vitest";
 import { DiscoveryCardContent } from "@/components/discovery-card-content";
 import type { PriceItem } from "@/lib/api";
 
@@ -18,6 +19,11 @@ function priceRow(overrides: Partial<PriceItem> = {}): PriceItem {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 test("renders source states without fake zeroes", () => {
   render(
@@ -353,6 +359,120 @@ test("gates realtime copy and booking after the winning inventory expiry", () =>
   expect(screen.queryByText("最低")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
   expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+});
+
+test("rerenders at expiry and gates winner and row links while mounted", () => {
+  vi.useFakeTimers();
+  const now = new Date("2099-08-01T00:00:00+00:00");
+  const expiry = new Date(now.getTime() + 1_000).toISOString();
+  vi.setSystemTime(now);
+
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2099-08-02"
+      basePrice={580}
+      totalPrice={580}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      bookingUrl="https://booking.example.test/winner"
+      winningPriceId="winner"
+      inventoryExpiresAt={expiry}
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "winner",
+          name: "飞猪",
+          price: 580,
+          lowest: true,
+          price_status: "priced",
+          url: "https://booking.example.test/winner",
+          expires_at: expiry,
+        }),
+        priceRow({
+          id: "live-row",
+          name: "实时查询",
+          price_status: "view_live_price",
+          url: "https://booking.example.test/live",
+          expires_at: expiry,
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("实时底价")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "前往预订" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看实时价" })).toBeInTheDocument();
+
+  act(() => {
+    vi.advanceTimersByTime(1_000);
+  });
+
+  expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeDisabled();
+  expect(screen.queryByRole("link", { name: "查看实时价" })).not.toBeInTheDocument();
+});
+
+test("rechecks expiry on focus and visibility and cleans lifecycle resources", () => {
+  vi.useFakeTimers();
+  const now = new Date("2099-08-01T00:00:00+00:00");
+  const expiry = new Date(now.getTime() + 60_000).toISOString();
+  vi.setSystemTime(now);
+  const removeWindowListener = vi.spyOn(window, "removeEventListener");
+  const removeDocumentListener = vi.spyOn(document, "removeEventListener");
+
+  const { unmount } = render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      totalPrice={580}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      bookingUrl="https://booking.example.test/winner"
+      winningPriceId="winner"
+      inventoryExpiresAt={expiry}
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "winner",
+          name: "飞猪",
+          price: 580,
+          lowest: true,
+          price_status: "priced",
+          url: "https://booking.example.test/winner",
+          expires_at: expiry,
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("实时底价")).toBeInTheDocument();
+  expect(vi.getTimerCount()).toBe(1);
+  vi.setSystemTime(new Date(now.getTime() + 60_000));
+  fireEvent.focus(window);
+  expect(screen.queryByText("实时底价")).not.toBeInTheDocument();
+
+  fireEvent(document, new Event("visibilitychange"));
+  expect(screen.queryByRole("link", { name: "前往预订" })).not.toBeInTheDocument();
+  expect(vi.getTimerCount()).toBe(0);
+
+  unmount();
+
+  expect(vi.getTimerCount()).toBe(0);
+  expect(removeWindowListener).toHaveBeenCalledWith("focus", expect.any(Function));
+  expect(removeDocumentListener).toHaveBeenCalledWith(
+    "visibilitychange",
+    expect.any(Function)
+  );
 });
 
 test("formats each currency with Intl and does not fabricate a score", () => {

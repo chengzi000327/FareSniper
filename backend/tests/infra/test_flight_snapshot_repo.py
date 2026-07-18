@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -212,6 +213,78 @@ async def test_read_provider_deals_marks_expired_rows_stale(seeded_pg):
 
     assert len(rows) == 1
     assert age is not None
+    assert stale is True
+
+
+@pytest.mark.asyncio
+async def test_read_provider_deals_uses_clock_after_database_reads(
+    seeded_pg,
+    monkeypatch,
+):
+    observed_at = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+    expiry = observed_at + timedelta(hours=1)
+
+    class FrozenDateTime(datetime):
+        current = observed_at
+
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return cls.current.replace(tzinfo=None)
+            return cls.current.astimezone(tz)
+
+    monkeypatch.setattr(snapshot_repo, "datetime", FrozenDateTime)
+    scope = {
+        "origin_code": "BJS",
+        "destination_code": "SHA",
+        "depart_date": "2099-08-01",
+    }
+    await upsert_provider_flights(
+        "ctrip_snapshot",
+        [
+            {
+                **scope,
+                "flight_no": "MU5106",
+                "airline": "东方航空",
+                "dep_time": "08:00",
+                "arr_time": "10:00",
+                "duration": "120分钟",
+                "stops": 0,
+                "prices": [{"platform": "携程", "price": 580}],
+            }
+        ],
+        ttl_minutes=60,
+        **scope,
+    )
+    FrozenDateTime.current = expiry - timedelta(microseconds=1)
+    real_get_session = snapshot_repo.get_session
+
+    class AdvancingSession:
+        def __init__(self, session):
+            self.session = session
+
+        async def execute(self, *args, **kwargs):
+            result = await self.session.execute(*args, **kwargs)
+            FrozenDateTime.current = expiry
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self.session, name)
+
+    @asynccontextmanager
+    async def crossing_session():
+        async with real_get_session() as session:
+            yield AdvancingSession(session)
+
+    monkeypatch.setattr(snapshot_repo, "get_session", crossing_session)
+
+    rows, age, stale = await read_provider_deals(
+        provider="ctrip_snapshot",
+        **scope,
+    )
+
+    assert len(rows) == 1
+    assert age == 60 * 60
     assert stale is True
 
 

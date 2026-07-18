@@ -59,8 +59,32 @@ def _is_fresh_numeric(offer: FlightOffer) -> bool:
     )
 
 
+def _parse_offer_expiry(value: object) -> tuple[datetime | None, bool]:
+    if value is None:
+        return None, False
+    if not isinstance(value, str) or not value.strip():
+        return None, True
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None, True
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry.astimezone(timezone.utc), False
+
+
+def _normalized_offer_expiry(value: object) -> str | None:
+    expiry, malformed = _parse_offer_expiry(value)
+    if malformed or expiry is None:
+        return None
+    return expiry.isoformat()
+
+
 def _offer_freshness(
-    offer: FlightOffer, provider_status: ProviderStatus
+    offer: FlightOffer,
+    provider_status: ProviderStatus,
+    *,
+    now: datetime,
 ) -> str:
     if (
         provider_status is ProviderStatus.stale
@@ -69,33 +93,34 @@ def _offer_freshness(
         return "stale"
     if provider_status is not ProviderStatus.success:
         return "unknown"
+    expiry, malformed_expiry = _parse_offer_expiry(offer.expires_at)
+    if malformed_expiry:
+        return "unknown"
+    if expiry is not None:
+        return "stale" if expiry <= now else "fresh"
     if offer.is_realtime:
         return "fresh"
-    if not offer.expires_at:
-        return "unknown"
-    try:
-        expiry = datetime.fromisoformat(
-            offer.expires_at.replace("Z", "+00:00")
-        )
-    except ValueError:
-        return "unknown"
-    if expiry.tzinfo is None:
-        expiry = expiry.replace(tzinfo=timezone.utc)
-    return "stale" if expiry <= datetime.now(timezone.utc) else "fresh"
+    return "unknown"
 
 
 def _is_ranked_offer(
-    offer: FlightOffer, provider_status: ProviderStatus
+    offer: FlightOffer,
+    provider_status: ProviderStatus,
+    *,
+    now: datetime,
 ) -> bool:
     return (
         offer.is_realtime
         and _is_fresh_numeric(offer)
-        and _offer_freshness(offer, provider_status) == "fresh"
+        and _offer_freshness(offer, provider_status, now=now) == "fresh"
     )
 
 
 def _price_row(
-    offer: FlightOffer, provider_status: ProviderStatus
+    offer: FlightOffer,
+    provider_status: ProviderStatus,
+    *,
+    now: datetime,
 ) -> dict[str, Any]:
     return {
         "id": _row_id(
@@ -109,8 +134,10 @@ def _price_row(
         "provider_status": provider_status.value,
         "url": offer.booking_url,
         "data_provider": offer.data_provider,
-        "data_freshness": _offer_freshness(offer, provider_status),
-        "expires_at": offer.expires_at,
+        "data_freshness": _offer_freshness(
+            offer, provider_status, now=now
+        ),
+        "expires_at": _normalized_offer_expiry(offer.expires_at),
     }
 
 
@@ -162,7 +189,10 @@ def _fetched_at_rank(value: str | None) -> float:
 
 
 def _offer_dedupe_key(
-    offer: FlightOffer, provider_status: ProviderStatus
+    offer: FlightOffer,
+    provider_status: ProviderStatus,
+    *,
+    now: datetime,
 ) -> tuple[int, float, float, str]:
     numeric_price = (
         float(offer.total_price)
@@ -172,7 +202,7 @@ def _offer_dedupe_key(
     return (
         0
         if _is_fresh_numeric(offer)
-        and _offer_freshness(offer, provider_status) == "fresh"
+        and _offer_freshness(offer, provider_status, now=now) == "fresh"
         else 1,
         numeric_price,
         _fetched_at_rank(offer.fetched_at),
@@ -182,6 +212,8 @@ def _offer_dedupe_key(
 
 def _deduplicate_rows(
     offers: list[tuple[FlightOffer, ProviderStatus]],
+    *,
+    now: datetime,
 ) -> list[tuple[FlightOffer, ProviderStatus]]:
     grouped: dict[
         tuple[str, str, str], tuple[FlightOffer, ProviderStatus]
@@ -190,21 +222,24 @@ def _deduplicate_rows(
         key = (offer.data_provider, offer.seller_name, offer.currency)
         current = grouped.get(key)
         if current is None or _offer_dedupe_key(
-            offer, provider_status
+            offer, provider_status, now=now
         ) < _offer_dedupe_key(
-            current[0], current[1]
+            current[0], current[1], now=now
         ):
             grouped[key] = (offer, provider_status)
     return list(grouped.values())
 
 
 def _select_ranked_offer(
-    offers: list[tuple[FlightOffer, ProviderStatus]], preferred_currency: str
+    offers: list[tuple[FlightOffer, ProviderStatus]],
+    preferred_currency: str,
+    *,
+    now: datetime,
 ) -> tuple[FlightOffer, ProviderStatus] | None:
     ranked = [
         (offer, provider_status)
         for offer, provider_status in offers
-        if _is_ranked_offer(offer, provider_status)
+        if _is_ranked_offer(offer, provider_status, now=now)
     ]
     if not ranked:
         return None
@@ -248,6 +283,8 @@ def _apply_ranked_offer(
     card: dict[str, Any],
     offer: FlightOffer,
     provider_status: ProviderStatus,
+    *,
+    now: datetime,
 ) -> None:
     card.update(
         {
@@ -268,8 +305,12 @@ def _apply_ranked_offer(
             "booking_url": offer.booking_url,
             "h5_fallback_url": offer.booking_url,
             "winning_price_id": _winning_row_id(offer),
-            "data_freshness": _offer_freshness(offer, provider_status),
-            "inventory_expires_at": offer.expires_at,
+            "data_freshness": _offer_freshness(
+                offer, provider_status, now=now
+            ),
+            "inventory_expires_at": _normalized_offer_expiry(
+                offer.expires_at
+            ),
         }
     )
 
@@ -317,7 +358,14 @@ def _new_card(offer: FlightOffer) -> dict[str, Any]:
 def offers_to_deals(
     query: FlightQuery,
     results: Mapping[str, ProviderResult],
+    *,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
+    pass_now = now or datetime.now(timezone.utc)
+    if pass_now.tzinfo is None:
+        pass_now = pass_now.replace(tzinfo=timezone.utc)
+    else:
+        pass_now = pass_now.astimezone(timezone.utc)
     cards: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     card_offers: dict[
         tuple[str, str, str, str, str],
@@ -338,13 +386,17 @@ def offers_to_deals(
         if not result.offers
     ]
     for identity, card in cards.items():
-        deduplicated = _deduplicate_rows(card_offers[identity])
-        ranked_offer = _select_ranked_offer(deduplicated, query.currency)
+        deduplicated = _deduplicate_rows(
+            card_offers[identity], now=pass_now
+        )
+        ranked_offer = _select_ranked_offer(
+            deduplicated, query.currency, now=pass_now
+        )
         if ranked_offer is not None:
-            _apply_ranked_offer(card, *ranked_offer)
+            _apply_ranked_offer(card, *ranked_offer, now=pass_now)
 
         rows = [
-            _price_row(offer, provider_status)
+            _price_row(offer, provider_status, now=pass_now)
             for offer, provider_status in deduplicated
         ]
         rows.extend(dict(row) for row in status_rows)

@@ -1,7 +1,85 @@
+'use client'
+
 import React from 'react'
 import { ArrowRight, Bell, Briefcase, Equal, ExternalLink, Plane, Plus, ShieldCheck } from 'lucide-react'
 import { formatCurrency } from '@/lib/currency'
 import type { DataFreshness, PriceItem, ProviderStatus } from '@/lib/api'
+
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
+function useExpiryClock(
+  values: ReadonlyArray<string | null | undefined>,
+): number | null {
+  const expiryKey = values
+    .filter((value): value is string => typeof value === 'string')
+    .sort()
+    .join('|')
+  const expiryInstants = React.useMemo(
+    () =>
+      expiryKey
+        .split('|')
+        .filter(Boolean)
+        .map((value) => Date.parse(value))
+        .filter(Number.isFinite),
+    [expiryKey],
+  )
+  const [now, setNow] = React.useState<number | null>(null)
+
+  React.useEffect(() => {
+    if (expiryInstants.length === 0) return
+
+    let timer: number | undefined
+    let disposed = false
+
+    const clearTimer = () => {
+      if (timer !== undefined) {
+        window.clearTimeout(timer)
+        timer = undefined
+      }
+    }
+    const refresh = () => {
+      if (disposed) return
+      const current = Date.now()
+      setNow(current)
+      clearTimer()
+      const nextExpiry = expiryInstants
+        .filter((expiry) => expiry > current)
+        .sort((left, right) => left - right)[0]
+      if (nextExpiry !== undefined) {
+        const delay = Math.min(
+          Math.max(0, nextExpiry - current),
+          MAX_TIMER_DELAY_MS,
+        )
+        timer = window.setTimeout(refresh, delay)
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refresh()
+    }
+
+    refresh()
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      disposed = true
+      clearTimer()
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [expiryInstants])
+
+  return now
+}
+
+function isExpiryCurrent(
+  value: string | null | undefined,
+  now: number | null,
+): boolean {
+  if (value === null || value === undefined) return true
+  const expiry = Date.parse(value)
+  return now !== null && Number.isFinite(expiry) && expiry > now
+}
 
 export type DiscoveryCardContentProps = {
   from: string
@@ -63,19 +141,18 @@ export function DiscoveryCardContent({
     empty: '暂无结果',
   }
   const hasFreeBaggage = hasBaggage === true && baggageFee === 0
-  const inventoryExpiry = inventoryExpiresAt
-    ? Date.parse(inventoryExpiresAt)
-    : null
-  const inventoryIsCurrent =
-    inventoryExpiry === null ||
-    (Number.isFinite(inventoryExpiry) && inventoryExpiry > Date.now())
+  const expiryNow = useExpiryClock([
+    inventoryExpiresAt,
+    ...prices.map((price) => price.expires_at),
+  ])
   const isRealtimeWinner = (price: PriceItem) =>
     price.id === winningPriceId &&
     price.provider_status === 'success' &&
     price.price_status === 'priced' &&
     price.data_freshness === 'fresh' &&
     dataFreshness === 'fresh' &&
-    inventoryIsCurrent &&
+    isExpiryCurrent(inventoryExpiresAt, expiryNow) &&
+    isExpiryCurrent(price.expires_at, expiryNow) &&
     price.price !== null &&
     computedTotal !== null &&
     price.price === computedTotal &&
@@ -230,7 +307,7 @@ export function DiscoveryCardContent({
               <span className="text-sm font-medium text-brand-text">{price.name}</span>
               <div className="flex items-center gap-2">
                 {lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
-                {price.provider_status === 'success' && price.data_freshness === 'fresh' && price.price_status === 'view_live_price' && isHttpsUrl(price.url) ? (
+                {price.provider_status === 'success' && price.data_freshness === 'fresh' && price.price_status === 'view_live_price' && isExpiryCurrent(price.expires_at, expiryNow) && isHttpsUrl(price.url) ? (
                   <a
                     href={price.url}
                     target="_blank"

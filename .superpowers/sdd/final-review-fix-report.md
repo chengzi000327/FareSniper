@@ -815,3 +815,205 @@ The monolithic backend suite was not run against the remote test database. No pa
 The complete diff from `12f18b8706a48970affda9d8beeba03e9c4f9a4c` was reviewed after implementation and verification. Self-review added the exact no-winner `lowest=false` boundary and the post-storage-query expiry race regression; both were observed RED before their production fixes. No remaining Critical or Important issue was found.
 
 The final commit uses the required message `fix(flights): refresh stale cached inventory`. Its exact hash is reported beside this report after Git creates the commit; a commit cannot contain its own final hash because changing this report changes that hash.
+
+---
+
+# Round 4 Remediation
+
+Review baseline: `f679f06c090a7ac56a2627478e683352bbb36fd0`
+
+Date: 2026-07-18
+
+## Root Causes
+
+1. The normalizer returned `fresh` for every successful realtime offer before inspecting an explicitly supplied expiry. It also copied malformed expiry text into the wire row, where `DealCardDto` could reject the progressive event.
+2. Recommendation cache reads sampled time before awaiting Redis, while the public response filtered cards before awaiting personalization. Either await could cross inventory expiry or Shanghai midnight and preserve a winner, URL, or no-longer-future departure through pagination.
+3. `read_provider_deals` sampled time before observation, snapshot, and child-row queries. The Ctrip provider trusted that pre-query aggregate flag even when its post-await row mapping independently found every selected price expired.
+4. The discovery card read `Date.now()` only during render. No state transition occurred at expiry, and `view_live_price` row links did not evaluate their own `expires_at` values.
+5. `test_rec_cache.py` still targeted removed per-user `_build_recommendations_uncached` behavior and required a database fixture. It contradicted the current shared L1 pool and could not validate `POOL_CACHE_KEY` or cross-user reuse.
+
+## RED Evidence
+
+Every Round 4 production change was preceded by a deterministic failing regression. No wall-clock sleeps, live providers, or live browser processes were used.
+
+### Obsolete shared-cache tests
+
+```text
+pytest -q backend/tests/services/test_rec_cache.py
+```
+
+Result before rewriting: `2 failed in 14.87s`. Both tests raised `AttributeError` for the removed `_build_recommendations_uncached` function.
+
+### Normalizer explicit expiry
+
+```text
+pytest -q backend/tests/services/test_flight_offer_normalizer.py::test_realtime_expiry_is_evaluated_with_one_injected_normalization_clock
+```
+
+Result: `3 failed in 0.06s`. The elapsed, malformed, and no-expiry cases failed because `offers_to_deals` had no injected `now` boundary; the prior implementation would also mark the two explicit realtime cases fresh.
+
+### Recommendation await crossings
+
+```text
+pytest -q \
+  backend/tests/services/test_recommendation_final_review.py::test_cache_hit_uses_clock_sampled_after_redis_returns \
+  backend/tests/services/test_recommendation_final_review.py::test_response_revalidates_winner_after_personalization_await \
+  backend/tests/services/test_recommendation_final_review.py::test_response_rechecks_future_date_after_personalization_await
+```
+
+Result: `3 failed in 0.16s`. Redis-return and personalization-return payloads retained the winner, and a departure that became today in Shanghai remained in the response.
+
+### Ctrip repository and provider crossings
+
+```text
+pytest -q backend/tests/infra/test_ctrip_snapshot_provider.py::test_provider_rechecks_expiry_after_repository_await_and_renews_demand
+```
+
+Result: `1 failed in 0.09s`; the selected row was stale but the provider still returned `success` and did not renew demand.
+
+```text
+pytest -q backend/tests/infra/test_flight_snapshot_repo.py::test_read_provider_deals_uses_clock_after_database_reads
+```
+
+Result: `1 failed in 15.22s`; age was the pre-query `3599` seconds instead of `3600`, and the expiry boundary was not evaluated with the post-query clock.
+
+### Mounted frontend expiry
+
+```text
+npm --prefix frontend run test -- --run \
+  __tests__/discovery-card-content.test.tsx \
+  -t "rerenders at expiry|rechecks expiry"
+```
+
+Result: `2 failed`. Advancing fake time or firing focus left the mounted realtime badge and booking state intact.
+
+## Implementation
+
+### Important 1: one normalizer clock and explicit expiry parsing
+
+- Added an optional injected `now` to `offers_to_deals`; absent injection samples UTC exactly once for the complete normalization pass.
+- Threaded that same instant through deduplication, eligibility, winner selection, row projection, and headline projection.
+- Successful realtime offers with a valid explicit expiry are fresh only while `expiry > now`; elapsed expiry becomes stale and malformed supplied expiry becomes unknown.
+- Realtime offers with no supplied expiry retain the approved compatibility behavior.
+- Malformed expiry is projected as `null`, so the wire DTO remains serializable without turning the row into a winner.
+
+### Important 2: post-await recommendation truth
+
+- Cache hits sample UTC only after awaited Redis retrieval, immediately before decoding and freshness revalidation.
+- Cache misses retain the post-storage-build sample and now revalidate once more after the awaited Redis write attempt.
+- The public service revalidates freshness and future departure after `_get_card_pool`, then repeats the same operation after awaited personalization.
+- The final post-personalization pass occurs immediately before total calculation and offset slicing; elapsed rows lose winner flags, booking URLs, row URLs, discount copy, and realtime reason text.
+- Future-date checks share the same injected UTC instant and derive the Shanghai calendar date from it.
+
+### Important 3: post-query Ctrip freshness
+
+- `read_provider_deals` now captures UTC after all observation, parent snapshot, and child price queries, including the successful-empty path.
+- Ctrip row conversion accepts one injected post-repository instant and uses it for every selected price.
+- If every returned offer is stale at that post-await instant, provider status is stale and the existing coalescing `recent_search` demand is renewed.
+- Existing mixed fresh/stale behavior remains successful while preserving stale status per expired reference row.
+
+### Important 4: mounted frontend lifecycle
+
+- Added a hydration-stable expiry clock hook whose initial state is `null`; explicit expiries are fail-closed until the mount effect samples browser time.
+- The hook schedules one timer for the next valid expiry, clamps long delays to the browser-safe signed 32-bit maximum, and reschedules if the true expiry is farther away.
+- Focus and visible-state transitions resample time. Effect replacement and unmount clear the timer and remove both listeners, with closures refreshed whenever the expiry set changes.
+- Winner claims and the booking CTA require both card and winning-row expiry to remain effective.
+- Every `view_live_price` row link independently requires its row expiry to remain effective. Missing expiry preserves realtime compatibility; malformed supplied expiry remains fail-closed.
+
+### Important 5: current shared cache contract
+
+- Removed the obsolete DB fixture and deleted references to `_build_recommendations_uncached` from `test_rec_cache.py`.
+- Tests now patch `_build_card_pool`, assert the versioned envelope under `POOL_CACHE_KEY`, prove a second request reuses the L1 pool, and prove different users share one build while personalization still runs per user.
+
+## Schema Details
+
+Round 4 required no wire or durable database schema change. The existing optional `prices[].expires_at` and `inventory_expires_at` fields remain unchanged, Redis remains `rec:pool:v3` envelope version 1, and Alembic retains one head.
+
+## GREEN Evidence
+
+### Focused regressions
+
+- Normalizer elapsed/malformed/compatibility node: `3 passed in 0.02s`.
+- Redis and final-response crossing nodes: `3 passed in 0.12s`.
+- Repository post-query clock node: `1 passed in 13.46s`.
+- Provider post-await clock node: `1 passed in 0.06s`.
+- Frontend fake-timer/focus lifecycle nodes: `2 passed`.
+- Rewritten explicit cache module: final explicit rerun `2 passed in 0.12s` (initial green was `2 passed in 0.11s`).
+- Full normalizer, standalone recommendation lifecycle, and cache files: `30 passed in 0.14s`.
+- Full discovery card file: `13 passed`.
+
+### Bounded database and provider evidence
+
+```text
+pytest -q \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_read_provider_deals_uses_clock_after_database_reads \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_read_provider_deals_marks_expired_rows_stale \
+  backend/tests/infra/test_flight_snapshot_repo.py::test_empty_provider_observation_is_scoped_and_expires_by_ttl \
+  backend/tests/infra/test_ctrip_snapshot_provider.py::test_provider_rechecks_expiry_after_repository_await_and_renews_demand \
+  backend/tests/infra/test_ctrip_snapshot_provider.py::test_stale_nonempty_snapshot_reactivates_expired_demand_without_duplicates \
+  backend/tests/infra/test_ctrip_snapshot_provider.py::test_successful_empty_snapshot_stays_empty_until_its_ttl_expires
+```
+
+Result: `6 passed in 95.41s`.
+
+The complete Ctrip snapshot provider file separately passed: `9 passed in 43.45s`.
+
+### Combined backend
+
+The combined non-live group covered provider and wire contracts, flight query/normalizer/aggregator, standalone recommendation/cache lifecycle, FlyAI, SerpAPI, deterministic Ctrip provider/source nodes, provider tracing, JSON and streaming search APIs, graph render/tool/search paths, schemas, dependency manifest, and settings.
+
+Result: `236 passed, 1 warning in 14.73s`. The warning is the pre-existing LangGraph pending-deprecation warning.
+
+### Frontend
+
+- Cross-layer parser/fixture/mapper/card/explore group: `5 files passed`, `95 tests passed`.
+- `npm --prefix frontend run lint`: passed (`tsc --noEmit`).
+- Full Vitest: `17 files passed`, `127 tests passed`.
+- `npm --prefix frontend run build`: Next.js 15.5.15 production build passed and generated all 10 routes.
+
+### Migration, static, mock, and safety
+
+- `python3 -m compileall -q backend`: passed.
+- Structured `dotenv_values` plus SQLAlchemy URL parsing asserted distinct test/production DSNs, printed neither, found one Alembic head, and upgraded the isolated test database to head.
+- The first wrapper attempt exited before DB access because it assumed `TEST_DATABASE_URL` always contained `+asyncpg`; the corrected structured driver conversion passed. Neither invocation printed a URL.
+- Settings/default/dependency/Ctrip mock checks: `48 passed in 4.22s`.
+- Path-only tracked scan covered 1,782 text files. Six credential-shaped URL candidates were limited to four pre-existing tracked vendored parser examples, the localhost Alembic placeholder, and a synthetic monkeypatched settings test. Private-key and known live-token-prefix rules found no candidate; `0` unapproved candidates remain.
+- Final `git diff --check` and changed-file review are rerun after this report is appended.
+
+## Limitations
+
+The known stalled combined recommendation database group remains intentionally omitted and is not counted as green. Its prior PID `51386` evidence remains unchanged: exactly 15 dots, no traceback or summary, followed by termination after a prolonged remote asyncpg wait. Round 4 instead uses standalone controlled-await recommendation tests plus the bounded six-node database/provider group.
+
+The monolithic backend suite was not run. No paid/live provider, live browser, Docker, Railway, GitHub, LangSmith, deployment, or external-service operation was performed or claimed.
+
+## Round 4 Files Changed
+
+### Backend production
+
+- `backend/application/services/flight_offer_normalizer.py`
+- `backend/application/services/recommendation_service.py`
+- `backend/infrastructure/db/flight_snapshot_repo.py`
+- `backend/infrastructure/flight_data/providers/ctrip_snapshot.py`
+
+### Backend tests
+
+- `backend/tests/infra/test_ctrip_snapshot_provider.py`
+- `backend/tests/infra/test_flight_snapshot_repo.py`
+- `backend/tests/services/test_flight_offer_normalizer.py`
+- `backend/tests/services/test_rec_cache.py`
+- `backend/tests/services/test_recommendation_final_review.py`
+
+### Frontend production and tests
+
+- `frontend/components/discovery-card-content.tsx`
+- `frontend/__tests__/discovery-card-content.test.tsx`
+
+### Report
+
+- `.superpowers/sdd/final-review-fix-report.md`
+
+## Round 4 Self-Review And Commit
+
+The complete production and test diff from `f679f06c090a7ac56a2627478e683352bbb36fd0` was reviewed after focused and combined verification. The review confirmed one clock per normalization/provider conversion pass, post-await recommendation/date checks before pagination, fail-closed malformed expiry, bounded frontend timers with lifecycle cleanup, and no unrelated schema or cache-version churn.
+
+The final commit uses the required message `fix(flights): close expiry race windows`. Its exact hash is returned after Git creates the commit; a commit cannot contain its own final hash because changing this report would change that hash.

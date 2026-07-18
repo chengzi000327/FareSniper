@@ -73,6 +73,16 @@ class StickyRedis:
         self.raw = value
 
 
+class AdvancingRedis(StickyRedis):
+    def __init__(self, raw: str, advance):
+        super().__init__(raw)
+        self.advance = advance
+
+    async def get(self, key: str) -> str | None:
+        self.advance()
+        return await super().get(key)
+
+
 def _frozen_datetime(start: datetime):
     class FrozenDateTime(datetime):
         current = start
@@ -282,6 +292,113 @@ async def test_cache_hit_after_inventory_expiry_downgrades_winner(
     assert preview["prices"][0]["url"] is None
     assert card.discount_pct is None
     assert "持续监控" in card.reason
+
+
+async def test_cache_hit_uses_clock_sampled_after_redis_returns(monkeypatch):
+    now = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+    expiry = now + timedelta(seconds=1)
+    FrozenDateTime = _frozen_datetime(now)
+    cached_card = RecCard(
+        id="card-sha",
+        title="北京→上海",
+        reason="实时低价",
+        preview_deal=_preview_deal(expires_at=expiry.isoformat()),
+    )
+    raw = json.dumps(
+        {
+            "version": svc.POOL_CACHE_ENVELOPE_VERSION,
+            "cached_at": now.isoformat(),
+            "inventory_expires_at": expiry.isoformat(),
+            "cards": [cached_card.model_dump()],
+        }
+    )
+    redis = AdvancingRedis(
+        raw,
+        lambda: setattr(FrozenDateTime, "current", expiry),
+    )
+
+    async def should_not_rebuild():
+        raise AssertionError("a parseable cache hit must not rebuild")
+
+    monkeypatch.setattr(svc, "datetime", FrozenDateTime)
+    monkeypatch.setattr(svc, "_redis", lambda: redis)
+    monkeypatch.setattr(svc, "_build_card_pool", should_not_rebuild)
+
+    cards = await svc._get_card_pool()
+
+    assert cards[0].preview_deal is not None
+    assert cards[0].preview_deal["winning_price_id"] is None
+    assert cards[0].preview_deal["booking_url"] is None
+    assert cards[0].preview_deal["prices"][0]["url"] is None
+
+
+async def test_response_revalidates_winner_after_personalization_await(
+    monkeypatch,
+):
+    now = datetime(2099, 7, 1, 0, 0, tzinfo=timezone.utc)
+    expiry = now + timedelta(seconds=1)
+    FrozenDateTime = _frozen_datetime(now)
+    card = RecCard(
+        id="card-sha",
+        title="北京→上海",
+        reason="实时低价",
+        preview_deal=_preview_deal(expires_at=expiry.isoformat()),
+    )
+
+    async def get_pool():
+        return [card]
+
+    async def personalize(user_id: str, pool: list[RecCard]):
+        FrozenDateTime.current = expiry
+        return list(pool), False
+
+    monkeypatch.setattr(svc, "datetime", FrozenDateTime)
+    monkeypatch.setattr(svc, "_get_card_pool", get_pool)
+    monkeypatch.setattr(svc, "_personalize", personalize)
+
+    response = await svc.build_recommendations("u1")
+
+    assert len(response.cards) == 1
+    preview = response.cards[0].preview_deal
+    assert preview is not None
+    assert preview["winning_price_id"] is None
+    assert preview["booking_url"] is None
+    assert preview["prices"][0]["url"] is None
+
+
+async def test_response_rechecks_future_date_after_personalization_await(
+    monkeypatch,
+):
+    before_shanghai_midnight = datetime(
+        2099, 7, 31, 15, 59, tzinfo=timezone.utc
+    )
+    shanghai_midnight = datetime(2099, 7, 31, 16, 0, tzinfo=timezone.utc)
+    FrozenDateTime = _frozen_datetime(before_shanghai_midnight)
+    card = RecCard(
+        id="card-sha",
+        title="北京→上海",
+        reason="实时低价",
+        preview_deal=_preview_deal(
+            expires_at="2099-08-02T00:00:00+00:00"
+        ),
+    )
+
+    async def get_pool():
+        return [card]
+
+    async def personalize(user_id: str, pool: list[RecCard]):
+        FrozenDateTime.current = shanghai_midnight
+        return list(pool), False
+
+    monkeypatch.setattr(svc, "datetime", FrozenDateTime)
+    monkeypatch.setattr(svc, "_get_card_pool", get_pool)
+    monkeypatch.setattr(svc, "_personalize", personalize)
+
+    response = await svc.build_recommendations("u1")
+
+    assert response.cards == []
+    assert response.has_more is False
+    assert response.next_offset == 0
 
 
 async def test_pool_build_revalidates_against_the_post_query_clock(monkeypatch):
