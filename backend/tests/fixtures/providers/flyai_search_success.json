@@ -2,7 +2,7 @@
   "data": {
     "itemList": [
       {
-        "adultPrice": "¥400.0",
+        "ticketPrice": "400.00",
         "journeys": [
           {
             "journeyType": "直达",

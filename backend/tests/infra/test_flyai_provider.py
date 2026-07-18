@@ -44,9 +44,27 @@ def test_parse_maps_price_flight_and_jump_url():
     assert offers[0].booking_url.startswith("https://")
 
 
+def test_parser_supports_legacy_adult_price_when_ticket_price_is_absent():
+    payload = _payload()
+    item = payload["data"]["itemList"][0]
+    item["adultPrice"] = "¥410.0"
+    item.pop("ticketPrice")
+
+    assert parse_flyai_payload(payload, _query())[0].total_price == 410
+
+
+def test_parser_prefers_current_ticket_price_over_legacy_adult_price():
+    payload = _payload()
+    item = payload["data"]["itemList"][0]
+    item["ticketPrice"] = "420.00"
+    item["adultPrice"] = "999.00"
+
+    assert parse_flyai_payload(payload, _query())[0].total_price == 420
+
+
 def test_missing_price_becomes_view_live_price():
     payload = _payload()
-    del payload["data"]["itemList"][0]["adultPrice"]
+    del payload["data"]["itemList"][0]["ticketPrice"]
 
     offer = parse_flyai_payload(payload, _query())[0]
 
@@ -77,7 +95,7 @@ def test_parser_flattens_segments_and_computes_stops():
 
 def test_parser_skips_unpriced_item_without_valid_https_url():
     payload = _payload()
-    payload["data"]["itemList"][0].pop("adultPrice")
+    payload["data"]["itemList"][0].pop("ticketPrice")
     payload["data"]["itemList"][0]["jumpUrl"] = "http://example.com/flight"
 
     assert parse_flyai_payload(payload, _query()) == []
