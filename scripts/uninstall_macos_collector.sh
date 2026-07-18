@@ -8,4 +8,3 @@ rm -f "$PLIST_PATH"
 echo "FareSniper collector launch agent removed."
 echo "The dedicated profile and collector.env were preserved."
 echo "Profile: $HOME/.faresniper/ctrip-profile"
-

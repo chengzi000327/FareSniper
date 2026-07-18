@@ -103,4 +103,3 @@ launchctl bootout "gui/$UID" "$PLIST_PATH" >/dev/null 2>&1 || true
 launchctl bootstrap "gui/$UID" "$PLIST_PATH"
 launchctl kickstart -k "gui/$UID/com.faresniper.ctrip-collector"
 echo "FareSniper Ctrip collector is running."
-
