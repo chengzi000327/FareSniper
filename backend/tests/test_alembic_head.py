@@ -56,7 +56,7 @@ def test_alembic_has_exactly_one_head():
         check=True,
     )
     heads = [line for line in proc.stdout.splitlines() if "(head)" in line]
-    assert heads == ["20260716_provider_snapshots (head)"]
+    assert heads == ["20260718_provider_inventory (head)"]
 
 
 def test_alembic_registers_task4_repositories():
