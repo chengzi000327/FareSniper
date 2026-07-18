@@ -72,6 +72,8 @@ DATABASE_URL=
 REDIS_URL=
 RUN_SCHEDULER_IN_API=false
 VARIFLIGHT_API_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=
 
 FARESNIPER_LANGSMITH_TRACING=true
 LANGSMITH_TRACING=false
@@ -81,15 +83,16 @@ LANGSMITH_PROJECT=faresniper
 LANGCHAIN_TRACING_V2=false
 ```
 
-worker 不需要模型变量，也不得配置 FlyAI、SerpAPI、携程 token、浏览器路径、profile 或 Cookie。`VARIFLIGHT_API_KEY` 仅用于可选的旧 `hourly_scrape` 调度；未配置时该任务不注册。携程每小时任务只播种待采集航线，真正的页面采集由 Mac 完成。
+worker 的 push dispatcher 使用 `VAPID_PRIVATE_KEY` 和 `VAPID_SUBJECT` 发送 Web Push。worker 不需要模型变量，也不得配置 FlyAI、SerpAPI、携程 token、浏览器路径、profile 或 Cookie。`VARIFLIGHT_API_KEY` 仅用于可选的旧 `hourly_scrape` 调度；未配置时该任务不注册。携程每小时任务只播种待采集航线，真正的页面采集由 Mac 完成。
 
 ## Frontend Variables
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=https://<backend>.up.railway.app
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 ```
 
-同时把 frontend 域名加入 backend 的 `CORS_ORIGINS`。
+`NEXT_PUBLIC_VAPID_PUBLIC_KEY` 是与 worker 私钥配套的公开 key。另需把 frontend 域名加入 backend 的 `CORS_ORIGINS`。
 
 ## LangSmith
 
@@ -123,15 +126,26 @@ alembic -c backend/alembic.ini current --check-heads
 curl -fsS https://<backend>.up.railway.app/health
 ```
 
-真实票价验证需要环境中已有 `FARESNIPER_API_URL`、`FARESNIPER_VERIFY_JWT` 和 `CTRIP_COLLECTOR_TOKEN`。所有值都不得写入命令历史或仓库文件。使用未来日期：
+真实票价验证需要环境中已有 `FARESNIPER_API_URL` 和 `CTRIP_COLLECTOR_TOKEN`。下面通过现有 `/api/session` 端点签发匿名 JWT：命令替换会直接把响应中的 token 放入当前 shell 变量，不会把 token 打印到终端或保存到仓库。不要开启 shell tracing，也不要把变量值粘贴到命令行、日志或文件。
 
 ```bash
+FARESNIPER_VERIFY_JWT="$(
+  curl -fsS -X POST "$FARESNIPER_API_URL/api/session" \
+    -H 'Content-Type: application/json' \
+    -d '{}' |
+    python -c 'import json, sys; print(json.load(sys.stdin)["access_token"])'
+)"
+export FARESNIPER_VERIFY_JWT
+DEPART_DATE="$(python -c 'from datetime import date, timedelta; print(date.today() + timedelta(days=14))')"
+
 python -m backend.scripts.verify_live_fares \
   --origin 北京 \
   --destination 三亚 \
-  --depart-date 2099-08-01 \
+  --depart-date "$DEPART_DATE" \
   --timeout-seconds 180 \
   --require-fresh
+
+unset FARESNIPER_VERIFY_JWT
 ```
 
 脚本依次检查 Mac heartbeat、航线 job 状态、携程数字价格和 HTTPS 预订链接，并确认 `analysis.min_price`、卡片价格与推荐文本一致。stdout 只输出 `collector`、`job`、币种/价格和固定 trace 名称，不输出 token、JWT、URL 或 raw payload。

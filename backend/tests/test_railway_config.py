@@ -137,6 +137,16 @@ def test_deployment_docs_keep_collector_secrets_out_of_worker_variables():
     assert "SERPAPI_API_KEY" not in worker_env
     assert "CHROME" not in worker_env.upper()
     assert "COOKIE" not in worker_env.upper()
+    assert "VAPID_PRIVATE_KEY=" in worker_env
+    assert "VAPID_SUBJECT=" in worker_env
+
+    frontend_block = railway_docs.split("## Frontend Variables", 1)[1].split(
+        "## LangSmith", 1
+    )[0]
+    assert "NEXT_PUBLIC_VAPID_PUBLIC_KEY=" in frontend_block
+
+    frontend_env = Path("frontend/.env.example").read_text()
+    assert "NEXT_PUBLIC_VAPID_PUBLIC_KEY=" in frontend_env
 
 
 def test_mac_collector_runbook_covers_install_operations_and_recovery():
@@ -169,3 +179,17 @@ def test_readme_describes_all_china_airports_and_mac_collection_boundary():
     assert "Mac" in readme
     assert "Railway 不运行 Chrome" in readme
     assert "docs/deployment/MAC_CTRIP_COLLECTOR.md" in readme
+
+
+def test_live_verification_docs_use_near_future_date_and_safe_session_token():
+    readme = Path("README.md").read_text()
+    railway_docs = Path("docs/deployment/RAILWAY.md").read_text()
+    combined = readme + "\n" + railway_docs
+
+    assert "2099-" not in combined
+    assert "timedelta(days=14)" in combined
+    assert 'DEPART_DATE="$(' in combined
+    assert '--depart-date "$DEPART_DATE"' in combined
+    assert "/api/session" in railway_docs
+    assert 'FARESNIPER_VERIFY_JWT="$(' in railway_docs
+    assert "unset FARESNIPER_VERIFY_JWT" in railway_docs

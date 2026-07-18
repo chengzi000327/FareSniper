@@ -62,6 +62,7 @@ npm --prefix frontend run dev
 
 ```dotenv
 NEXT_PUBLIC_API_BASE_URL=https://<backend>.up.railway.app
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=
 ```
 
 ## 配置
@@ -107,14 +108,16 @@ npm --prefix frontend run build
 默认测试不调用付费来源。配置好 Railway、JWT 和 Mac collector 后，可对未来日期运行：
 
 ```bash
+DEPART_DATE="$(python -c 'from datetime import date, timedelta; print(date.today() + timedelta(days=14))')"
+
 python -m backend.scripts.verify_live_fares \
   --origin 阿勒泰 \
   --destination 三亚 \
-  --depart-date 2099-08-01 \
+  --depart-date "$DEPART_DATE" \
   --require-fresh
 ```
 
-请把示例日期替换为执行日之后的真实日期。脚本只输出状态、币种/价格和固定 trace 名称，不输出密钥或预订 URL。
+脚本只输出状态、币种/价格和固定 trace 名称，不输出密钥或预订 URL。JWT 的安全获取与清理命令见 [Railway Deployment](docs/deployment/RAILWAY.md#验证)。
 
 ## 相关文档
 
