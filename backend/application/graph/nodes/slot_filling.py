@@ -136,7 +136,7 @@ async def _clarification_question(
     if not missing or missing[0] not in {"origin", "destination"}:
         return fallback, "deterministic"
 
-    ambiguity = location_ambiguity(user_text)
+    ambiguity = location_ambiguity(user_text, missing_slot=missing[0])
     if ambiguity is None:
         return fallback, "deterministic"
 

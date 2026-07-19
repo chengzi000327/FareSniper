@@ -110,11 +110,27 @@ def test_province_destination_clarification_lists_catalog_airport_cities():
 
 
 def test_province_ambiguity_survives_an_exact_origin_in_same_message():
-    ambiguity = location_ambiguity("明天从北京去广西")
+    ambiguity = location_ambiguity(
+        "明天从北京去广西",
+        missing_slot="destination",
+    )
 
     assert ambiguity is not None
     assert ambiguity.region == "广西"
     assert "南宁" in ambiguity.cities
+
+
+def test_two_provinces_select_region_for_missing_endpoint():
+    origin = location_ambiguity("从广东去广西", missing_slot="origin")
+    destination = location_ambiguity(
+        "从广东去广西",
+        missing_slot="destination",
+    )
+
+    assert origin is not None
+    assert destination is not None
+    assert origin.region == "广东"
+    assert destination.region == "广西"
 
 
 def test_slots_to_intent_uses_chinese_city_and_airport_code():

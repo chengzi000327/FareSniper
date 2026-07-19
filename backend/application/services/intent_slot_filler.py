@@ -323,7 +323,7 @@ def build_clarify_question(
             return f"去{destination}，从哪里出发？"
         return "你想从哪个城市出发？"
     if first == "destination":
-        ambiguity = location_ambiguity(user_text)
+        ambiguity = location_ambiguity(user_text, missing_slot=first)
         if ambiguity:
             choices = "、".join(ambiguity.cities)
             prefix = ""
@@ -361,33 +361,39 @@ def build_clarify_question(
     return "还差一点信息，能补充一下吗？"
 
 
-def location_ambiguity(text: str) -> LocationAmbiguity | None:
+def location_ambiguity(
+    text: str,
+    *,
+    missing_slot: str | None = None,
+) -> LocationAmbiguity | None:
     """Return valid airport-city choices for an unresolved province mention."""
     normalized = _normalize_text(text)
     if not normalized:
         return None
 
-    provinces = sorted(
-        {city.province for city in _CATALOG.cities if city.province},
-        key=len,
-        reverse=True,
-    )
-    region = next(
-        (province for province in provinces if province in normalized),
-        None,
-    )
-    if region is None:
+    candidates: list[tuple[int, LocationAmbiguity]] = []
+    for region in {city.province for city in _CATALOG.cities if city.province}:
+        position = normalized.find(region)
+        if position < 0:
+            continue
+        cities = tuple(
+            city.name
+            for city in _CATALOG.cities
+            if city.province == region
+            and any(airport.bookable for airport in city.airports)
+        )
+        if len(cities) >= 2:
+            candidates.append(
+                (position, LocationAmbiguity(region=region, cities=cities))
+            )
+    if not candidates:
         return None
 
-    cities = tuple(
-        city.name
-        for city in _CATALOG.cities
-        if city.province == region
-        and any(airport.bookable for airport in city.airports)
-    )
-    if len(cities) < 2:
-        return None
-    return LocationAmbiguity(region=region, cities=cities)
+    # "广东去广西" must clarify the first region as the origin and the last
+    # as the destination. Municipalities such as Beijing are filtered out
+    # above because they do not have multiple airport cities.
+    candidates.sort(key=lambda item: (item[0], item[1].region))
+    return candidates[0][1] if missing_slot == "origin" else candidates[-1][1]
 
 
 def looks_like_flight_search(text: str, slots: SlotBundle | None = None) -> bool:
