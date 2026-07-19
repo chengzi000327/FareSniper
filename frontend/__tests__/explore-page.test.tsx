@@ -94,6 +94,33 @@ test("hands a recommendation query to the chat callback", async () => {
   expect(onSearch).toHaveBeenCalledWith("2099-08-01 从上海到新加坡的机票");
 });
 
+test("renders an unpriced route and hands it to realtime chat search", async () => {
+  listMock.mockResolvedValue({
+    personalized: false,
+    cards: [
+      {
+        id: "route-syx",
+        title: "北京→三亚",
+        query_hint: "明天从北京到三亚的机票",
+        reason: "进入对话获取最新报价",
+        tags: ["海岛度假"],
+        preview_deal: null,
+      },
+    ],
+    has_more: false,
+    next_offset: 1,
+  });
+  const onSearch = vi.fn();
+
+  render(<ExplorePage onSearch={onSearch} />);
+
+  expect(await screen.findByText("实时查询")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "查询实时价格" }));
+  fireEvent.click(await screen.findByRole("button", { name: "在对话中查询" }));
+
+  expect(onSearch).toHaveBeenCalledWith("明天从北京到三亚的机票");
+});
+
 test("continues past an empty first page and renders a later valid page", async () => {
   listMock
     .mockResolvedValueOnce({

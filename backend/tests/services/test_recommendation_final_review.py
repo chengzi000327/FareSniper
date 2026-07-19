@@ -101,7 +101,7 @@ async def _identity_personalize(user_id: str, pool: list[RecCard]):
 
 
 def test_recommendation_pool_cache_version_excludes_pre_freshness_cards():
-    assert svc.POOL_CACHE_KEY == "rec:pool:v3"
+    assert svc.POOL_CACHE_KEY == "rec:pool:v4"
 
 
 async def test_server_pagination_skips_empty_cards_before_slicing(monkeypatch):
@@ -123,6 +123,29 @@ async def test_server_pagination_skips_empty_cards_before_slicing(monkeypatch):
     assert [card.title for card in response.cards] == ["valid-later-page"]
     assert response.has_more is False
     assert response.next_offset == 1
+
+
+async def test_server_keeps_unpriced_route_cards_with_search_handoff(monkeypatch):
+    pool = [
+        RecCard(
+            title="北京→三亚",
+            reason="查询实时价格",
+            query_hint="明天从北京到三亚的机票",
+            preview_deal=None,
+        )
+    ]
+
+    async def fake_pool():
+        return pool
+
+    monkeypatch.setattr(svc, "_get_card_pool", fake_pool)
+    monkeypatch.setattr(svc, "_personalize", _identity_personalize)
+
+    response = await svc.build_recommendations("u1", limit=6, offset=0)
+
+    assert len(response.cards) == 1
+    assert response.cards[0].preview_deal is None
+    assert response.cards[0].query_hint == "明天从北京到三亚的机票"
 
 
 async def test_historical_only_inventory_never_becomes_a_preview_link(monkeypatch):

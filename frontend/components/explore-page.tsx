@@ -21,6 +21,13 @@ const DEST_IMAGES: Record<string, string> = {
   CAN: '/images/destinations/CAN.jpg',
   XMN: '/images/destinations/XMN.jpg',
 }
+const DEST_CODES_BY_CITY: Record<string, string> = {
+  上海: 'SHA',
+  三亚: 'SYX',
+  成都: 'CTU',
+  广州: 'CAN',
+  厦门: 'XMN',
+}
 
 type Deal = {
   id: string
@@ -39,10 +46,51 @@ type Deal = {
   airline: string
   platform: string
   numericPrice: number | null
+  hasPricePreview: boolean
 }
 
 function mapCard(c: RecCardDto): Deal | null {
-  if (!c.preview_deal) return null
+  if (!c.preview_deal) {
+    const [from, to, ...extra] = (c.title ?? '')
+      .split('→')
+      .map((part) => part.trim())
+    const queryHint = c.query_hint?.trim() ?? ''
+    if (!from || !to || extra.length > 0 || !queryHint) return null
+    const destCode = DEST_CODES_BY_CITY[to] ?? to
+    return {
+      id: c.id ?? `route-${from}-${to}`,
+      from,
+      to,
+      destCode,
+      price: '实时查询',
+      date: '',
+      reason: c.reason ?? '进入对话获取最新航班与平台报价。',
+      tags: c.tags ?? [],
+      discountPct: null,
+      image:
+        DEST_IMAGES[destCode] ??
+        `https://picsum.photos/seed/${encodeURIComponent(destCode)}/800/560`,
+      cardData: {
+        from,
+        to,
+        basePrice: null,
+        totalPrice: null,
+        tax: null,
+        baggageFee: null,
+        hasBaggage: null,
+        currency: 'CNY',
+        platform: '',
+        prices: [],
+        placeholder: true,
+      },
+      queryHint,
+      flightNo: '',
+      airline: '',
+      platform: '',
+      numericPrice: null,
+      hasPricePreview: false,
+    }
+  }
   const deal = c.preview_deal
   const destCode = (deal.destination_code as string) ?? ''
   return {
@@ -62,6 +110,7 @@ function mapCard(c: RecCardDto): Deal | null {
     airline: deal.airline,
     platform: deal.platform,
     numericPrice: deal.total_price,
+    hasPricePreview: true,
   }
 }
 
@@ -155,6 +204,7 @@ export function ExplorePage({ onSearch }: { onSearch?: (query: string) => void }
 
   const selectDeal = (deal: Deal) => {
     setSelectedDeal(deal)
+    if (!deal.flightNo) return
     void track(EventName.TicketClicked, {
       flight_no: deal.flightNo,
       platform: deal.platform,
@@ -342,7 +392,9 @@ function DealCard({ deal, onSelect }: { deal: Deal; onSelect: () => void }) {
         {/* 价格 */}
         <div className="mb-1 flex items-baseline gap-2">
           <span className="text-3xl font-black text-brand-text">{deal.price}</span>
-          <span className="text-sm text-brand-muted">起 · {deal.date}</span>
+          <span className="text-sm text-brand-muted">
+            {deal.hasPricePreview ? `起 · ${deal.date}` : '点击获取最新报价'}
+          </span>
         </div>
 
         {/* 推荐理由 */}
@@ -353,7 +405,7 @@ function DealCard({ deal, onSelect }: { deal: Deal; onSelect: () => void }) {
           onClick={onSelect}
           className="w-full rounded-2xl bg-brand-bg px-4 py-3 text-sm font-bold text-brand-text transition hover:bg-brand-text hover:text-white"
         >
-          查看详情
+          {deal.hasPricePreview ? '查看详情' : '查询实时价格'}
         </button>
       </div>
     </motion.div>

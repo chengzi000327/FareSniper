@@ -27,7 +27,7 @@ from backend.schemas.common import DealCardDto
 # ── 缓存分层 ──────────────────────────────────────────────────────────────────
 # L1:全局未排序卡片池,全用户共享,key=rec:pool:v3,TTL 受库存到期时间约束。
 # L2:请求时在内存里做个性化排序(读 frequent_cities),不进 L1 缓存。
-POOL_CACHE_KEY = "rec:pool:v3"
+POOL_CACHE_KEY = "rec:pool:v4"
 POOL_CACHE_TTL = 600  # 10 分钟
 POOL_CACHE_ENVELOPE_VERSION = 1
 
@@ -213,9 +213,15 @@ def _revalidate_renderable_cards(
     return [
         card
         for card in refreshed
-        if card.preview_deal is not None
-        and _is_future_departure(
-            card.preview_deal.get("depart_date"), now=now
+        if (
+            card.preview_deal is None
+            and bool(card.query_hint.strip())
+        )
+        or (
+            card.preview_deal is not None
+            and _is_future_departure(
+                card.preview_deal.get("depart_date"), now=now
+            )
         )
     ]
 
@@ -423,6 +429,7 @@ def _build_card(
                 id=str(uuid.uuid4())[:8],
                 title=f"{origin_name}→{dest_name}",
                 reason=_build_reason(dest_name, None, None, False),
+                query_hint=f"明天从{origin_name}到{dest_name}的机票",
                 tags=tags,
             )
         prices = deal.get("prices") or []
@@ -569,7 +576,7 @@ def _build_card(
         query_hint=(
             f"{preview_deal['depart_date']} 从{origin_name}到{dest_name}的机票"
             if preview_deal
-            else ""
+            else f"明天从{origin_name}到{dest_name}的机票"
         ),
         tags=tags,
         discount_pct=discount_pct,
