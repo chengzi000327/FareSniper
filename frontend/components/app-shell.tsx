@@ -94,17 +94,20 @@ export function AppShell() {
                   <DiscoveryCardContent
                     from="上海"
                     to="三亚"
-                    basePrice={null}
-                    tax={null}
-                    baggageFee={null}
-                    hasBaggage={null}
+                    basePrice={399}
+                    totalPrice={549}
+                    tax={150}
+                    taxSource="regulatory_estimate"
+                    baggageFee={0}
+                    baggageAllowance="20KG"
+                    hasBaggage
                     currency="CNY"
                     platform="飞猪旅行"
                     compact
-                    placeholder
+                    demo
                     prices={[
-                      { id: 'landing-flyai', name: '飞猪旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'loading', data_provider: 'flyai', data_freshness: 'unknown' },
-                      { id: 'landing-ctrip', name: '携程旅行', price: null, currency: 'CNY', price_status: null, provider_status: 'queued', data_provider: 'ctrip_snapshot', data_freshness: 'unknown' },
+                      { id: 'landing-flyai', name: '飞猪旅行', price: 549, currency: 'CNY', price_status: 'priced', provider_status: 'success', data_provider: 'flyai', data_freshness: 'unknown' },
+                      { id: 'landing-ctrip', name: '携程旅行', price: 579, currency: 'CNY', price_status: 'stale', provider_status: 'stale', data_provider: 'ctrip_snapshot', data_freshness: 'stale' },
                     ]}
                   />
                 </motion.div>
@@ -119,26 +122,28 @@ export function AppShell() {
                   <DiscoveryCardContent
                     from="上海"
                     to="新加坡"
-                    basePrice={null}
-                    tax={null}
-                    baggageFee={null}
-                    hasBaggage={null}
+                    basePrice={168}
+                    totalPrice={226}
+                    tax={58}
+                    baggageFee={0}
+                    baggageAllowance="1件 23KG"
+                    hasBaggage
                     currency="USD"
                     platform="国际航司/销售平台"
                     compact
-                    placeholder
+                    demo
                     prices={[
                       {
                         name: '国际航司/销售平台',
-                        price: null,
+                        price: 226,
                         id: 'landing-serpapi',
                         currency: 'USD',
-                        price_status: null,
-                        provider_status: 'loading',
+                        price_status: 'priced',
+                        provider_status: 'success',
                         data_provider: 'serpapi_google_flights',
                         data_freshness: 'unknown',
                       },
-                      { id: 'landing-flyai-global', name: '飞猪旅行', price: null, currency: 'USD', price_status: null, provider_status: 'empty', data_provider: 'flyai', data_freshness: 'unknown' },
+                      { id: 'landing-flyai-global', name: '飞猪旅行', price: 239, currency: 'USD', price_status: 'priced', provider_status: 'success', data_provider: 'flyai', data_freshness: 'unknown' },
                     ]}
                   />
                 </motion.div>

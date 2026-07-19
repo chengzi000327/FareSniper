@@ -132,8 +132,28 @@ def _first_price(item: Mapping[str, object], *keys: str) -> int | None:
     return None
 
 
+def _nested_mappings(value: object):
+    if isinstance(value, Mapping):
+        yield value
+        for child in value.values():
+            yield from _nested_mappings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _nested_mappings(child)
+
+
+def _first_nested_price(
+    item: Mapping[str, object], *keys: str
+) -> int | None:
+    for candidate in _nested_mappings(item):
+        price = _first_price(candidate, *keys)
+        if price is not None:
+            return price
+    return None
+
+
 def _tax_total(item: Mapping[str, object]) -> int | None:
-    direct = _first_price(
+    direct = _first_nested_price(
         item,
         "tax",
         "taxPrice",
@@ -142,43 +162,59 @@ def _tax_total(item: Mapping[str, object]) -> int | None:
     )
     if direct is not None:
         return direct
-    construction_fee = _first_price(
+    construction_fee = _first_nested_price(
         item,
         "airportConstructionFee",
         "airportTax",
         "constructionFee",
     )
-    fuel_surcharge = _first_price(item, "fuelSurcharge", "fuelFee")
+    fuel_surcharge = _first_nested_price(
+        item, "fuelSurcharge", "fuelFee"
+    )
     if construction_fee is None or fuel_surcharge is None:
         return None
     return construction_fee + fuel_surcharge
 
 
 def _has_baggage(item: Mapping[str, object]) -> bool | None:
-    explicit = item.get("hasBaggage")
-    if isinstance(explicit, bool):
-        return explicit
-    for key in ("baggageAllowance", "checkedBaggage", "baggageInfo"):
-        value = item.get(key)
-        if value is None:
-            continue
-        text = str(value).strip().casefold()
-        if not text:
-            continue
-        if any(marker in text for marker in ("不含", "无托运", "0kg", "0 kg")):
-            return False
-        return True
+    for candidate in _nested_mappings(item):
+        explicit = candidate.get("hasBaggage")
+        if isinstance(explicit, bool):
+            return explicit
+        for key in (
+            "baggageAllowance",
+            "checkedBaggage",
+            "baggageInfo",
+        ):
+            value = candidate.get(key)
+            if value is None:
+                continue
+            text = str(value).strip().casefold()
+            if not text:
+                continue
+            if (
+                "不含" in text
+                or "无托运" in text
+                or re.search(r"(?<!\d)0\s*kg\b", text) is not None
+            ):
+                return False
+            return True
     return None
 
 
 def _baggage_allowance(item: Mapping[str, object]) -> str | None:
-    for key in ("baggageAllowance", "checkedBaggage", "baggageInfo"):
-        value = item.get(key)
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text:
-            return text[:128]
+    for candidate in _nested_mappings(item):
+        for key in (
+            "baggageAllowance",
+            "checkedBaggage",
+            "baggageInfo",
+        ):
+            value = candidate.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text[:128]
     return None
 
 
@@ -254,7 +290,9 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
         )
         tax = _tax_total(item)
         tax_source = "provider" if tax is not None else None
-        baggage_fee = _first_price(item, "baggageFee", "baggagePrice")
+        baggage_fee = _first_nested_price(
+            item, "baggageFee", "baggagePrice"
+        )
         has_baggage = _has_baggage(item)
         if baggage_fee is None and has_baggage is True:
             baggage_fee = 0

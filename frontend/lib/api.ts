@@ -635,7 +635,7 @@ export interface MemoryItemDto {
 }
 
 export interface QueryHistoryItemDto {
-  id: string;
+  id: string | number;
   query: unknown;
   created_at: string;
   [key: string]: unknown;

@@ -66,12 +66,8 @@ const populatedMemory = {
   ],
 };
 
-function openJournal() {
-  fireEvent.click(screen.getByRole("button", { name: /打开记忆/ }));
-}
-
 function selectChapter(name: string) {
-  fireEvent.click(screen.getByRole("button", { name }));
+  fireEvent.click(screen.getByRole("button", { name, pressed: false }));
 }
 
 beforeEach(() => {
@@ -87,7 +83,6 @@ test("derives all four journal chapters from real memory and query history", asy
 
   render(<MemoryPage />);
   await waitFor(() => expect(getMemory).toHaveBeenCalledTimes(1));
-  openJournal();
 
   expect(await screen.findByText("心理价位：¥1,200")).toBeInTheDocument();
   expect(screen.getByText("常去城市：三亚、成都")).toBeInTheDocument();
@@ -111,7 +106,6 @@ test("shows neutral empty states instead of invented preferences or stories", as
   getMemory.mockResolvedValue({ memories: [], query_history: [] });
 
   render(<MemoryPage />);
-  openJournal();
 
   expect(await screen.findByText("还没有记录出行偏好")).toBeInTheDocument();
 
@@ -133,8 +127,8 @@ test("keeps the journal neutral when memory loading fails", async () => {
   getMemory.mockRejectedValue(new Error("offline"));
 
   render(<MemoryPage />);
-  openJournal();
 
   expect(await screen.findByText("暂时无法读取记忆数据")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "重新读取" })).toBeInTheDocument();
   expect(screen.queryByText(/更容易被海岛/)).not.toBeInTheDocument();
 });

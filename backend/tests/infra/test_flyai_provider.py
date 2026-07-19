@@ -68,6 +68,28 @@ def test_parser_maps_explicit_total_tax_and_baggage_components():
     assert offer.has_baggage is True
 
 
+def test_parser_reads_tax_and_baggage_when_skill_nests_them_in_segment():
+    payload = _payload()
+    item = payload["data"]["itemList"][0]
+    segment = item["journeys"][0]["segments"][0]
+    segment.update(
+        {
+            "airportConstructionFee": "50",
+            "fuelSurcharge": "20",
+            "baggageAllowance": "20KG",
+            "baggageFee": "0",
+        }
+    )
+
+    offer = parse_flyai_payload(payload, _query())[0]
+
+    assert offer.tax == 70
+    assert offer.tax_source == "provider"
+    assert offer.baggage_allowance == "20KG"
+    assert offer.baggage_fee == 0
+    assert offer.has_baggage is True
+
+
 def test_parser_infers_tax_from_an_explicit_provider_total():
     payload = _payload()
     payload["data"]["itemList"][0].update(

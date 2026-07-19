@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
+
+from backend.application.contracts.intent import SlotBundle
 
 
 def test_build_graph_wires_react_primary_with_rule_fallback():
@@ -153,6 +155,49 @@ async def test_build_graph_restores_route_for_date_only_followup(
     assert second["response"].query["origin_city"] == "北京"
     assert second["response"].query["destination_city"] == "三亚"
     assert second["response"].query["date_start"] == "2026-07-25"
+
+
+@pytest.mark.asyncio
+async def test_region_clarification_uses_llm_then_catalog_validation(monkeypatch):
+    import backend.application.graph.nodes.slot_filling as sf
+
+    calls: list[str] = []
+
+    class _Model:
+        async def ainvoke(self, messages):
+            calls.append(messages[0].content)
+            fallback = sf.build_clarify_question(
+                SlotBundle(
+                    intent="search_flight",
+                    origin="北京",
+                    depart_date="2026-07-20",
+                ),
+                ["destination"],
+                "去广西桂宁",
+            )
+            return AIMessage(content=fallback)
+
+    monkeypatch.setattr(sf, "_build_clarification_model", lambda: _Model())
+    state = {
+        "messages": [HumanMessage(content="去广西桂宁")],
+        "request_message": "去广西桂宁",
+        "request_session_id": "s_region",
+        "request_user_id": "u1",
+        "accumulated_slots": SlotBundle(
+            intent="search_flight",
+            origin="北京",
+            depart_date="2026-07-20",
+        ),
+        "missing_slots": ["destination"],
+    }
+
+    result = await sf.slot_clarify_response(state)
+
+    assert len(calls) == 1
+    assert "广西" in calls[0]
+    assert "南宁" in result["response"].recommendation["text"]
+    assert "桂林" in result["response"].recommendation["text"]
+    assert result["response"].meta["clarification_mode"] == "llm_validated"
 
 
 @pytest.mark.asyncio

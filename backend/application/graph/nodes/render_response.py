@@ -320,12 +320,13 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 await learn_preferences(user_id, user_message, session_factory)
             except Exception:
                 logger.warning("learn_preferences_failed user_id=%s", user_id, exc_info=True)
-        # 行为推断学习（仅在拿到结构化 intent 时补充）
-        if intent and not intent.parse_failed:
+        # ReAct 工具链通常没有 NormalizedIntent；只要已有权威查询快照，
+        # 就应记录搜索历史并更新行为记忆。
+        if user_id and user_message and query_summary:
             await _async_memory_writeback(
                 user_id=user_id,
                 message=user_message,
-                intent=intent,
+                query_summary=query_summary,
                 session_factory=session_factory,
             )
     else:
@@ -468,14 +469,63 @@ async def _write_chat_history(
         )
 
 
-async def _async_memory_writeback(user_id, message, intent, session_factory):
+async def _async_memory_writeback(
+    user_id,
+    message,
+    query_summary,
+    session_factory,
+):
     try:
         from backend.services.memory_learner import (
             learn_from_query_history,
             learn_from_search,
         )
 
-        await learn_from_search(user_id, intent.model_dump(), session_factory)
+        intent = _memory_intent(query_summary)
+        if intent is None:
+            return
+        origin = intent["origin"]["city"]
+        destination = intent["destination"]["city"]
+        depart_date = intent["date_window"]["start_date"]
+        raw_text = str(query_summary.get("raw_text") or message).strip()
+        if origin not in raw_text or destination not in raw_text:
+            raw_text = f"{depart_date} {origin} → {destination}"
+        await learn_from_search(
+            user_id,
+            {**intent, "raw_text": raw_text},
+            session_factory,
+        )
         await learn_from_query_history(user_id, session_factory)
     except Exception:
-        pass
+        logger.warning(
+            "memory_query_writeback_failed user_id=%s",
+            user_id,
+            exc_info=True,
+        )
+
+
+def _memory_intent(query_summary: dict) -> dict | None:
+    origin = str(query_summary.get("origin_city") or "").strip()
+    destination = str(query_summary.get("destination_city") or "").strip()
+    depart_date = str(query_summary.get("date_start") or "").strip()
+    if not origin or not destination or not depart_date:
+        return None
+    return {
+        "origin": {
+            "city": origin,
+            "iata_code": str(query_summary.get("origin_code") or "").strip(),
+        },
+        "destination": {
+            "city": destination,
+            "iata_code": str(
+                query_summary.get("destination_code") or ""
+            ).strip(),
+        },
+        "date_window": {
+            "start_date": depart_date,
+            "end_date": str(
+                query_summary.get("date_end") or depart_date
+            ).strip(),
+        },
+        "budget_cny": query_summary.get("budget"),
+    }

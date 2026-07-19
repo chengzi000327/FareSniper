@@ -399,6 +399,7 @@ export function ChatPage({
           />
           <motion.button
             type="button"
+            aria-label="发送消息"
             onClick={handleSend}
             whileTap={{ scale: 0.96 }}
             className="rounded-2xl bg-brand-text p-3 text-white transition hover:bg-brand-orange"

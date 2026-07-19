@@ -19,6 +19,7 @@ export function SidebarItem({
     <div className="group flex flex-col items-center gap-1">
       <motion.button
         type="button"
+        aria-label={label}
         onClick={onClick}
         whileHover={{ scale: 1.08 }}
         className={`flex h-10 w-10 items-center justify-center rounded-2xl transition ${

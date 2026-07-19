@@ -11,6 +11,7 @@ from backend.application.services.intent_slot_filler import (
     build_clarify_question,
     extract_route_locations,
     fill_slots,
+    location_ambiguity,
     missing_required_slots,
     slots_to_intent,
 )
@@ -85,6 +86,35 @@ def test_clarify_question_carries_known_destination():
     slots = SlotBundle(intent="search_flight", destination="三亚", depart_date="2026-05-16")
 
     assert build_clarify_question(slots, ["origin"]) == "5月16日去三亚，从哪里出发？"
+
+
+def test_province_destination_clarification_lists_catalog_airport_cities():
+    slots = SlotBundle(
+        intent="search_flight",
+        origin="北京",
+        depart_date="2026-07-20",
+    )
+
+    question = build_clarify_question(
+        slots,
+        ["destination"],
+        "去广西桂宁",
+    )
+    ambiguity = location_ambiguity("去广西桂宁")
+
+    assert ambiguity is not None
+    assert ambiguity.region == "广西"
+    assert {"南宁", "桂林", "北海", "柳州"} <= set(ambiguity.cities)
+    assert question.startswith("7月20日从北京出发，广西有多个机场城市")
+    assert all(city in question for city in ambiguity.cities)
+
+
+def test_province_ambiguity_survives_an_exact_origin_in_same_message():
+    ambiguity = location_ambiguity("明天从北京去广西")
+
+    assert ambiguity is not None
+    assert ambiguity.region == "广西"
+    assert "南宁" in ambiguity.cities
 
 
 def test_slots_to_intent_uses_chinese_city_and_airport_code():

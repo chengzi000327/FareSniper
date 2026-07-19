@@ -74,6 +74,14 @@ class _LocationTerm:
     is_ascii_code: bool
 
 
+@dataclass(frozen=True)
+class LocationAmbiguity:
+    """A province-level location that must be narrowed to an airport city."""
+
+    region: str
+    cities: tuple[str, ...]
+
+
 def _build_location_terms() -> tuple[_LocationTerm, ...]:
     terms: set[str] = set()
     for city in _CATALOG.cities:
@@ -297,7 +305,11 @@ def slots_to_intent(
     )
 
 
-def build_clarify_question(slots: SlotBundle | None, missing: list[str]) -> str:
+def build_clarify_question(
+    slots: SlotBundle | None,
+    missing: list[str],
+    user_text: str = "",
+) -> str:
     """Ask one natural follow-up question, carrying already known context."""
     first = missing[0] if missing else "origin"
     destination = slots.destination if slots else None
@@ -311,6 +323,18 @@ def build_clarify_question(slots: SlotBundle | None, missing: list[str]) -> str:
             return f"去{destination}，从哪里出发？"
         return "你想从哪个城市出发？"
     if first == "destination":
+        ambiguity = location_ambiguity(user_text)
+        if ambiguity:
+            choices = "、".join(ambiguity.cities)
+            prefix = ""
+            if origin and depart_date:
+                prefix = f"{_display_date(depart_date)}从{origin}出发，"
+            elif origin:
+                prefix = f"从{origin}出发，"
+            return (
+                f"{prefix}{ambiguity.region}有多个机场城市，请确认目的地："
+                f"{choices}？"
+            )
         if origin and depart_date:
             return f"{_display_date(depart_date)}从{origin}出发，想去哪里？"
         if origin:
@@ -335,6 +359,35 @@ def build_clarify_question(slots: SlotBundle | None, missing: list[str]) -> str:
     if first == "preference_field":
         return "想更新哪类偏好？"
     return "还差一点信息，能补充一下吗？"
+
+
+def location_ambiguity(text: str) -> LocationAmbiguity | None:
+    """Return valid airport-city choices for an unresolved province mention."""
+    normalized = _normalize_text(text)
+    if not normalized:
+        return None
+
+    provinces = sorted(
+        {city.province for city in _CATALOG.cities if city.province},
+        key=len,
+        reverse=True,
+    )
+    region = next(
+        (province for province in provinces if province in normalized),
+        None,
+    )
+    if region is None:
+        return None
+
+    cities = tuple(
+        city.name
+        for city in _CATALOG.cities
+        if city.province == region
+        and any(airport.bookable for airport in city.airports)
+    )
+    if len(cities) < 2:
+        return None
+    return LocationAmbiguity(region=region, cities=cities)
 
 
 def looks_like_flight_search(text: str, slots: SlotBundle | None = None) -> bool:

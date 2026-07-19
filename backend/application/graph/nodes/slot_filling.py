@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from langchain_core.messages import AIMessage, HumanMessage
@@ -13,6 +14,7 @@ from backend.application.services.intent_slot_filler import (
     build_clarify_question,
     fill_slots,
     intent_definition_for,
+    location_ambiguity,
     missing_required_slots,
     slots_to_intent,
 )
@@ -84,7 +86,12 @@ async def slot_clarify_response(state: WorkflowState) -> WorkflowState:
         slots,
         state.get("intent_definitions"),
     )
-    question = build_clarify_question(slots, missing)
+    user_text = _latest_user_text(state)
+    question, clarification_mode = await _clarification_question(
+        slots,
+        missing,
+        user_text,
+    )
     response = FrontendResponse(
         user_id=state.get("request_user_id", ""),
         session_id=state.get("request_session_id"),
@@ -114,9 +121,63 @@ async def slot_clarify_response(state: WorkflowState) -> WorkflowState:
             "missing_slots": missing,
             "accumulated_slots": _slot_dict(slots),
             "intent": slots.intent if slots else None,
+            "clarification_mode": clarification_mode,
         },
     )
     return {"messages": [AIMessage(content=question)], "response": response}
+
+
+async def _clarification_question(
+    slots,
+    missing: list[str],
+    user_text: str,
+) -> tuple[str, str]:
+    fallback = build_clarify_question(slots, missing, user_text)
+    if not missing or missing[0] not in {"origin", "destination"}:
+        return fallback, "deterministic"
+
+    ambiguity = location_ambiguity(user_text)
+    if ambiguity is None:
+        return fallback, "deterministic"
+
+    try:
+        model = _build_clarification_model()
+        city_list = "、".join(ambiguity.cities)
+        prompt = (
+            "你是机票搜索的地点消歧助手。只输出一句简洁中文追问，不要解释。"
+            "不得猜测用户最终目的地，也不得添加候选列表之外的城市。"
+            f"用户原话：{user_text}\n"
+            f"已知出发地：{getattr(slots, 'origin', None) or '未知'}\n"
+            f"已知日期：{getattr(slots, 'depart_date', None) or '未知'}\n"
+            f"用户提到的地区：{ambiguity.region}\n"
+            f"该地区可用机场城市：{city_list}\n"
+            "请让用户从上述机场城市中明确选择一个。"
+        )
+        response = await asyncio.wait_for(
+            model.ainvoke([HumanMessage(content=prompt)]),
+            timeout=4.0,
+        )
+        content = getattr(response, "content", "")
+        if (
+            isinstance(content, str)
+            and content.strip()
+            and ambiguity.region in content
+            and all(city in content for city in ambiguity.cities)
+        ):
+            return content.strip(), "llm_validated"
+    except Exception:
+        logger.warning(
+            "location_clarification_llm_failed region=%s",
+            ambiguity.region,
+            exc_info=True,
+        )
+    return fallback, "catalog_fallback"
+
+
+def _build_clarification_model():
+    from backend.infrastructure.llm.models import build_chat_model
+
+    return build_chat_model(role="agent")
 
 
 async def dynamic_intent_response(state: WorkflowState) -> WorkflowState:

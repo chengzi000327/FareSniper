@@ -224,6 +224,54 @@ async def test_chat_history_uses_the_grounded_final_snapshot(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_react_search_query_is_written_to_memory_without_normalized_intent(
+    monkeypatch,
+):
+    captured: dict = {}
+
+    async def ignore_history(**kwargs):
+        return None
+
+    async def capture_memory(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(
+        "backend.application.graph.nodes.render_response._write_chat_history",
+        ignore_history,
+    )
+    monkeypatch.setattr(
+        "backend.application.graph.nodes.render_response._async_memory_writeback",
+        capture_memory,
+    )
+    query = {
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "destination_city": "南宁",
+        "destination_code": "NNG",
+        "date_start": "2026-07-20",
+        "date_end": "2026-07-20",
+    }
+
+    await render_response(
+        {
+            "request_user_id": "u1",
+            "request_session_id": "s1",
+            "request_message": "明天北京到南宁",
+            "_session_factory": object(),
+            "search_result": {
+                "source": "multi_provider",
+                "query": query,
+                "deals": [deal("CA1335", 610)],
+            },
+        }
+    )
+
+    assert captured["user_id"] == "u1"
+    assert captured["message"] == "明天北京到南宁"
+    assert captured["query_summary"] == query
+
+
+@pytest.mark.asyncio
 async def test_render_empty_when_no_search_result():
     state = {
         "search_result": None,
