@@ -29,7 +29,6 @@ import {
   SearchCheck,
   ShieldCheck,
   Sparkles,
-  UserRoundCheck,
   X,
 } from 'lucide-react'
 
@@ -102,20 +101,21 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'architecture',
     label: 'Agent 内部',
-    duration: '02:20',
+    duration: '02:30',
     notes: [
-      'ReAct Agent 负责理解含糊表达和决定调用什么工具；日期、机场、价格和排序由确定性代码校验。',
-      '不同平台通过统一 Provider 契约接入，先归一化成同一种 FlightOffer，再进入推荐。',
-      '模型负责语言和决策编排，工程系统负责事实。',
+      '不要按组件名念架构。沿着一次请求讲：恢复上下文 → 识别与追问 → 并行搜索 → 归一化证据 → 冻结后输出。',
+      '模型 8 秒超时或关键要素不完整时进入确定性槽位链；单个 Provider 10 秒超时或熔断时，其他来源仍可继续返回。',
+      '核心分工是：LLM 负责理解与工具编排，工程系统负责日期、机场、价格、新鲜度和最终事实。',
     ],
   },
   {
     id: 'decisions',
-    label: '架构取舍',
-    duration: '01:30',
+    label: '可信闭环',
+    duration: '01:50',
     notes: [
-      '这些技术选择都来自产品约束：信任要求事实可复算，多平台要求故障隔离，个性化要求可解释记忆。',
-      'LangSmith 让每次意图理解、工具调用和失败回退都可追踪，便于持续做 Bad Case 迭代。',
+      '可信依赖四个不变量：关键槽位完整、未知字段不补全、winner 资格可复算、文案和卡片共享冻结快照。',
+      '形成两个反馈环：用户行为进入可编辑记忆并影响下一次排序；LangSmith Trace 进入 Bad Case、修正规则或 Provider、再做回归测试。',
+      '因此闭环不是“模型越用越聪明”，而是每次错误都能定位，每次改动都能验证。',
     ],
   },
   {
@@ -634,60 +634,108 @@ function DemoSlide() {
 }
 
 function ArchitectureSlide() {
-  const nodes = [
-    { label: '自然语言', detail: '日期、城市、预算、约束', icon: <UserRoundCheck /> },
-    { label: 'ReAct Agent', detail: '理解歧义、选择工具', icon: <BrainCircuit /> },
-    { label: 'Provider 层', detail: 'FlyAI / Ctrip / Global', icon: <Network /> },
-    { label: 'Normalizer', detail: '航班、价格、费用归一', icon: <RefreshCw /> },
-    { label: 'Grounded Reply', detail: '同源回答与卡片', icon: <BadgeCheck /> },
+  const stages = [
+    {
+      step: '01',
+      label: '上下文与路由',
+      detail: 'Redis 恢复 30 分钟会话槽位，PostgreSQL 偏好注入上下文。',
+      flow: '动态意图 → ReAct',
+      icon: <BrainCircuit />,
+    },
+    {
+      step: '02',
+      label: '要素校验与工具',
+      detail: '缺少出发地、目的地或日期就先追问；用户身份由服务端注入。',
+      flow: 'ask_user | search_flights',
+      icon: <Route />,
+    },
+    {
+      step: '03',
+      label: '并行数据面',
+      detail: '飞猪实时、携程快照与国际来源按航线并发，逐来源返回状态。',
+      flow: 'async + 10s timeout',
+      icon: <Network />,
+    },
+    {
+      step: '04',
+      label: '证据与输出',
+      detail: 'FlightOffer 归一、去重和排序；冻结事实后同时生成文案与卡片。',
+      flow: 'Normalize → Freeze → Render',
+      icon: <BadgeCheck />,
+    },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="06 · INSIDE THE AGENT" title="模型负责理解，工程系统负责事实" />
-      <div className="mt-9 grid items-stretch gap-3 lg:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr]">
-        {nodes.map((node, index) => (
-          <React.Fragment key={node.label}>
-            <div className={`rounded-[24px] border p-5 shadow-sm ${index === 1 ? 'border-brand-orange/30 bg-brand-orange-light' : index === 4 ? 'border-green-200 bg-green-50' : 'border-brand-text/5 bg-white'}`}>
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{node.icon}</div>
-              <h3 className="mt-5 text-lg font-black">{node.label}</h3>
-              <p className="mt-2 text-sm leading-6 text-brand-muted">{node.detail}</p>
+      <SlideHeading eyebrow="06 · REQUEST LIFECYCLE" title="一次请求，如何变成一份可验证的推荐" />
+      <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
+        主链负责完成任务，异常链保证可退化，证据链确保每一个价格都能追溯。
+      </p>
+      <div className="mt-6 grid items-stretch gap-4 lg:grid-cols-4">
+        {stages.map((stage, index) => (
+          <div
+            key={stage.label}
+            className={`relative rounded-[24px] border p-5 shadow-sm ${
+              index === 1
+                ? 'border-brand-orange/30 bg-brand-orange-light'
+                : index === 3
+                  ? 'border-green-200 bg-green-50'
+                  : 'border-brand-text/5 bg-white'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{stage.icon}</div>
+              <span className="text-xs font-black text-brand-orange">{stage.step}</span>
             </div>
-            {index < nodes.length - 1 ? <ArrowRight className="mx-auto hidden h-5 w-5 self-center text-brand-muted/60 lg:block" /> : null}
-          </React.Fragment>
+            <h3 className="mt-4 text-lg font-black">{stage.label}</h3>
+            <p className="mt-2 min-h-12 text-sm leading-6 text-brand-muted">{stage.detail}</p>
+            <div className="mt-3 border-t border-brand-text/10 pt-3 text-xs font-bold text-brand-text">{stage.flow}</div>
+            {index < stages.length - 1 ? (
+              <ArrowRight className="absolute -right-3 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" />
+            ) : null}
+          </div>
         ))}
       </div>
-      <div className="mt-8 grid gap-4 lg:grid-cols-3">
-        <ArchitectureBand icon={<Route />} title="确定性校验" detail="机场目录、未来日期、税费计算与最低价排序不交给模型猜。" />
-        <ArchitectureBand icon={<Database />} title="两层记忆" detail="Redis 延续当前会话，PostgreSQL 沉淀查询、点击与长期偏好。" />
-        <ArchitectureBand icon={<Radar />} title="LangSmith Trace" detail="意图、工具、供应商和失败回退都能被定位与复盘。" />
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <ArchitectureBand icon={<RefreshCw />} title="模型失败可退化" detail="LLM 8 秒超时后转入确定性槽位链，继续追问或搜索。" />
+        <ArchitectureBand icon={<ShieldCheck />} title="来源失败可隔离" detail="Provider 10 秒超时；连续失败触发熔断，其他来源仍返回部分结果。" />
+        <ArchitectureBand icon={<Radar />} title="链路全程可观测" detail="flight_search → provider.* → normalize → rank → stream_results。" />
       </div>
     </div>
   )
 }
 
 function DecisionsSlide() {
-  const decisions = [
-    ['为什么不用纯 LLM？', '自然语言可以模糊，但航班、日期和价格不能模糊。'],
-    ['为什么 Provider 隔离？', '一个平台超时或反爬，不应该拖垮整次搜索。'],
-    ['为什么先归一化再推荐？', '推荐必须基于可复算的完整成本，而不是模型读原始文本。'],
-    ['为什么记忆必须可见？', '不可查看、不可修改的个性化，也会成为新的黑箱。'],
+  const invariants = [
+    ['输入完整', '机场目录与未来日期确定性校验；关键槽位不全，不启动搜索。'],
+    ['数据诚实', '未知税费和行李保留 null；实时、过期、排队、超时状态全部显式。'],
+    ['赢家可复算', '只有满足新鲜度、价格与链接条件的报价能成为 winning_price。'],
+    ['输出同源', 'ResponseFacts 深拷贝并冻结；AI 文案和卡片只读取同一份快照。'],
   ]
   return (
-    <div className="mx-auto grid min-h-full max-w-7xl items-center gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-16">
-      <div>
-        <SlideHeading eyebrow="07 · DESIGN DECISIONS" title="每个架构选择，都来自一个产品约束" />
-        <div className="mt-8 rounded-r-[24px] border-l-4 border-brand-orange bg-brand-orange/5 py-4 pl-5 text-xl font-bold leading-9 text-brand-text">
-          可信不是一句产品文案，<br />而是一组可以被验证的系统设计。
-        </div>
-      </div>
-      <div className="divide-y divide-brand-text/10 overflow-hidden rounded-[28px] border border-brand-text/5 bg-white px-6 shadow-card">
-        {decisions.map(([question, answer], index) => (
-          <div key={question} className="grid gap-2 py-5 sm:grid-cols-[2.5rem_14rem_minmax(0,1fr)] sm:items-start">
-            <div className="text-sm font-black text-brand-orange">0{index + 1}</div>
-            <h3 className="font-black">{question}</h3>
-            <p className="text-sm leading-7 text-brand-muted sm:text-base">{answer}</p>
+    <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
+      <SlideHeading eyebrow="07 · TRUSTED SYSTEM" title="可信不是模型说对，而是系统让它难以说错" />
+      <div className="mt-6 grid gap-4 lg:grid-cols-4">
+        {invariants.map(([title, detail], index) => (
+          <div key={title} className="rounded-[24px] border border-brand-text/5 bg-white p-5 shadow-card">
+            <div className="text-xs font-black text-brand-orange">INVARIANT 0{index + 1}</div>
+            <h3 className="mt-3 text-lg font-black">{title}</h3>
+            <p className="mt-2 text-sm leading-6 text-brand-muted">{detail}</p>
           </div>
         ))}
+      </div>
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <FeedbackLoop
+          icon={<Database />}
+          title="个性化反馈环"
+          flow="查询 / 点击 → 偏好提取 → PostgreSQL → 下一轮 Context"
+          detail="记忆只改变排序与解释，不修改供应商价格，并允许用户查看和编辑。"
+        />
+        <FeedbackLoop
+          icon={<Radar />}
+          title="质量反馈环"
+          flow="LangSmith Trace → Bad Case → 规则 / Prompt / Provider → 回归测试"
+          detail="错误能定位到模型、参数、数据源或映射层，每次修复都有可验证出口。"
+        />
       </div>
     </div>
   )
@@ -764,6 +812,31 @@ function ArchitectureBand({ icon, title, detail }: { icon: React.ReactElement; t
       <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-orange/10 text-brand-orange [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
       <div>
         <h3 className="font-black">{title}</h3>
+        <p className="mt-1 text-sm leading-6 text-brand-muted">{detail}</p>
+      </div>
+    </div>
+  )
+}
+
+function FeedbackLoop({
+  icon,
+  title,
+  flow,
+  detail,
+}: {
+  icon: React.ReactElement
+  title: string
+  flow: string
+  detail: string
+}) {
+  return (
+    <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-3 rounded-[24px] border border-brand-orange/10 bg-brand-orange/5 p-4">
+      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-orange text-white [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
+      <div>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <h3 className="font-black">{title}</h3>
+          <span className="text-xs font-bold text-brand-orange">{flow}</span>
+        </div>
         <p className="mt-1 text-sm leading-6 text-brand-muted">{detail}</p>
       </div>
     </div>

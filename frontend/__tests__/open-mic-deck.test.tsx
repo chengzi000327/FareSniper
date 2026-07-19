@@ -34,4 +34,18 @@ describe('OpenMicDeck', () => {
     expect(screen.getByRole('complementary', { name: '当前页讲稿' })).toBeInTheDocument()
     expect(screen.getByText(/搜索机票并不难/)).toBeInTheDocument()
   })
+
+  test('explains the request lifecycle and trusted-system feedback loops', async () => {
+    render(<OpenMicDeck />)
+
+    fireEvent.click(screen.getByRole('button', { name: '第 7 页：Agent 内部' }))
+    expect(await screen.findByRole('heading', { name: '一次请求，如何变成一份可验证的推荐' })).toBeInTheDocument()
+    expect(screen.getByText(/LLM 8 秒超时后转入确定性槽位链/)).toBeInTheDocument()
+    expect(screen.getByText(/flight_search → provider\.\* → normalize/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '第 8 页：可信闭环' }))
+    expect(await screen.findByRole('heading', { name: '可信不是模型说对，而是系统让它难以说错' })).toBeInTheDocument()
+    expect(screen.getByText(/ResponseFacts 深拷贝并冻结/)).toBeInTheDocument()
+    expect(screen.getByText(/LangSmith Trace → Bad Case/)).toBeInTheDocument()
+  })
 })
