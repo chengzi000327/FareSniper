@@ -151,3 +151,38 @@ test("continues past an empty first page and renders a later valid page", async 
     )
   ).toBeInTheDocument();
 });
+
+test("loads the next recommendation page after the first six-card page", async () => {
+  listMock
+    .mockResolvedValueOnce({
+      personalized: false,
+      cards: [recommendationCard()],
+      has_more: true,
+      next_offset: 6,
+    })
+    .mockResolvedValueOnce({
+      personalized: false,
+      cards: [
+        {
+          id: "route-syx-next-page",
+          title: "北京→三亚",
+          query_hint: "明天从北京到三亚的机票",
+          reason: "进入对话获取最新报价",
+          tags: ["海岛度假"],
+          preview_deal: null,
+        },
+      ],
+      has_more: false,
+      next_offset: 7,
+    });
+
+  render(<ExplorePage />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "加载更多目的地" }));
+
+  await waitFor(() =>
+    expect(listMock).toHaveBeenLastCalledWith({ limit: 6, offset: 6 })
+  );
+  expect(await screen.findByText("北京 → 三亚")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "加载更多目的地" })).not.toBeInTheDocument();
+});

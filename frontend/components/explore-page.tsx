@@ -172,7 +172,7 @@ export function ExplorePage({ onSearch }: { onSearch?: (query: string) => void }
   // 触底无限滚动:IntersectionObserver 监听 sentinel 进入视口即追加下一页
   React.useEffect(() => {
     const node = sentinelRef.current
-    if (!node) return
+    if (!node || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver(
       (entries) => {
         const { hasMore: more, loadingMore: busy, nextOffset: off } = stateRef.current
@@ -187,7 +187,16 @@ export function ExplorePage({ onSearch }: { onSearch?: (query: string) => void }
     )
     observer.observe(node)
     return () => observer.disconnect()
-  }, [loadPage])
+  }, [hasMore, loadPage, loading])
+
+  const loadMore = () => {
+    const { hasMore: more, loadingMore: busy, nextOffset: off } = stateRef.current
+    if (!more || busy) return
+    setLoadingMore(true)
+    loadPage(off)
+      .catch(() => {/* keep prev */})
+      .finally(() => setLoadingMore(false))
+  }
 
   const visibleDeals = deals.filter((deal) => !departure || deal.from.includes(departure) || deal.to.includes(departure))
 
@@ -287,11 +296,19 @@ export function ExplorePage({ onSearch }: { onSearch?: (query: string) => void }
             {/* 无限滚动 sentinel + 加载态 */}
             {!departure && hasMore && (
               <div ref={sentinelRef} className="flex h-20 items-center justify-center">
-                {loadingMore && (
+                {loadingMore ? (
                   <div className="flex items-center gap-2 text-sm text-brand-muted">
                     <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" />
                     加载更多...
                   </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={loadMore}
+                    className="rounded-2xl border border-brand-text/10 bg-white px-5 py-2.5 text-sm font-bold text-brand-text transition hover:border-brand-orange hover:text-brand-orange"
+                  >
+                    加载更多目的地
+                  </button>
                 )}
               </div>
             )}
