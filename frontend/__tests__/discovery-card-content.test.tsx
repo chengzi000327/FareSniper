@@ -51,7 +51,7 @@ test("renders source states without fake zeroes", () => {
 
   expect(screen.getByText("查看实时价")).toHaveAttribute("href", "https://fly.test");
   expect(screen.getByText("正在获取数据")).toBeInTheDocument();
-  expect(screen.getByText("行李额以预订页为准")).toBeInTheDocument();
+  expect(screen.getByText("平台未返回行李额度，请在预订页确认")).toBeInTheDocument();
   expect(screen.queryByText("¥0")).not.toBeInTheDocument();
 });
 
@@ -132,7 +132,7 @@ test("labels an incomplete fee breakdown as a platform display price", () => {
   );
 
   expect(screen.getByText("平台展示价")).toBeInTheDocument();
-  expect(screen.getByText(/机建燃油与行李额待平台确认/)).toBeInTheDocument();
+  expect(screen.getByText(/机建燃油与行李额度待平台补充/)).toBeInTheDocument();
   expect(screen.queryByText("综合总价")).not.toBeInTheDocument();
 });
 
@@ -144,7 +144,9 @@ test("labels a complete fee breakdown as a confirmed total", () => {
       basePrice={500}
       totalPrice={580}
       tax={80}
+      taxSource="regulatory_estimate"
       baggageFee={0}
+      baggageAllowance="20KG"
       hasBaggage={true}
       currency="CNY"
       platform="飞猪"
@@ -164,9 +166,11 @@ test("labels a complete fee breakdown as a confirmed total", () => {
   );
 
   expect(screen.getByText("综合总价")).toBeInTheDocument();
-  expect(screen.getByText(/含机建燃油与行李费用/)).toBeInTheDocument();
+  expect(screen.getByText("机建燃油（现行）")).toBeInTheDocument();
+  expect(screen.getByText("20KG")).toBeInTheDocument();
+  expect(screen.getByText(/按现行标准计算的机建燃油/)).toBeInTheDocument();
   expect(screen.getByText("¥80")).toBeInTheDocument();
-  expect(screen.getByText("免费")).toBeInTheDocument();
+  expect(screen.getByText("含免费托运行李 20KG")).toBeInTheDocument();
 });
 
 test("does not confirm a fee breakdown when the platform total is inconsistent", () => {
@@ -197,7 +201,7 @@ test("does not confirm a fee breakdown when the platform total is inconsistent",
   );
 
   expect(screen.getByText("平台展示价")).toBeInTheDocument();
-  expect(screen.getByText(/机建燃油与行李额待平台确认/)).toBeInTheDocument();
+  expect(screen.getByText(/机建燃油与行李额度待平台补充/)).toBeInTheDocument();
   expect(screen.queryByText("综合总价")).not.toBeInTheDocument();
 });
 
@@ -267,7 +271,7 @@ test("does not describe unknown or excluded baggage as free", () => {
   );
 
   expect(screen.queryByText("免费")).not.toBeInTheDocument();
-  expect(screen.getByText("行李额以预订页为准")).toBeInTheDocument();
+  expect(screen.getByText("平台未返回行李额度，请在预订页确认")).toBeInTheDocument();
 
   rerender(
     <DiscoveryCardContent

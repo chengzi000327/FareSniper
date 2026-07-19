@@ -104,7 +104,9 @@ export interface DealCardDto {
   lowest_price: number | null;
   base_price?: number | null;
   tax: number | null;
+  tax_source?: "provider" | "regulatory_estimate" | null;
   baggage_fee: number | null;
+  baggage_allowance?: string | null;
   has_baggage: boolean | null;
   total_price: number | null;
   currency: string;
@@ -290,6 +292,8 @@ function isDealCardDto(value: unknown): value is DealCardDto {
   }
   const optionalFieldsAreValid = (
     hasOptionalField(value, "base_price", isNullableFiniteNumber) &&
+    hasOptionalField(value, "tax_source", (item) => item === null || item === "provider" || item === "regulatory_estimate") &&
+    hasOptionalField(value, "baggage_allowance", (item) => item === null || typeof item === "string") &&
     hasOptionalField(value, "original_price", isNullableFiniteNumber) &&
     hasOptionalField(value, "discount_rate", isNullableFiniteNumber) &&
     hasOptionalField(value, "cabin", (item) => item === null || typeof item === "string") &&

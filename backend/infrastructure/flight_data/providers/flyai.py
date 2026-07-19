@@ -17,6 +17,7 @@ from backend.application.contracts.flight_provider import (
     ProviderResult,
     ProviderStatus,
 )
+from backend.application.services.domestic_fees import mainland_domestic_tax
 
 
 _TRANSIENT_ERROR_MARKERS = (
@@ -170,6 +171,17 @@ def _has_baggage(item: Mapping[str, object]) -> bool | None:
     return None
 
 
+def _baggage_allowance(item: Mapping[str, object]) -> str | None:
+    for key in ("baggageAllowance", "checkedBaggage", "baggageInfo"):
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text[:128]
+    return None
+
+
 def _time_part(value: object) -> str:
     if not isinstance(value, str):
         return ""
@@ -241,17 +253,45 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
             "farePrice",
         )
         tax = _tax_total(item)
+        tax_source = "provider" if tax is not None else None
         baggage_fee = _first_price(item, "baggageFee", "baggagePrice")
-        total_price = _first_price(
+        has_baggage = _has_baggage(item)
+        if baggage_fee is None and has_baggage is True:
+            baggage_fee = 0
+        provider_total_price = _first_price(
             item,
             "totalPrice",
             "adultTotalPrice",
             "payPrice",
         )
-        if total_price is None:
-            total_price = ticket_price
         if base_price is None:
             base_price = ticket_price
+        if (
+            tax is None
+            and provider_total_price is not None
+            and base_price is not None
+        ):
+            implied_tax = (
+                provider_total_price - base_price - (baggage_fee or 0)
+            )
+            if implied_tax >= 0:
+                tax = implied_tax
+                tax_source = "provider"
+        if tax is None and query.is_mainland_domestic:
+            tax = mainland_domestic_tax(
+                (
+                    (
+                        _airport_code(segment.get("depStationCode"), None),
+                        _airport_code(segment.get("arrStationCode"), None),
+                    )
+                    for segment in segments
+                )
+            )
+            if tax is not None:
+                tax_source = "regulatory_estimate"
+        total_price = provider_total_price
+        if total_price is None and base_price is not None:
+            total_price = base_price + (tax or 0) + (baggage_fee or 0)
         jump_url = item.get("jumpUrl")
         booking_url = jump_url if _is_https_url(jump_url) else None
         if total_price is None and booking_url is None:
@@ -324,8 +364,10 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
                 base_price=base_price,
                 total_price=total_price,
                 tax=tax,
+                tax_source=tax_source,
                 baggage_fee=baggage_fee,
-                has_baggage=_has_baggage(item),
+                baggage_allowance=_baggage_allowance(item),
+                has_baggage=has_baggage,
                 price_status=price_status,
                 booking_url=booking_url,
             )

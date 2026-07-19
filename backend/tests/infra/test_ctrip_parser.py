@@ -37,10 +37,13 @@ def test_parser_keeps_only_real_ctrip_fields(ctrip_payload, query):
     offers = parse_batch_search(ctrip_payload, query)
 
     assert offers[0].seller_name == "携程"
-    assert offers[0].display_price == 680
-    assert offers[0].tax is None
-    assert offers[0].baggage_fee is None
-    assert offers[0].has_baggage is None
+    assert offers[0].base_price == 680
+    assert offers[0].tax == 150
+    assert offers[0].tax_source == "regulatory_estimate"
+    assert offers[0].baggage_fee == 0
+    assert offers[0].baggage_allowance == "20KG"
+    assert offers[0].has_baggage is True
+    assert offers[0].display_price == 830
     assert offers[0].price_status is PriceStatus.priced
     assert {offer.seller_name for offer in offers} == {"携程"}
 

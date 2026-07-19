@@ -31,6 +31,7 @@ from backend.infrastructure.db.base import Base, get_session
 APPROVED_DEMAND_SOURCES = frozenset(
     {"recent_search", "price_alert", "hot_route"}
 )
+MAX_DEMAND_ATTEMPTS = 3
 
 
 class FlightSearchDemandRow(Base):
@@ -227,6 +228,22 @@ async def enqueue_demand(
         "updated_at": now,
     }
     async with get_session() as session:
+        await session.execute(
+            update(FlightSearchDemandRow)
+            .where(
+                FlightSearchDemandRow.origin_code == origin_code,
+                FlightSearchDemandRow.origin_airport_code
+                == origin_airport_scope,
+                FlightSearchDemandRow.destination_code == destination_code,
+                FlightSearchDemandRow.destination_airport_code
+                == destination_airport_scope,
+                FlightSearchDemandRow.depart_date == depart_date,
+                FlightSearchDemandRow.demand_hour < demand_hour,
+                FlightSearchDemandRow.priority <= priority,
+                FlightSearchDemandRow.status != "leased",
+            )
+            .values(active=False, updated_at=now)
+        )
         stmt = pg_insert(FlightSearchDemandRow.__table__).values(**values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_flight_search_demand_hour",
@@ -302,7 +319,7 @@ async def claim_next(
                 )
                 .order_by(
                     FlightSearchDemandRow.priority.desc(),
-                    FlightSearchDemandRow.last_requested_at.desc(),
+                    FlightSearchDemandRow.last_requested_at.asc(),
                     FlightSearchDemandRow.id.asc(),
                 )
                 .limit(1)
@@ -401,11 +418,13 @@ async def fail_job(
         ).scalar_one_or_none()
         if row is None:
             raise CollectorJobNotFoundError(job_id)
-        if row.status == "retry" and row.lease_owner == node_id:
+        if row.status in {"retry", "failed"} and row.lease_owner == node_id:
             return False
         _verify_live_lease(row, node_id, now)
 
-        row.status = "retry"
+        exhausted = row.attempts >= MAX_DEMAND_ATTEMPTS
+        row.status = "failed" if exhausted else "retry"
+        row.active = not exhausted
         row.next_attempt_at = retry_at.astimezone(timezone.utc)
         row.lease_expires_at = None
         row.last_error = error_code
@@ -533,7 +552,13 @@ async def read_collector_verification_status(
         >= now - timedelta(seconds=heartbeat_timeout_seconds)
     )
     status = str(job.status) if job is not None else "missing"
-    if status not in {"pending", "leased", "retry", "completed"}:
+    if status not in {
+        "pending",
+        "leased",
+        "retry",
+        "completed",
+        "failed",
+    }:
         status = "missing"
     return CollectorVerificationStatus(
         collector_online=online,

@@ -218,6 +218,69 @@ async def test_claim_next_uses_priority(seeded_pg):
 
 
 @pytest.mark.asyncio
+async def test_enqueue_deactivates_older_equal_priority_duplicate(seeded_pg):
+    old_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "hot_route", 5
+    )
+    async with seeded_pg.begin() as connection:
+        await connection.execute(
+            update(FlightSearchDemandRow)
+            .where(FlightSearchDemandRow.id == old_id)
+            .values(
+                id="older-hot-route",
+                demand_hour=datetime.now(timezone.utc).replace(
+                    minute=0, second=0, microsecond=0
+                )
+                - timedelta(hours=1),
+            )
+        )
+
+    new_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "hot_route", 5
+    )
+
+    async with seeded_pg.connect() as connection:
+        rows = (
+            await connection.execute(
+                select(
+                    FlightSearchDemandRow.id,
+                    FlightSearchDemandRow.active,
+                ).where(
+                    FlightSearchDemandRow.id.in_(
+                        ["older-hot-route", new_id]
+                    )
+                )
+            )
+        ).all()
+    assert dict(rows) == {"older-hot-route": False, new_id: True}
+
+
+@pytest.mark.asyncio
+async def test_claim_next_is_fifo_within_the_same_priority(seeded_pg):
+    older_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+    newer_id = await enqueue_demand(
+        "BJS", "SYX", "2099-08-01", "recent_search", 50
+    )
+    async with seeded_pg.begin() as connection:
+        await connection.execute(
+            update(FlightSearchDemandRow)
+            .where(FlightSearchDemandRow.id == older_id)
+            .values(
+                last_requested_at=datetime.now(timezone.utc)
+                - timedelta(minutes=5)
+            )
+        )
+
+    claimed = await claim_next("mac-1", lease_seconds=60)
+
+    assert claimed is not None
+    assert claimed.job_id == older_id
+    assert claimed.job_id != newer_id
+
+
+@pytest.mark.asyncio
 async def test_concurrent_claims_lease_a_job_only_once(seeded_pg):
     job_id = await enqueue_demand(
         "BJS", "SHA", "2099-08-01", "recent_search", 50
@@ -284,6 +347,39 @@ async def test_fail_job_requires_owner_and_retry_is_idempotent(seeded_pg):
     assert row.status == "retry"
     assert row.attempts == 1
     assert row.last_error == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_fail_job_stops_retrying_after_three_attempts(seeded_pg):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "recent_search", 50
+    )
+
+    for attempt in range(1, 4):
+        claimed = await claim_next("mac-1", lease_seconds=60)
+        assert claimed is not None
+        assert claimed.attempts == attempt
+        assert await fail_job(
+            job_id,
+            "mac-1",
+            "timeout",
+            datetime.now(timezone.utc) - timedelta(seconds=1),
+        ) is True
+
+    assert await claim_next("mac-2", lease_seconds=60) is None
+    async with seeded_pg.connect() as connection:
+        row = (
+            await connection.execute(
+                select(
+                    FlightSearchDemandRow.status,
+                    FlightSearchDemandRow.active,
+                    FlightSearchDemandRow.attempts,
+                ).where(FlightSearchDemandRow.id == job_id)
+            )
+        ).one()
+    assert row.status == "failed"
+    assert row.active is False
+    assert row.attempts == 3
 
 
 @pytest.mark.asyncio

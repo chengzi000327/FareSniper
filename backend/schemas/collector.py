@@ -218,7 +218,9 @@ class CollectorStatusResponse(BaseModel):
     collector_online: bool
     last_heartbeat_at: datetime | None = None
     last_success_at: datetime | None = None
-    job_status: Literal["missing", "pending", "leased", "retry", "completed"]
+    job_status: Literal[
+        "missing", "pending", "leased", "retry", "completed", "failed"
+    ]
     job_attempts: int = Field(ge=0)
     job_updated_at: datetime | None = None
     snapshot_observed_at: datetime | None = None
@@ -242,6 +244,12 @@ class CollectorOffer(CollectorRequest):
     stops: Annotated[StrictInt, Field(ge=0)] = 0
     cabin: str | None = Field(default=None, max_length=32)
     currency: Literal["CNY"]
+    base_price: Annotated[StrictInt, Field(gt=0)] | None = None
+    tax: Annotated[StrictInt, Field(ge=0)] | None = None
+    tax_source: Literal["provider", "regulatory_estimate"] | None = None
+    baggage_fee: Annotated[StrictInt, Field(ge=0)] | None = None
+    baggage_allowance: str | None = Field(default=None, max_length=128)
+    has_baggage: bool | None = None
     display_price: Annotated[StrictInt, Field(gt=0)]
     booking_url: str = Field(max_length=_MAX_BOOKING_URL_LENGTH)
 
@@ -289,11 +297,13 @@ class CollectorOffer(CollectorRequest):
             stops=self.stops,
             cabin=self.cabin,
             currency="CNY",
-            base_price=None,
-            tax=None,
-            baggage_fee=None,
+            base_price=self.base_price,
+            tax=self.tax,
+            tax_source=self.tax_source,
+            baggage_fee=self.baggage_fee,
+            baggage_allowance=self.baggage_allowance,
             total_price=self.display_price,
-            has_baggage=None,
+            has_baggage=self.has_baggage,
             price_status=PriceStatus.priced,
             booking_url=self.booking_url,
             raw_reference=None,

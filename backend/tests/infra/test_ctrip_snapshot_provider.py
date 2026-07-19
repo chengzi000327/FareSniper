@@ -196,6 +196,12 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
                         "url": "https://ctrip.test/book",
                         "currency": "CNY",
                         "price_status": "priced",
+                        "base_price": 430,
+                        "tax": 150,
+                        "tax_source": "regulatory_estimate",
+                        "baggage_fee": 0,
+                        "baggage_allowance": "20KG",
+                        "has_baggage": True,
                         "crawled_at": "2099-07-31T23:50:00+00:00",
                         "expires_at": (
                             "2000-01-01T00:00:00+00:00"
@@ -230,9 +236,12 @@ async def test_snapshot_rows_map_to_non_realtime_ctrip_offers(
     assert offer.data_provider == "ctrip_snapshot"
     assert offer.total_price == 580
     assert offer.duration_minutes == 120
-    assert offer.tax is None
-    assert offer.baggage_fee is None
-    assert offer.has_baggage is None
+    assert offer.base_price == 430
+    assert offer.tax == 150
+    assert offer.tax_source == "regulatory_estimate"
+    assert offer.baggage_fee == 0
+    assert offer.baggage_allowance == "20KG"
+    assert offer.has_baggage is True
     assert offer.is_realtime is False
     assert offer.price_status is expected_price_status
     assert len(queued) == int(stale)

@@ -11,6 +11,7 @@ from backend.application.contracts.flight_provider import (
     PriceStatus,
 )
 from backend.application.services.airport_catalog import AirportCatalog
+from backend.application.services.domestic_fees import mainland_domestic_tax
 
 
 _CATALOG = AirportCatalog.load_default()
@@ -111,9 +112,10 @@ def _parse_itinerary(
     if not all(isinstance(flight, Mapping) for flight in flights):
         raise CtripBatchSearchParseError("flight list is invalid")
 
-    price = _lowest_economy_adult_price(itinerary.get("priceList"))
-    if price is None:
+    selected_price = _lowest_economy_price(itinerary.get("priceList"))
+    if selected_price is None:
         return None
+    price, price_item = selected_price
 
     first_flight = flights[0]
     last_flight = flights[-1]
@@ -153,6 +155,11 @@ def _parse_itinerary(
     depart_date = _actual_depart_date(
         first_flight.get("departureDateTime")
     )
+    tax, tax_source = _tax_details(price_item, flights, query)
+    baggage_fee, has_baggage, baggage_allowance = _baggage_details(
+        price_item
+    )
+    total_price = price + (tax or 0) + (baggage_fee or 0)
 
     return _CtripFlightOffer(
         data_provider="ctrip",
@@ -176,10 +183,12 @@ def _parse_itinerary(
         cabin="Y",
         currency=query.currency,
         base_price=price,
-        tax=None,
-        baggage_fee=None,
-        total_price=price,
-        has_baggage=None,
+        tax=tax,
+        tax_source=tax_source,
+        baggage_fee=baggage_fee,
+        baggage_allowance=baggage_allowance,
+        total_price=total_price,
+        has_baggage=has_baggage,
         price_status=PriceStatus.priced,
     )
 
@@ -262,10 +271,12 @@ def _actual_depart_date(value: Any) -> str:
     return parsed.date().isoformat()
 
 
-def _lowest_economy_adult_price(price_list: Any) -> int | None:
+def _lowest_economy_price(
+    price_list: Any,
+) -> tuple[int, Mapping[str, Any]] | None:
     if not isinstance(price_list, list):
         raise CtripBatchSearchParseError("price list is missing")
-    prices: list[int] = []
+    prices: list[tuple[int, Mapping[str, Any]]] = []
     for price_item in price_list:
         if not isinstance(price_item, Mapping) or price_item.get("cabin") != "Y":
             continue
@@ -277,8 +288,115 @@ def _lowest_economy_adult_price(price_list: Any) -> int | None:
         except (TypeError, ValueError):
             continue
         if amount > 0:
-            prices.append(amount)
-    return min(prices, default=None)
+            prices.append((amount, price_item))
+    return min(prices, key=lambda item: item[0], default=None)
+
+
+def _tax_details(
+    price_item: Mapping[str, Any],
+    flights: Sequence[Mapping[Any, Any]],
+    query: FlightQuery,
+) -> tuple[int | None, str | None]:
+    for field in ("adultTax", "tax", "oilFeeAndTax"):
+        value = price_item.get(field)
+        if isinstance(value, bool):
+            continue
+        try:
+            amount = int(value)
+        except (TypeError, ValueError):
+            continue
+        if amount >= 0:
+            return amount, "provider"
+
+    if price_item.get("freeOilFeeAndTax") is True:
+        return 0, "provider"
+    if not query.is_mainland_domestic:
+        return None, None
+
+    tax = mainland_domestic_tax(
+        (
+            (
+                _normalized_code(flight.get("departureAirportCode")),
+                _normalized_code(flight.get("arrivalAirportCode")),
+            )
+            for flight in flights
+        )
+    )
+    return (
+        (tax, "regulatory_estimate")
+        if tax is not None
+        else (None, None)
+    )
+
+
+def _baggage_details(
+    price_item: Mapping[str, Any],
+) -> tuple[int | None, bool | None, str | None]:
+    baggage = price_item.get("baggage")
+    if not isinstance(baggage, Mapping):
+        return None, None, None
+
+    allowance = _baggage_allowance(baggage)
+    free_flags: list[bool] = []
+    data_list = baggage.get("dataList")
+    if isinstance(data_list, list):
+        for entry in data_list:
+            if not isinstance(entry, Mapping):
+                continue
+            adult = entry.get("adultBaggage")
+            if not isinstance(adult, Mapping):
+                continue
+            checked = adult.get("checkedBaggage")
+            if not isinstance(checked, Mapping):
+                continue
+            has_free = checked.get("hasFreeBaggage")
+            if isinstance(has_free, bool):
+                free_flags.append(has_free)
+
+    if free_flags:
+        has_baggage = all(free_flags)
+    elif allowance is not None:
+        has_baggage = allowance != "不含"
+    else:
+        has_baggage = None
+    return (
+        0 if has_baggage is True else None,
+        has_baggage,
+        allowance,
+    )
+
+
+def _baggage_allowance(baggage: Mapping[str, Any]) -> str | None:
+    tag = baggage.get("baggageTag")
+    if isinstance(tag, str) and tag.strip():
+        normalized = tag.strip()
+        if any(marker in normalized for marker in ("无免费", "不含")):
+            return "不含"
+        normalized = normalized.removeprefix("托运行李额").strip()
+        if normalized:
+            return normalized[:128]
+
+    data_list = baggage.get("dataList")
+    if not isinstance(data_list, list):
+        return None
+    for entry in data_list:
+        if not isinstance(entry, Mapping):
+            continue
+        adult = entry.get("adultBaggage")
+        checked = (
+            adult.get("checkedBaggage")
+            if isinstance(adult, Mapping)
+            else None
+        )
+        if not isinstance(checked, Mapping):
+            continue
+        content = checked.get("baggageContent")
+        if not isinstance(content, str):
+            continue
+        match = re.search(r"总重\s*(\d+\s*KG)", content, re.IGNORECASE)
+        if match:
+            return re.sub(r"\s+", "", match.group(1)).upper()
+    return None
 
 
 def _duration_minutes(flights: Sequence[Mapping[Any, Any]]) -> int | None:

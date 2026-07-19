@@ -146,7 +146,10 @@ async def _run_once() -> int:
     )
     try:
         result = await CollectorRunner(client, browser).run_once()
-        print(f"collector status={result.status} count={result.result_count}")
+        print(
+            f"collector status={result.status} count={result.result_count}",
+            flush=True,
+        )
         return 0
     finally:
         await browser.close()
@@ -188,6 +191,11 @@ async def _run_daemon(interval: float | None) -> int:
             stop_requested=stop.is_set,
             interval_seconds=configured_interval,
             wait_for_stop=wait_for_stop,
+            on_result=lambda result: print(
+                "collector "
+                f"status={result.status} count={result.result_count}",
+                flush=True,
+            ),
         )
         return 0
     finally:

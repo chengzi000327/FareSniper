@@ -62,7 +62,7 @@ async def _restore_collector_migration_head(seeded_pg) -> None:
         current_revision = await connection.scalar(
             text("SELECT version_num FROM alembic_version")
         )
-        if current_revision != "20260718_ctrip_collector":
+        if current_revision != "20260719_offer_fee_details":
             await connection.execute(
                 text("DROP TABLE IF EXISTS collector_nodes")
             )
@@ -83,6 +83,10 @@ def _collector_upgrade_schema(sync_connection) -> dict[str, object]:
         "snapshot_columns": {
             column["name"]
             for column in inspector.get_columns("flight_snapshots")
+        },
+        "price_columns": {
+            column["name"]
+            for column in inspector.get_columns("platform_price_snapshots")
         },
         "seller_constraints": {
             constraint["name"]
@@ -132,7 +136,7 @@ def test_alembic_has_exactly_one_head():
         timeout=30,
     )
     heads = [line for line in proc.stdout.splitlines() if "(head)" in line]
-    assert heads == ["20260718_ctrip_collector (head)"]
+    assert heads == ["20260719_offer_fee_details (head)"]
 
 
 def test_alembic_registers_task4_repositories():
@@ -286,7 +290,7 @@ async def test_collector_upgrade_adopts_production_precreated_nodes_table(
             ).one()
 
         collector_columns = end_schema["collector_columns"]
-        assert end_revision == "20260718_ctrip_collector"
+        assert end_revision == "20260719_offer_fee_details"
         assert [column["name"] for column in collector_columns] == [
             "node_id",
             "version",
@@ -326,6 +330,14 @@ async def test_collector_upgrade_adopts_production_precreated_nodes_table(
             "origin_airport_code",
             "destination_airport_code",
         } <= end_schema["snapshot_columns"]
+        assert {
+            "base_price",
+            "tax",
+            "tax_source",
+            "baggage_fee",
+            "baggage_allowance",
+            "has_baggage",
+        } <= end_schema["price_columns"]
         assert (
             "uq_platform_price_provider_seller"
             in end_schema["seller_constraints"]

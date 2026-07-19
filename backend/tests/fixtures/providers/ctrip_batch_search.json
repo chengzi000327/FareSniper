@@ -23,7 +23,21 @@
         "priceList": [
           {
             "cabin": "Y",
-            "adultPrice": 680
+            "adultPrice": 680,
+            "freeOilFeeAndTax": false,
+            "baggage": {
+              "baggageTag": "托运行李额20KG",
+              "dataList": [
+                {
+                  "adultBaggage": {
+                    "checkedBaggage": {
+                      "baggageContent": "总重20KG，不限件数。",
+                      "hasFreeBaggage": true
+                    }
+                  }
+                }
+              ]
+            }
           }
         ]
       }

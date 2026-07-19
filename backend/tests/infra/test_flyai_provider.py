@@ -32,9 +32,10 @@ def test_parse_maps_price_flight_and_jump_url():
 
     assert offers[0].data_provider == "flyai"
     assert offers[0].seller_name == "飞猪"
-    assert offers[0].total_price == 400
+    assert offers[0].total_price == 550
     assert offers[0].base_price == 400
-    assert offers[0].tax is None
+    assert offers[0].tax == 150
+    assert offers[0].tax_source == "regulatory_estimate"
     assert offers[0].baggage_fee is None
     assert offers[0].flight_no == "CA1883"
     assert offers[0].airline == "国航"
@@ -67,7 +68,7 @@ def test_parser_maps_explicit_total_tax_and_baggage_components():
     assert offer.has_baggage is True
 
 
-def test_parser_keeps_partial_tax_components_unconfirmed():
+def test_parser_infers_tax_from_an_explicit_provider_total():
     payload = _payload()
     payload["data"]["itemList"][0].update(
         {
@@ -81,7 +82,8 @@ def test_parser_keeps_partial_tax_components_unconfirmed():
 
     offer = parse_flyai_payload(payload, _query())[0]
 
-    assert offer.tax is None
+    assert offer.tax == 50
+    assert offer.tax_source == "provider"
 
 
 def test_parser_maps_airport_codes_from_first_and_last_segments():
@@ -172,7 +174,9 @@ def test_parser_supports_legacy_adult_price_when_ticket_price_is_absent():
     item["adultPrice"] = "¥410.0"
     item.pop("ticketPrice")
 
-    assert parse_flyai_payload(payload, _query())[0].total_price == 410
+    offer = parse_flyai_payload(payload, _query())[0]
+    assert offer.base_price == 410
+    assert offer.total_price == 560
 
 
 def test_parser_prefers_current_ticket_price_over_legacy_adult_price():
@@ -181,7 +185,9 @@ def test_parser_prefers_current_ticket_price_over_legacy_adult_price():
     item["ticketPrice"] = "420.00"
     item["adultPrice"] = "999.00"
 
-    assert parse_flyai_payload(payload, _query())[0].total_price == 420
+    offer = parse_flyai_payload(payload, _query())[0]
+    assert offer.base_price == 420
+    assert offer.total_price == 570
 
 
 def test_parser_falls_back_to_adult_price_when_ticket_price_is_unusable():
@@ -190,7 +196,9 @@ def test_parser_falls_back_to_adult_price_when_ticket_price_is_unusable():
     item["ticketPrice"] = "not available"
     item["adultPrice"] = "¥410.0"
 
-    assert parse_flyai_payload(payload, _query())[0].total_price == 410
+    offer = parse_flyai_payload(payload, _query())[0]
+    assert offer.base_price == 410
+    assert offer.total_price == 560
 
 
 def test_parser_keeps_zero_ticket_price_ahead_of_adult_price():
@@ -199,7 +207,9 @@ def test_parser_keeps_zero_ticket_price_ahead_of_adult_price():
     item["ticketPrice"] = "0"
     item["adultPrice"] = "999.00"
 
-    assert parse_flyai_payload(payload, _query())[0].total_price == 0
+    offer = parse_flyai_payload(payload, _query())[0]
+    assert offer.base_price == 0
+    assert offer.total_price == 150
 
 
 def test_missing_price_becomes_view_live_price():
@@ -251,7 +261,7 @@ def test_parser_rejects_non_https_booking_url_but_keeps_numeric_price():
 
     offer = parse_flyai_payload(payload, _query())[0]
 
-    assert offer.total_price == 400
+    assert offer.total_price == 550
     assert offer.booking_url is None
 
 

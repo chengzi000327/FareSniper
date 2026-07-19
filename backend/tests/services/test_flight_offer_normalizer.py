@@ -40,7 +40,9 @@ def _offer(
     expires_at: str | None = None,
     base_price: int | None = None,
     tax: int | None = None,
+    tax_source: str | None = None,
     baggage_fee: int | None = None,
+    baggage_allowance: str | None = None,
     has_baggage: bool | None = None,
 ) -> FlightOffer:
     return FlightOffer(
@@ -63,7 +65,9 @@ def _offer(
         base_price=base_price,
         total_price=price,
         tax=tax,
+        tax_source=tax_source,
         baggage_fee=baggage_fee,
+        baggage_allowance=baggage_allowance,
         has_baggage=has_baggage,
         price_status=status,
         booking_url=booking_url
@@ -165,7 +169,9 @@ def test_winning_offer_drives_the_card_price_components():
                     price=600,
                     base_price=500,
                     tax=70,
+                    tax_source="regulatory_estimate",
                     baggage_fee=30,
+                    baggage_allowance="20KG",
                     has_baggage=True,
                 )
             ],
@@ -176,9 +182,15 @@ def test_winning_offer_drives_the_card_price_components():
 
     assert deal["base_price"] == 500
     assert deal["tax"] == 70
+    assert deal["tax_source"] == "regulatory_estimate"
     assert deal["baggage_fee"] == 30
+    assert deal["baggage_allowance"] == "20KG"
     assert deal["has_baggage"] is True
-    assert DealCardDto.model_validate(deal).base_price == 500
+    dto = DealCardDto.model_validate(deal)
+    assert dto.base_price == 500
+    assert dto.total_price == 600
+    assert dto.tax_source == "regulatory_estimate"
+    assert dto.baggage_allowance == "20KG"
 
 
 def test_flyai_and_ctrip_offers_with_same_airports_merge_into_one_card():

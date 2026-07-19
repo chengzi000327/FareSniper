@@ -30,6 +30,7 @@ _COLLECTOR_RUNTIME_FILES = {
     "backend/application/contracts/flight_provider.py",
     "backend/application/services/__init__.py",
     "backend/application/services/airport_catalog.py",
+    "backend/application/services/domestic_fees.py",
     "backend/application/services/flight_dates.py",
     "backend/application/services/flight_query.py",
     "backend/infrastructure/__init__.py",
@@ -533,8 +534,15 @@ def test_macos_installer_creates_tcc_safe_private_runtime(tmp_path):
     plist = plistlib.loads(plist_path.read_bytes())
     assert str(sandbox.repo) not in plist_text
     assert plist["WorkingDirectory"] == str(runtime_dir)
-    assert str(venv_python) in plist["ProgramArguments"][-1]
-    assert str(runtime_dir) not in plist["ProgramArguments"][-1]
+    assert plist["ProgramArguments"] == [
+        str(venv_python),
+        "-m",
+        "backend.collector.cli",
+        "--env-file",
+        str(sandbox.env_file),
+        "daemon",
+    ]
+    assert plist["EnvironmentVariables"]["PYTHONUNBUFFERED"] == "1"
 
 
 def test_macos_installer_displayed_login_command_disables_bytecode(tmp_path):

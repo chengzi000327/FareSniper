@@ -92,7 +92,9 @@ export type DiscoveryCardContentProps = {
   basePrice: number | null
   totalPrice?: number | null
   tax: number | null
+  taxSource?: 'provider' | 'regulatory_estimate' | null
   baggageFee: number | null
+  baggageAllowance?: string | null
   hasBaggage: boolean | null
   currency: string
   originalPrice?: number
@@ -119,7 +121,9 @@ export function DiscoveryCardContent({
   basePrice,
   totalPrice,
   tax,
+  taxSource,
   baggageFee,
+  baggageAllowance,
   hasBaggage,
   currency,
   platform,
@@ -259,18 +263,26 @@ export function DiscoveryCardContent({
         <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-transparent via-brand-orange/20 to-transparent" />
         <PriceBlock label="票价" value={money(basePrice)} compact={compact} />
         <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
-        <PriceBlock label="机建燃油" value={money(tax)} compact={compact} />
+        <PriceBlock
+          label={taxSource === 'regulatory_estimate' ? '机建燃油（现行）' : '机建燃油'}
+          value={money(tax)}
+          compact={compact}
+        />
         <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <PriceBlock
           label="行李额"
           value={
-            baggageFee !== null && baggageFee > 0
+            baggageAllowance
+              ? baggageAllowance
+              : baggageFee !== null && baggageFee > 0
               ? '+' + money(baggageFee)
               : hasFreeBaggage
                 ? '免费'
                 : hasBaggage === false
                   ? '不含'
-                  : '待确认'
+                  : placeholder
+                    ? '待确认'
+                    : '平台未返回'
           }
           compact={compact}
           highlight={baggageFee !== null && baggageFee > 0}
@@ -293,13 +305,15 @@ export function DiscoveryCardContent({
             {hasBaggage === null
               ? baggageFee !== null && baggageFee > 0
                 ? '行李加购费 ' + money(baggageFee) + '，已计入总价，行李额以预订页为准'
-                : '行李额以预订页为准'
+                : '平台未返回行李额度，请在预订页确认'
               : hasBaggage === false
                 ? baggageFee !== null && baggageFee > 0
                   ? '不含免费托运行李额度，需加购 ' + money(baggageFee) + '，已计入总价'
                   : '不含免费托运行李额度，行李额以预订页为准'
                 : hasFreeBaggage
-                ? '含免费托运行李额度'
+                ? baggageAllowance
+                  ? '含免费托运行李 ' + baggageAllowance
+                  : '含免费托运行李额度'
                 : baggageFee === null
                   ? '行李额以预订页为准'
                   : '含托运行李额度，行李费用 ' + money(baggageFee) + '，以预订页为准'}
@@ -313,13 +327,18 @@ export function DiscoveryCardContent({
               <>
                 {feeBreakdownComplete ? (
                   <>
-                    AI 监测：该价格含机建燃油与行李费用，是当前全网
+                    AI 监测：该价格含
+                    {taxSource === 'regulatory_estimate' ? '按现行标准计算的机建燃油' : '机建燃油'}
+                    与行李费用，是当前全网
                     <span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
                     <span className="font-bold text-brand-orange">{platform}</span> 下单。
                   </>
                 ) : (
                   <>
-                    当前为 <span className="font-bold text-brand-orange">{platform}</span> 平台展示价，机建燃油与行李额待平台确认。
+                    当前为 <span className="font-bold text-brand-orange">{platform}</span> 平台展示价，
+                    {taxSource === 'regulatory_estimate'
+                      ? '机建燃油已按现行标准计算，行李额度待平台补充。'
+                      : '机建燃油与行李额度待平台补充。'}
                   </>
                 )}
               </>

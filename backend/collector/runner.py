@@ -78,11 +78,14 @@ class CollectorRunner:
         stop_requested: Callable[[], bool],
         interval_seconds: float = 60.0,
         wait_for_stop: Callable[[float], Awaitable[bool]] | None = None,
+        on_result: Callable[[RunResult], None] | None = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("collector interval must be positive")
         while not stop_requested():
-            await self.run_once()
+            result = await self.run_once()
+            if on_result is not None:
+                on_result(result)
             if stop_requested():
                 break
             if wait_for_stop is None:

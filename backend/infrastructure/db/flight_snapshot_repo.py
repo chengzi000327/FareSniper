@@ -6,6 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -77,6 +78,12 @@ class PlatformPriceSnapshot(Base):
     currency = Column(String, nullable=False, default="CNY")
     price_status = Column(String, nullable=False, default="priced")
     expires_at = Column(DateTime(timezone=True), nullable=True)
+    base_price = Column(Integer, nullable=True)
+    tax = Column(Integer, nullable=True)
+    tax_source = Column(String, nullable=True)
+    baggage_fee = Column(Integer, nullable=True)
+    baggage_allowance = Column(String, nullable=True)
+    has_baggage = Column(Boolean, nullable=True)
 
 
 class ProviderInventoryObservation(Base):
@@ -221,6 +228,12 @@ def _offer_to_provider_flight(offer: object) -> dict[str, Any]:
                 "url": values.get("booking_url") or "",
                 "raw_payload": None,
                 "price_status": values.get("price_status") or "priced",
+                "base_price": values.get("base_price"),
+                "tax": values.get("tax"),
+                "tax_source": values.get("tax_source"),
+                "baggage_fee": values.get("baggage_fee"),
+                "baggage_allowance": values.get("baggage_allowance"),
+                "has_baggage": values.get("has_baggage"),
             }
         ],
     }
@@ -328,6 +341,12 @@ async def upsert_flights(flights: list[dict[str, Any]]) -> None:
                     ),
                     "price_status": p.get("price_status", "priced"),
                     "expires_at": now + CACHE_TTL,
+                    "base_price": p.get("base_price"),
+                    "tax": p.get("tax"),
+                    "tax_source": p.get("tax_source"),
+                    "baggage_fee": p.get("baggage_fee"),
+                    "baggage_allowance": p.get("baggage_allowance"),
+                    "has_baggage": p.get("has_baggage"),
                 }
                 for idx, p in enumerate(legacy_prices)
             ]
@@ -469,6 +488,12 @@ async def _upsert_provider_flights_in_session(
                 "currency": p["currency"],
                 "price_status": p.get("price_status", "priced"),
                 "expires_at": expires_at,
+                "base_price": p.get("base_price"),
+                "tax": p.get("tax"),
+                "tax_source": p.get("tax_source"),
+                "baggage_fee": p.get("baggage_fee"),
+                "baggage_allowance": p.get("baggage_allowance"),
+                "has_baggage": p.get("has_baggage"),
             }
             for p in provider_prices
         ]
@@ -487,6 +512,14 @@ async def _upsert_provider_flights_in_session(
                         "currency": price_stmt.excluded.currency,
                         "price_status": price_stmt.excluded.price_status,
                         "expires_at": price_stmt.excluded.expires_at,
+                        "base_price": price_stmt.excluded.base_price,
+                        "tax": price_stmt.excluded.tax,
+                        "tax_source": price_stmt.excluded.tax_source,
+                        "baggage_fee": price_stmt.excluded.baggage_fee,
+                        "baggage_allowance": (
+                            price_stmt.excluded.baggage_allowance
+                        ),
+                        "has_baggage": price_stmt.excluded.has_baggage,
                     },
                 )
             )
@@ -784,6 +817,12 @@ async def read_provider_deals(
                         if price.expires_at is not None
                         else None
                     ),
+                    "base_price": price.base_price,
+                    "tax": price.tax,
+                    "tax_source": price.tax_source,
+                    "baggage_fee": price.baggage_fee,
+                    "baggage_allowance": price.baggage_allowance,
+                    "has_baggage": price.has_baggage,
                 }
                 for price in prices
             ]

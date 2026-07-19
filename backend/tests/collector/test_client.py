@@ -77,6 +77,12 @@ async def test_client_sends_only_normalized_offer_fields():
         stops=0,
         cabin="Y",
         currency="CNY",
+        base_price=430,
+        tax=150,
+        tax_source="regulatory_estimate",
+        baggage_fee=0,
+        baggage_allowance="20KG",
+        has_baggage=True,
         total_price=580,
         price_status=PriceStatus.priced,
         booking_url=(
@@ -102,7 +108,12 @@ async def test_client_sends_only_normalized_offer_fields():
     assert wire_offer["origin_airport_code"] == "PEK"
     assert wire_offer["destination_airport_code"] == "SHA"
     assert "raw_reference" not in wire_offer
-    assert "base_price" not in wire_offer
+    assert wire_offer["base_price"] == 430
+    assert wire_offer["tax"] == 150
+    assert wire_offer["tax_source"] == "regulatory_estimate"
+    assert wire_offer["baggage_fee"] == 0
+    assert wire_offer["baggage_allowance"] == "20KG"
+    assert wire_offer["has_baggage"] is True
 
 
 @pytest.mark.asyncio

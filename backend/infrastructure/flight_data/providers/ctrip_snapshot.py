@@ -106,11 +106,13 @@ def ctrip_rows_to_offers(
                 duration_minutes=_duration_minutes(row.get("duration")),
                 stops=int(row.get("stops", 0)),
                 currency=price.get("currency", query.currency),
-                base_price=None,
-                tax=None,
-                baggage_fee=None,
+                base_price=price.get("base_price"),
+                tax=price.get("tax"),
+                tax_source=price.get("tax_source"),
+                baggage_fee=price.get("baggage_fee"),
+                baggage_allowance=price.get("baggage_allowance"),
                 total_price=int(price["price"]),
-                has_baggage=None,
+                has_baggage=price.get("has_baggage"),
                 price_status=(
                     PriceStatus.stale
                     if stale

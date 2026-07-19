@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Protocol
+from typing import Literal, Protocol
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -82,7 +82,9 @@ class FlightOffer(BaseModel):
     currency: str = "CNY"
     base_price: int | None = None
     tax: int | None = None
+    tax_source: Literal["provider", "regulatory_estimate"] | None = None
     baggage_fee: int | None = None
+    baggage_allowance: str | None = Field(default=None, max_length=128)
     total_price: int | None = None
     has_baggage: bool | None = None
     price_status: PriceStatus = PriceStatus.priced

@@ -90,7 +90,9 @@ class DealCardDto(BaseModel):
     lowest_price: Optional[int] = None
     base_price: Optional[int] = None
     tax: Optional[int] = None
+    tax_source: Optional[Literal["provider", "regulatory_estimate"]] = None
     baggage_fee: Optional[int] = None
+    baggage_allowance: Optional[str] = None
     has_baggage: Optional[bool] = None
     total_price: Optional[int] = None
     currency: str

@@ -133,6 +133,12 @@ class CollectorApiClient:
             "stops": offer.stops,
             "cabin": offer.cabin,
             "currency": "CNY",
+            "base_price": offer.base_price,
+            "tax": offer.tax,
+            "tax_source": offer.tax_source,
+            "baggage_fee": offer.baggage_fee,
+            "baggage_allowance": offer.baggage_allowance,
+            "has_baggage": offer.has_baggage,
             "display_price": offer.total_price,
             "booking_url": offer.booking_url,
         }

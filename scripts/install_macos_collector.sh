@@ -46,6 +46,7 @@ RUNTIME_SOURCE_FILES=(
   backend/application/contracts/flight_provider.py
   backend/application/services/__init__.py
   backend/application/services/airport_catalog.py
+  backend/application/services/domestic_fees.py
   backend/application/services/flight_dates.py
   backend/application/services/flight_query.py
   backend/infrastructure/__init__.py
@@ -346,15 +347,14 @@ PLIST_STAGE="$(mktemp "$STATE_DIR/.plist-stage.XXXXXX")"
 python3 - "$PLIST_TEMPLATE" "$PLIST_STAGE" "$RUNTIME_DIR" "$PYTHON" "$ENV_FILE" "$LOG_DIR" <<'PY'
 from pathlib import Path
 from xml.sax.saxutils import escape
-import shlex
 import sys
 
 template, output, runtime, python, env_file, log_dir = sys.argv[1:]
 text = Path(template).read_text(encoding="utf-8")
 values = {
     "__RUNTIME_DIR_XML__": escape(runtime),
-    "__PYTHON_SHELL__": escape(shlex.quote(python)),
-    "__ENV_FILE_SHELL__": escape(shlex.quote(env_file)),
+    "__PYTHON_XML__": escape(python),
+    "__ENV_FILE_XML__": escape(env_file),
     "__STDOUT_PATH_XML__": escape(str(Path(log_dir) / "collector.log")),
     "__STDERR_PATH_XML__": escape(str(Path(log_dir) / "collector.err.log")),
 }
