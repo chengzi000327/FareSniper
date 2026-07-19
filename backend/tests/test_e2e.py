@@ -236,6 +236,10 @@ async def test_e2e_flow(e2e_client: AsyncClient) -> None:
 
     with (
         patch("backend.api.memory.list_memories", new=AsyncMock(return_value=[])),
+        patch(
+            "backend.api.memory.get_user_preferences",
+            new=AsyncMock(return_value=None),
+        ),
         patch("backend.api.memory.list_query_history", new=AsyncMock(return_value=[])),
     ):
         memory_response = await e2e_client.get("/api/memory")

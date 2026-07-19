@@ -18,6 +18,82 @@ async def test_get_returns_memories_and_history(
 
 
 @pytest.mark.asyncio
+async def test_get_combines_learned_preferences_manual_memory_and_query_history(
+    seeded_pg, client: AsyncClient, valid_jwt_for_u1
+):
+    from backend.infrastructure.db.base import get_session
+    from backend.infrastructure.db.memory_repo import upsert_memory
+    from backend.infrastructure.db.query_history_repo import append_query
+    from backend.memory.long_term import LongTermMemory
+
+    async with get_session() as db:
+        await LongTermMemory(db).upsert_preferences(
+            "u1",
+            {
+                "budget": 680,
+                "frequent_cities": ["三亚", "成都"],
+                "preferred_airlines": ["南方航空"],
+                "constraints": ["direct_only"],
+                "travel_scenes": ["亲子游"],
+            },
+        )
+        await db.commit()
+    await upsert_memory("u1", "seat_preference", "靠窗", source="user")
+    await append_query(
+        "u1",
+        "下周五北京飞三亚",
+        intent={
+            "destination": {"city": "三亚", "iata_code": "SYX"},
+            "date_window": {"start_date": "2026-07-24"},
+        },
+    )
+
+    response = await client.get(
+        "/api/memory", headers={"authorization": f"Bearer {valid_jwt_for_u1}"}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    by_field = {item["field"]: item for item in body["memories"]}
+    assert set(by_field) == {
+        "budget",
+        "frequent_cities",
+        "preferred_airlines",
+        "constraints",
+        "travel_scenes",
+        "seat_preference",
+    }
+    assert by_field["budget"] == {
+        "field": "budget",
+        "value": 680,
+        "label": "心理价位",
+        "value_display": "¥680",
+        "source": "auto",
+    }
+    assert by_field["frequent_cities"]["value_display"] == "三亚、成都"
+    assert by_field["constraints"]["value_display"] == "只看直飞"
+    assert by_field["seat_preference"] == {
+        "field": "seat_preference",
+        "value": "靠窗",
+        "label": "座位偏好",
+        "value_display": "靠窗",
+        "source": "manual",
+    }
+
+    assert len(body["query_history"]) == 1
+    history = body["query_history"][0]
+    assert isinstance(history["id"], int)
+    assert history["query"] == {
+        "text": "下周五北京飞三亚",
+        "intent": {
+            "destination": {"city": "三亚", "iata_code": "SYX"},
+            "date_window": {"start_date": "2026-07-24"},
+        },
+    }
+    assert history["created_at"]
+
+
+@pytest.mark.asyncio
 async def test_patch_upserts(seeded_pg, client: AsyncClient, valid_jwt_for_u1):
     r = await client.patch(
         "/api/memory",

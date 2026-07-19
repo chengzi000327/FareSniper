@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import Column, DateTime, JSON, String, delete, select
 from sqlalchemy.sql import func
 
+from backend.db.models import UserPreference
 from backend.infrastructure.db.base import Base, get_session
 
 
@@ -44,6 +45,21 @@ async def list_memories(user_id: str) -> list[MemoryRow]:
             select(MemoryRow).where(MemoryRow.user_id == user_id)
         )
         return list(rows.scalars().all())
+
+
+async def get_user_preferences(user_id: str) -> dict[str, object] | None:
+    """Return the automatically learned preference row in API-ready form."""
+    async with get_session() as s:
+        row = await s.get(UserPreference, user_id)
+        if row is None:
+            return None
+        return {
+            "budget": row.budget,
+            "frequent_cities": list(row.frequent_cities or []),
+            "preferred_airlines": list(row.preferred_airlines or []),
+            "constraints": list(row.constraints or []),
+            "travel_scenes": list(row.travel_scenes or []),
+        }
 
 
 async def delete_field(user_id: str, field: str) -> None:
