@@ -11,7 +11,12 @@
         <string>set -a; source __ENV_FILE_SHELL__; set +a; exec __PYTHON_SHELL__ -m backend.collector.cli daemon</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>__REPO_ROOT_XML__</string>
+    <string>__RUNTIME_DIR_XML__</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONDONTWRITEBYTECODE</key>
+        <string>1</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

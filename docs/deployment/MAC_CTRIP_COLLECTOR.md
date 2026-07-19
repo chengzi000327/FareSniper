@@ -20,18 +20,38 @@ iPad 不能运行该 launchd/Selenium 节点。安装器不会复制日常 Chrom
 在仓库根目录执行：
 
 ```bash
-bash scripts/install_macos_collector.sh
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.faresniper/config}"
+INSTALLER_PATH="$(pwd -P)/scripts/install_macos_collector.sh"
+bash "$INSTALLER_PATH"
 ```
+
+当前采集节点使用 `~/.faresniper/config`，因为本机 `~/.config` 不可写。
+若使用其他自定义目录，请在后续登录、doctor、激活和恢复命令中继续导出
+同一个 `XDG_CONFIG_HOME`，不要在激活时切回另一个配置目录。
 
 安装器创建：
 
 ```text
-.venv-collector/
-~/.config/faresniper/collector.env
+~/.faresniper/venv/
+~/.faresniper/runtime/
+${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env
 ~/.faresniper/ctrip-profile/
 ~/.faresniper/logs/
 ~/Library/LaunchAgents/com.faresniper.ctrip-collector.plist
 ```
+
+`venv`、collector 所需的最小 Python 源码副本和 launchd 工作目录都位于
+`~/.faresniper`。安装完成后，LaunchAgent 不再读取仓库或 `~/Documents`。
+runtime 使用显式文件 allowlist 构建，不会复制 `backend/.env`、测试、
+`__pycache__`、`.pyc`、工具缓存、密钥文件或其他应用源码；重复安装会
+先在 `~/.faresniper` 的暂存路径构建 venv、runtime 和 plist，并通过
+local/full doctor 后才停止旧 agent、交换资源和启动新版本。交换或启动
+失败时会恢复旧资源并重新启动原服务，同时保留 `collector.env`、日志和
+携程 profile。
+
+agent 已加载时，不带 `--activate` 的安装会直接拒绝且不会改动运行资源；
+升级运行中的节点必须沿用上述 XDG 导出和绝对 `INSTALLER_PATH` 执行
+`bash "$INSTALLER_PATH" --activate`。
 
 `collector.env` 权限为 600。填写空白项，不要把值提交到 Git：
 
@@ -39,7 +59,7 @@ bash scripts/install_macos_collector.sh
 FARESNIPER_API_URL=
 CTRIP_COLLECTOR_TOKEN=
 FARESNIPER_COLLECTOR_NODE_ID=
-FARESNIPER_CTRIP_PROFILE="$HOME/.faresniper/ctrip-profile"
+FARESNIPER_CTRIP_PROFILE=
 FARESNIPER_CTRIP_HEADLESS=false
 FARESNIPER_COLLECTOR_INTERVAL_SECONDS=60
 CTRIP_COLLECTION_TIMEOUT_SECONDS=90
@@ -47,6 +67,9 @@ FARESNIPER_LANGSMITH_TRACING=false
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=faresniper
 ```
+
+新配置中的 `FARESNIPER_CTRIP_PROFILE` 故意留空，CLI 会使用精确默认目录
+`~/.faresniper/ctrip-profile`。已有配置中的显式自定义路径不会被安装器改写。
 
 Mac 安装器显式使用可见浏览器采集，因为携程可能阻止 headless
 会话。CLI 在未配置 `FARESNIPER_CTRIP_HEADLESS` 时仍默认为 `true`，
@@ -58,25 +81,40 @@ Mac 安装器显式使用可见浏览器采集，因为携程可能阻止 headle
 先验证本机依赖：
 
 ```bash
-.venv-collector/bin/python -m backend.collector.cli \
-  --env-file "$HOME/.config/faresniper/collector.env" \
-  doctor --local-only
+COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
+(
+  cd "$HOME/.faresniper/runtime"
+  PYTHONDONTWRITEBYTECODE=1 \
+    "$HOME/.faresniper/venv/bin/python" -m backend.collector.cli \
+    --env-file "$COLLECTOR_ENV_FILE" \
+    doctor --local-only
+)
 ```
 
 配置 backend URL 和 token 后，打开可见 Chrome 完成登录：
 
 ```bash
-.venv-collector/bin/python -m backend.collector.cli \
-  --env-file "$HOME/.config/faresniper/collector.env" \
-  login
+COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
+(
+  cd "$HOME/.faresniper/runtime"
+  PYTHONDONTWRITEBYTECODE=1 \
+    "$HOME/.faresniper/venv/bin/python" -m backend.collector.cli \
+    --env-file "$COLLECTOR_ENV_FILE" \
+    login
+)
 ```
 
 只有未来航班页和 allowlist 登录 Cookie 都验证成功后，collector 才创建 `.login-confirmed`。完成后运行完整 doctor：
 
 ```bash
-.venv-collector/bin/python -m backend.collector.cli \
-  --env-file "$HOME/.config/faresniper/collector.env" \
-  doctor
+COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
+(
+  cd "$HOME/.faresniper/runtime"
+  PYTHONDONTWRITEBYTECODE=1 \
+    "$HOME/.faresniper/venv/bin/python" -m backend.collector.cli \
+    --env-file "$COLLECTOR_ENV_FILE" \
+    doctor
+)
 ```
 
 ## Clash Verge
@@ -90,15 +128,22 @@ Mac 安装器显式使用可见浏览器采集，因为携程可能阻止 headle
 先手动跑一个任务：
 
 ```bash
-.venv-collector/bin/python -m backend.collector.cli \
-  --env-file "$HOME/.config/faresniper/collector.env" \
-  once
+COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
+(
+  cd "$HOME/.faresniper/runtime"
+  PYTHONDONTWRITEBYTECODE=1 \
+    "$HOME/.faresniper/venv/bin/python" -m backend.collector.cli \
+    --env-file "$COLLECTOR_ENV_FILE" \
+    once
+)
 ```
 
 确认成功后激活 launchd：
 
 ```bash
-bash scripts/install_macos_collector.sh --activate
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.faresniper/config}"
+INSTALLER_PATH="$(pwd -P)/scripts/install_macos_collector.sh"
+bash "$INSTALLER_PATH" --activate
 ```
 
 ## 状态与日志
@@ -116,12 +161,18 @@ tail -f "$HOME/.faresniper/logs/collector.err.log"
 出现 `captcha_required`、`login_required` 或持续 `parse_error` 时：
 
 ```bash
-launchctl bootout "gui/$UID" \
-  "$HOME/Library/LaunchAgents/com.faresniper.ctrip-collector.plist"
-.venv-collector/bin/python -m backend.collector.cli \
-  --env-file "$HOME/.config/faresniper/collector.env" \
-  login
-bash scripts/install_macos_collector.sh --activate
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.faresniper/config}"
+launchctl bootout "gui/$UID/com.faresniper.ctrip-collector"
+COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
+(
+  cd "$HOME/.faresniper/runtime"
+  PYTHONDONTWRITEBYTECODE=1 \
+    "$HOME/.faresniper/venv/bin/python" -m backend.collector.cli \
+    --env-file "$COLLECTOR_ENV_FILE" \
+    login
+)
+INSTALLER_PATH="$(pwd -P)/scripts/install_macos_collector.sh"
+bash "$INSTALLER_PATH" --activate
 ```
 
 在可见窗口中手工完成 CAPTCHA；不要编写绕过验证码的脚本。失败会关闭浏览器会话并释放 profile lock，下一轮创建新 session。若专用 profile 已损坏，可在停止 agent 后备份并删除 `~/.faresniper/ctrip-profile`，再重新运行 `login`。
@@ -129,7 +180,7 @@ bash scripts/install_macos_collector.sh --activate
 ## Token 轮换
 
 1. 在 Railway backend 生成并设置新的高熵 `CTRIP_COLLECTOR_TOKEN`。
-2. 在本机 `~/.config/faresniper/collector.env` 写入相同值。
+2. 在本机 `${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env` 写入相同值。
 3. 重启 agent：
 
 ```bash
@@ -148,13 +199,17 @@ Mac 睡眠、关机、Chrome 更新或网络中断时，采集暂停，Railway �
 bash scripts/uninstall_macos_collector.sh
 ```
 
-卸载脚本移除 launchd agent，但故意保留配置和 `~/.faresniper/ctrip-profile`。确认不再需要登录状态后，可手工删除：
+卸载脚本会移除 launchd agent、私有 runtime 和 venv，但故意保留日志、
+配置和 `~/.faresniper/ctrip-profile`。若已加载 agent 无法停止，卸载会在
+删除任何文件前中止。确认不再需要登录状态后，可手工删除：
 
 ```bash
+COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
 rm -rf "$HOME/.faresniper/ctrip-profile" \
   "$HOME/.faresniper/logs" \
-  "$HOME/.config/faresniper/collector.env" \
-  .venv-collector
+  "$COLLECTOR_ENV_FILE"
 ```
 
-专用 profile 始终保留在本机；删除前先确认其中没有仍需保留的携程登录状态。
+旧版安装器可能在仓库留下已被 `.gitignore` 排除的 `.venv-collector/`，
+确认没有旧进程使用后可从仓库手工移除。专用 profile 始终保留在本机；
+删除前先确认其中没有仍需保留的携程登录状态。
