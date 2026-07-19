@@ -184,6 +184,7 @@ def test_recommendation_preview_keeps_currency_without_fabricated_score_or_fees(
 
     assert card.preview_deal is not None
     assert card.preview_deal["currency"] == "USD"
+    assert card.preview_deal["base_price"] == 80
     assert card.preview_deal["recommend_score"] is None
     assert card.preview_deal["tax"] is None
     assert card.preview_deal["baggage_fee"] is None
@@ -196,6 +197,7 @@ def test_recommendation_preview_keeps_currency_without_fabricated_score_or_fees(
     assert card.preview_deal["inventory_expires_at"] == (
         "2099-08-01T01:00:00+00:00"
     )
+    assert card.query_hint == "2099-08-01 从北京到新加坡的机票"
 
 
 async def test_pool_cache_ttl_is_bounded_by_earliest_inventory_expiry(

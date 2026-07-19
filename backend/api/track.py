@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Response, Depends
+import logging
+
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel
 from backend.analytics.events import EventName
 from backend.analytics.track import track
@@ -7,6 +9,7 @@ from backend.infrastructure.db import base as db_base
 from backend.services.memory_learner import learn_from_click
 
 router = APIRouter(tags=["track"])
+logger = logging.getLogger(__name__)
 
 
 class TrackBody(BaseModel):
@@ -37,5 +40,8 @@ async def post_track(body: TrackBody, uid: str = Depends(current_user_id)) -> Re
             for field in _LEARNED_FLIGHT_FIELDS
             if field in body.payload and body.payload[field] is not None
         }
-        await learn_from_click(uid, flight_data, db_base.SessionLocal)
+        try:
+            await learn_from_click(uid, flight_data, db_base.SessionLocal)
+        except Exception:
+            logger.exception("memory_learning_failed user_id=%s event=%s", uid, event)
     return Response(status_code=204)

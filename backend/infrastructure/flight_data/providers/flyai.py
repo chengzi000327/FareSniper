@@ -123,6 +123,53 @@ def _parse_price(value: object) -> int | None:
     return int(price)
 
 
+def _first_price(item: Mapping[str, object], *keys: str) -> int | None:
+    for key in keys:
+        parsed = _parse_price(item.get(key))
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _tax_total(item: Mapping[str, object]) -> int | None:
+    direct = _first_price(
+        item,
+        "tax",
+        "taxPrice",
+        "taxFee",
+        "adultTax",
+    )
+    if direct is not None:
+        return direct
+    construction_fee = _first_price(
+        item,
+        "airportConstructionFee",
+        "airportTax",
+        "constructionFee",
+    )
+    fuel_surcharge = _first_price(item, "fuelSurcharge", "fuelFee")
+    if construction_fee is None or fuel_surcharge is None:
+        return None
+    return construction_fee + fuel_surcharge
+
+
+def _has_baggage(item: Mapping[str, object]) -> bool | None:
+    explicit = item.get("hasBaggage")
+    if isinstance(explicit, bool):
+        return explicit
+    for key in ("baggageAllowance", "checkedBaggage", "baggageInfo"):
+        value = item.get(key)
+        if value is None:
+            continue
+        text = str(value).strip().casefold()
+        if not text:
+            continue
+        if any(marker in text for marker in ("不含", "无托运", "0kg", "0 kg")):
+            return False
+        return True
+    return None
+
+
 def _time_part(value: object) -> str:
     if not isinstance(value, str):
         return ""
@@ -186,12 +233,28 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
         if not segments:
             continue
 
-        price = _parse_price(item.get("ticketPrice"))
-        if price is None:
-            price = _parse_price(item.get("adultPrice"))
+        ticket_price = _first_price(item, "ticketPrice", "adultPrice")
+        base_price = _first_price(
+            item,
+            "basePrice",
+            "adultBasePrice",
+            "farePrice",
+        )
+        tax = _tax_total(item)
+        baggage_fee = _first_price(item, "baggageFee", "baggagePrice")
+        total_price = _first_price(
+            item,
+            "totalPrice",
+            "adultTotalPrice",
+            "payPrice",
+        )
+        if total_price is None:
+            total_price = ticket_price
+        if base_price is None:
+            base_price = ticket_price
         jump_url = item.get("jumpUrl")
         booking_url = jump_url if _is_https_url(jump_url) else None
-        if price is None and booking_url is None:
+        if total_price is None and booking_url is None:
             continue
 
         first_segment = segments[0]
@@ -225,7 +288,9 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
             if segment.get("marketingTransportName")
         ]
         price_status = (
-            PriceStatus.priced if price is not None else PriceStatus.view_live_price
+            PriceStatus.priced
+            if total_price is not None
+            else PriceStatus.view_live_price
         )
         total_duration = item.get("totalDuration")
         if total_duration is None:
@@ -256,10 +321,11 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
                 duration_minutes=_minutes(total_duration),
                 stops=max(0, len(segments) - 1),
                 cabin=first_segment.get("seatClassName"),
-                total_price=price,
-                tax=None,
-                baggage_fee=None,
-                has_baggage=None,
+                base_price=base_price,
+                total_price=total_price,
+                tax=tax,
+                baggage_fee=baggage_fee,
+                has_baggage=_has_baggage(item),
                 price_status=price_status,
                 booking_url=booking_url,
             )

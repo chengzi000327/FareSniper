@@ -66,9 +66,14 @@ async def learn_from_click(
 
         recent_clicks = await ltm.get_recent_clicks(user_id, limit=5)
         prices = [
-            click.get("flight_data", {}).get("price")
+            price
             for click in recent_clicks
-            if click.get("flight_data", {}).get("price")
+            if isinstance(
+                price := click.get("flight_data", {}).get("price"),
+                (int, float),
+            )
+            and not isinstance(price, bool)
+            and price > 0
         ]
         if len(prices) >= 3:
             median_price = int(statistics.median(prices))

@@ -27,6 +27,33 @@ async def test_react_emits_tool_call_when_slots_complete(
 
 
 @pytest.mark.asyncio
+async def test_react_routes_missing_date_to_deterministic_clarification(monkeypatch):
+    import backend.application.graph.nodes.react_agent as ra
+
+    model_built = False
+
+    def _build_model(*args, **kwargs):
+        nonlocal model_built
+        model_built = True
+        raise AssertionError("the model must not guess a missing date")
+
+    monkeypatch.setattr(ra, "build_chat_model", _build_model)
+
+    out = await ra.react_agent(
+        {
+            "messages": [HumanMessage(content="北京到上海的机票")],
+            "request_message": "北京到上海的机票",
+            "accumulated_slots": None,
+            "intent_definitions": [],
+            "request_user_id": "u1",
+        }
+    )
+
+    assert out == {"llm_failed": True}
+    assert model_built is False
+
+
+@pytest.mark.asyncio
 async def test_react_agent_marks_llm_failed_on_exception(monkeypatch):
     import backend.application.graph.nodes.react_agent as ra
 

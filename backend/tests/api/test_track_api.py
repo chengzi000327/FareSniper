@@ -75,3 +75,24 @@ async def test_click_events_learn_with_jwt_user_and_sanitized_payload(
     }
     assert "user_id" not in learned_payload
     assert session_factory is not None
+
+
+@pytest.mark.asyncio
+async def test_click_learning_failure_does_not_break_tracking(
+    seeded_pg, valid_jwt_for_u1, monkeypatch
+):
+    learner = AsyncMock(side_effect=RuntimeError("learning unavailable"))
+    monkeypatch.setattr("backend.api.track.learn_from_click", learner)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        response = await c.post(
+            "/api/track",
+            headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+            json={
+                "event": "ticket_clicked",
+                "payload": {"flight_no": "CZ6718", "price": 650},
+            },
+        )
+
+    assert response.status_code == 204
+    assert await count_events(EventName.TICKET_CLICKED, user_id="u1") == 1

@@ -67,6 +67,7 @@ async def render_response(state: WorkflowState) -> WorkflowState:
                 deal["arrive_time"] = c.arrive_time
                 deal["price"] = None
                 deal["lowest_price"] = None
+                deal["base_price"] = None
                 deal["total_price"] = None
                 deal["currency"] = "CNY"
                 deal["winning_price_id"] = None

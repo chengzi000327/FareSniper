@@ -164,10 +164,43 @@ def fill_slots(
         intent_definitions=definitions,
         matched_intent=intent_match.intent_name if intent_match else None,
     )
-    merged = merge_slot_bundle(base, extracted)
+    merge_base = (
+        replace(base, depart_date=None, return_date=None)
+        if _requires_date_reconfirmation(base, extracted)
+        else base
+    )
+    merged = merge_slot_bundle(merge_base, extracted)
     if merged.intent is None and intent_match:
         merged = replace(merged, intent=intent_match.intent_name)
     return merged
+
+
+def _requires_date_reconfirmation(
+    accumulated: SlotBundle,
+    extracted: SlotBundle,
+) -> bool:
+    """Do not silently carry a confirmed date onto a newly stated route."""
+    if (
+        accumulated.intent != "search_flight"
+        or not accumulated.depart_date
+        or extracted.depart_date
+    ):
+        return False
+
+    complete_route_restatement = bool(
+        extracted.origin and extracted.destination
+    )
+    origin_changed = bool(
+        accumulated.origin
+        and extracted.origin
+        and accumulated.origin != extracted.origin
+    )
+    destination_changed = bool(
+        accumulated.destination
+        and extracted.destination
+        and accumulated.destination != extracted.destination
+    )
+    return complete_route_restatement or origin_changed or destination_changed
 
 
 def extract_slots(

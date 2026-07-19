@@ -5,6 +5,10 @@ import logging
 
 from backend.application.graph._now import today_cn
 from backend.application.graph.tools import load_available_tools
+from backend.application.services.intent_slot_filler import (
+    fill_slots,
+    missing_required_slots,
+)
 from backend.infrastructure.llm.models import build_chat_model
 from backend.infrastructure.llm.prompt_loader import load_prompt
 
@@ -15,6 +19,9 @@ LLM_TIMEOUT_SECONDS = 8.0
 
 async def react_agent(state: dict) -> dict:
     """ReAct LLM node: bind tools and invoke the chat model; on failure flag llm_failed for rule fallback."""
+    if _search_requires_clarification(state):
+        return {"llm_failed": True}
+
     tools = load_available_tools()
     chat = build_chat_model(role="agent")
     if tools:
@@ -56,3 +63,27 @@ async def react_agent(state: dict) -> dict:
         pass
 
     return {"messages": [ai]}
+
+
+def _search_requires_clarification(state: dict) -> bool:
+    text = str(state.get("request_message") or _latest_user_text(state))
+    if not text.strip():
+        return False
+    definitions = state.get("intent_definitions") or None
+    slots = fill_slots(
+        text,
+        state.get("accumulated_slots"),
+        intent_definitions=definitions,
+    )
+    return slots.intent == "search_flight" and bool(
+        missing_required_slots(slots, definitions)
+    )
+
+
+def _latest_user_text(state: dict) -> str:
+    for message in reversed(list(state.get("messages") or [])):
+        if getattr(message, "type", "") == "human":
+            return str(getattr(message, "content", ""))
+        if isinstance(message, dict) and message.get("role") == "user":
+            return str(message.get("content") or "")
+    return ""

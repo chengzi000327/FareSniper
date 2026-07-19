@@ -22,6 +22,7 @@ def _deal(
 ) -> dict:
     return {
         "flight_no": flight_no,
+        "platform": "飞猪",
         "depart_time": depart_time,
         "arrive_time": arrive_time,
         "price": price,
@@ -71,8 +72,8 @@ def test_markdown_preserves_first_deal_and_uses_stale_display_price():
     deals[1]["winning_price_id"] = "ctrip-JD5577-20260720"
 
     markdown = render_flight_markdown(build_response_facts(deals, budget=500))
-    first_row = "| JD5121 | 08:00 | 10:00 | ¥650 |"
-    second_row = "| JD5577 | 11:00 | 13:20 | ¥620 |"
+    first_row = "| JD5121 | 飞猪 | 08:00 | 10:00 | ¥650 |"
+    second_row = "| JD5577 | 飞猪 | 11:00 | 13:20 | ¥620 |"
 
     assert markdown.index(first_row) < markdown.index(second_row)
     assert "平台展示价最低：¥620" in markdown
@@ -194,7 +195,7 @@ def test_nested_price_keeps_selected_amount_and_currency_atomic():
     assert (facts.rows[1].display_price, facts.rows[1].currency) == (620, "CNY")
     assert facts.minimum_display_price == 620
     assert facts.within_budget is True
-    assert "| JD5577 | 11:00 | 13:20 | ¥620 |" in markdown
+    assert "| JD5577 | 携程 | 11:00 | 13:20 | ¥620 |" in markdown
     assert "USD 620" not in markdown
     assert "平台展示价最低：¥620" in markdown
     assert "当前最低平台展示价在预算 ¥650 内" in markdown

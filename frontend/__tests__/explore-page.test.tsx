@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ExplorePage } from "@/components/explore-page";
 
 const { listMock } = vi.hoisted(() => ({ listMock: vi.fn() }));
@@ -13,6 +13,7 @@ function recommendationCard() {
   return {
     id: "rec-sin",
     title: "上海→新加坡",
+    query_hint: "2099-08-01 从上海到新加坡的机票",
     reason: "未来航班",
     tags: [],
     preview_deal: {
@@ -31,6 +32,7 @@ function recommendationCard() {
       duration_minutes: 360,
       stops: 0,
       price: 80,
+      base_price: 80,
       lowest_price: 80,
       tax: null,
       baggage_fee: null,
@@ -73,6 +75,23 @@ test("renders cards from recApi", async () => {
   render(<ExplorePage />);
 
   await waitFor(() => expect(screen.getByText("上海 → 新加坡")).toBeInTheDocument());
+});
+
+test("hands a recommendation query to the chat callback", async () => {
+  listMock.mockResolvedValue({
+    personalized: false,
+    cards: [recommendationCard()],
+    has_more: false,
+    next_offset: 1,
+  });
+  const onSearch = vi.fn();
+
+  render(<ExplorePage onSearch={onSearch} />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "查看详情" }));
+  fireEvent.click(await screen.findByRole("button", { name: "在对话中查询" }));
+
+  expect(onSearch).toHaveBeenCalledWith("2099-08-01 从上海到新加坡的机票");
 });
 
 test("continues past an empty first page and renders a later valid page", async () => {

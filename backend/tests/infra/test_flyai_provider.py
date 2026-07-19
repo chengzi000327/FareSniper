@@ -33,7 +33,7 @@ def test_parse_maps_price_flight_and_jump_url():
     assert offers[0].data_provider == "flyai"
     assert offers[0].seller_name == "飞猪"
     assert offers[0].total_price == 400
-    assert offers[0].base_price is None
+    assert offers[0].base_price == 400
     assert offers[0].tax is None
     assert offers[0].baggage_fee is None
     assert offers[0].flight_no == "CA1883"
@@ -42,6 +42,46 @@ def test_parse_maps_price_flight_and_jump_url():
     assert offers[0].depart_time == "21:00"
     assert offers[0].arrive_time == "23:20"
     assert offers[0].booking_url.startswith("https://")
+
+
+def test_parser_maps_explicit_total_tax_and_baggage_components():
+    payload = _payload()
+    item = payload["data"]["itemList"][0]
+    item.update(
+        {
+            "basePrice": "400",
+            "airportConstructionFee": "50",
+            "fuelSurcharge": "20",
+            "baggageFee": "30",
+            "totalPrice": "500",
+            "hasBaggage": True,
+        }
+    )
+
+    offer = parse_flyai_payload(payload, _query())[0]
+
+    assert offer.base_price == 400
+    assert offer.tax == 70
+    assert offer.baggage_fee == 30
+    assert offer.total_price == 500
+    assert offer.has_baggage is True
+
+
+def test_parser_keeps_partial_tax_components_unconfirmed():
+    payload = _payload()
+    payload["data"]["itemList"][0].update(
+        {
+            "basePrice": "400",
+            "airportConstructionFee": "50",
+            "baggageFee": "0",
+            "totalPrice": "450",
+            "hasBaggage": True,
+        }
+    )
+
+    offer = parse_flyai_payload(payload, _query())[0]
+
+    assert offer.tax is None
 
 
 def test_parser_maps_airport_codes_from_first_and_last_segments():

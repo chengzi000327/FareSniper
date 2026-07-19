@@ -9,6 +9,7 @@ class RecCard(BaseModel):
     id: str = ""
     title: str
     reason: str
+    query_hint: str = ""
     tags: list[str] = Field(default_factory=list)
     discount_pct: int | None = None      # 低于均价的百分比（正数=便宜）
     preview_deal: dict[str, Any] | None = None

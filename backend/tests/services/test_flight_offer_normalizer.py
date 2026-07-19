@@ -38,6 +38,10 @@ def _offer(
     fetched_at: str | None = None,
     booking_url: str | None = None,
     expires_at: str | None = None,
+    base_price: int | None = None,
+    tax: int | None = None,
+    baggage_fee: int | None = None,
+    has_baggage: bool | None = None,
 ) -> FlightOffer:
     return FlightOffer(
         data_provider=provider,
@@ -56,10 +60,11 @@ def _offer(
         duration_minutes=130,
         stops=stops,
         currency=currency,
+        base_price=base_price,
         total_price=price,
-        tax=None,
-        baggage_fee=None,
-        has_baggage=None,
+        tax=tax,
+        baggage_fee=baggage_fee,
+        has_baggage=has_baggage,
         price_status=status,
         booking_url=booking_url
         or (
@@ -146,6 +151,34 @@ def test_deduplicates_identity_and_orders_price_rows_stably():
     assert deal["tax"] is None
     assert deal["baggage_fee"] is None
     assert deal["has_baggage"] is None
+
+
+def test_winning_offer_drives_the_card_price_components():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="flyai",
+                    seller="飞猪",
+                    price=600,
+                    base_price=500,
+                    tax=70,
+                    baggage_fee=30,
+                    has_baggage=True,
+                )
+            ],
+        )
+    }
+
+    deal = offers_to_deals(_query(), results)[0]
+
+    assert deal["base_price"] == 500
+    assert deal["tax"] == 70
+    assert deal["baggage_fee"] == 30
+    assert deal["has_baggage"] is True
+    assert DealCardDto.model_validate(deal).base_price == 500
 
 
 def test_flyai_and_ctrip_offers_with_same_airports_merge_into_one_card():

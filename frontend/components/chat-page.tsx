@@ -88,7 +88,13 @@ function MarkdownMessage({ content }: { content: string }) {
   )
 }
 
-export function ChatPage() {
+export function ChatPage({
+  initialQuery,
+  onInitialQueryConsumed,
+}: {
+  initialQuery?: string | null
+  onInitialQueryConsumed?: () => void
+}) {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [inputValue, setInputValue] = React.useState('')
   const [sessionId, setSessionId] = React.useState<string | null>(null)
@@ -236,7 +242,7 @@ export function ChatPage() {
         if (!bestDeal) return
         updateAssistant((message) => ({
           ...message,
-          isSpecial: false,
+          isSpecial: true,
           hasCard: true,
           cardData: cardPropsFromDeal(bestDeal),
         }))
@@ -301,6 +307,13 @@ export function ChatPage() {
   }
 
   startSearchRef.current = startSearch
+
+  React.useEffect(() => {
+    const query = initialQuery?.trim()
+    if (!query || activeSearchRef.current) return
+    onInitialQueryConsumed?.()
+    void startSearchRef.current?.(query)
+  }, [initialQuery, onInitialQueryConsumed])
 
   const handleSend = () => {
     const value = inputValue.trim()

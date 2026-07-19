@@ -487,6 +487,7 @@ def _build_card(
             "stops": int(deal.get("stops", 0)),
             "price": price,
             "lowest_price": price,
+            "base_price": _positive_price(deal.get("base_price")) or price,
             "tax": None,
             "baggage_fee": None,
             "has_baggage": None,
@@ -565,6 +566,11 @@ def _build_card(
         id=str(uuid.uuid4())[:8],
         title=f"{origin_name}→{dest_name}",
         reason=reason,
+        query_hint=(
+            f"{preview_deal['depart_date']} 从{origin_name}到{dest_name}的机票"
+            if preview_deal
+            else ""
+        ),
         tags=tags,
         discount_pct=discount_pct,
         preview_deal=preview_deal,

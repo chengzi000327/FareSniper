@@ -88,6 +88,7 @@ class DealCardDto(BaseModel):
     stops: int = 0
     price: Optional[int]
     lowest_price: Optional[int] = None
+    base_price: Optional[int] = None
     tax: Optional[int] = None
     baggage_fee: Optional[int] = None
     has_baggage: Optional[bool] = None
@@ -131,6 +132,7 @@ class DealCardDto(BaseModel):
                 self.platform
                 or self.price is not None
                 or self.lowest_price is not None
+                or self.base_price is not None
                 or self.total_price is not None
                 or self.booking_url is not None
                 or self.h5_fallback_url is not None

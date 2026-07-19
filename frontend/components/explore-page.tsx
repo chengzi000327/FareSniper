@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Gift, MapPin, Plane, Sparkles, TrendingDown, X } from 'lucide-react'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import { recApi } from '@/lib/api'
+import { EventName, track } from '@/lib/analytics'
 import { dealToCardProps } from '@/lib/mappers'
 import { formatCurrency } from '@/lib/currency'
 import type { RecCardDto } from '@/lib/api'
@@ -33,6 +34,11 @@ type Deal = {
   discountPct: number | null
   image: string
   cardData: DiscoveryCardContentProps
+  queryHint: string
+  flightNo: string
+  airline: string
+  platform: string
+  numericPrice: number | null
 }
 
 function mapCard(c: RecCardDto): Deal | null {
@@ -51,10 +57,15 @@ function mapCard(c: RecCardDto): Deal | null {
     discountPct: (c.discount_pct as number) ?? null,
     image: DEST_IMAGES[destCode] ?? `https://picsum.photos/seed/${destCode}/800/560`,
     cardData: dealToCardProps(deal),
+    queryHint: c.query_hint || `${deal.depart_date} 从${deal.origin_city}到${deal.destination_city}的机票`,
+    flightNo: deal.flight_no,
+    airline: deal.airline,
+    platform: deal.platform,
+    numericPrice: deal.total_price,
   }
 }
 
-export function ExplorePage() {
+export function ExplorePage({ onSearch }: { onSearch?: (query: string) => void }) {
   const [deals, setDeals] = React.useState<Deal[]>([])
   const [loading, setLoading] = React.useState(true)
   const [loadingMore, setLoadingMore] = React.useState(false)
@@ -142,6 +153,27 @@ export function ExplorePage() {
     }, 1400)
   }
 
+  const selectDeal = (deal: Deal) => {
+    setSelectedDeal(deal)
+    void track(EventName.TicketClicked, {
+      flight_no: deal.flightNo,
+      platform: deal.platform,
+      price: deal.numericPrice,
+      signals: deal.tags,
+      airline: deal.airline,
+      origin: deal.from,
+      destination: deal.to,
+      depart_date: deal.date,
+    }).catch(() => undefined)
+  }
+
+  const searchSelectedDeal = () => {
+    if (!selectedDeal || !onSearch) return
+    const query = selectedDeal.queryHint
+    setSelectedDeal(null)
+    onSearch(query)
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
@@ -199,7 +231,7 @@ export function ExplorePage() {
           <>
             <div className="columns-1 gap-5 space-y-5 md:columns-2 xl:columns-3">
               {visibleDeals.map((deal) => (
-                <DealCard key={deal.id} deal={deal} onSelect={() => setSelectedDeal(deal)} />
+                <DealCard key={deal.id} deal={deal} onSelect={() => selectDeal(deal)} />
               ))}
             </div>
             {/* 无限滚动 sentinel + 加载态 */}
@@ -241,7 +273,10 @@ export function ExplorePage() {
               >
                 <X className="h-5 w-5 text-brand-text" />
               </button>
-              <DiscoveryCardContent {...selectedDeal.cardData} />
+              <DiscoveryCardContent
+                {...selectedDeal.cardData}
+                onSearch={onSearch ? searchSelectedDeal : undefined}
+              />
             </motion.div>
           </motion.div>
         ) : null}

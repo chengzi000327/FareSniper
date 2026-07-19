@@ -104,6 +104,103 @@ test("renders a neutral header for landing placeholders", () => {
   expect(screen.queryByText(/实时价格/)).not.toBeInTheDocument();
 });
 
+test("labels an incomplete fee breakdown as a platform display price", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={580}
+      totalPrice={580}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      winningPriceId="winner"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "winner",
+          name: "飞猪",
+          price: 580,
+          lowest: true,
+          price_status: "priced",
+          data_provider: "flyai",
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("平台展示价")).toBeInTheDocument();
+  expect(screen.getByText(/机建燃油与行李额待平台确认/)).toBeInTheDocument();
+  expect(screen.queryByText("综合总价")).not.toBeInTheDocument();
+});
+
+test("labels a complete fee breakdown as a confirmed total", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={500}
+      totalPrice={580}
+      tax={80}
+      baggageFee={0}
+      hasBaggage={true}
+      currency="CNY"
+      platform="飞猪"
+      winningPriceId="winner"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "winner",
+          name: "飞猪",
+          price: 580,
+          lowest: true,
+          price_status: "priced",
+          data_provider: "flyai",
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("综合总价")).toBeInTheDocument();
+  expect(screen.getByText(/含机建燃油与行李费用/)).toBeInTheDocument();
+  expect(screen.getByText("¥80")).toBeInTheDocument();
+  expect(screen.getByText("免费")).toBeInTheDocument();
+});
+
+test("does not confirm a fee breakdown when the platform total is inconsistent", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      basePrice={400}
+      totalPrice={650}
+      tax={70}
+      baggageFee={30}
+      hasBaggage={true}
+      currency="CNY"
+      platform="飞猪"
+      winningPriceId="winner"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          id: "winner",
+          name: "飞猪",
+          price: 650,
+          lowest: true,
+          price_status: "priced",
+          data_provider: "flyai",
+        }),
+      ]}
+    />
+  );
+
+  expect(screen.getByText("平台展示价")).toBeInTheDocument();
+  expect(screen.getByText(/机建燃油与行李额待平台确认/)).toBeInTheDocument();
+  expect(screen.queryByText("综合总价")).not.toBeInTheDocument();
+});
+
 test("renders every terminal provider state and rejects non-HTTPS live links", () => {
   render(
     <DiscoveryCardContent

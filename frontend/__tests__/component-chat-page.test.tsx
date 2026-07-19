@@ -61,6 +61,7 @@ function deal(overrides: Partial<DealCardDto> = {}): DealCardDto {
     duration_minutes: 120,
     stops: 0,
     price: 580,
+    base_price: 580,
     lowest_price: 580,
     tax: null,
     baggage_fee: null,
@@ -143,6 +144,7 @@ test("chat page updates its card when results arrive before the stream completes
 
   expect((await screen.findAllByText("飞猪")).length).toBeGreaterThan(0);
   expect(screen.getByText("正在获取数据")).toBeInTheDocument();
+  expect(screen.getByText("正在为您深度扫描全网特价资源...")).toBeInTheDocument();
   expect(screen.queryByText("飞猪当前价格更优")).not.toBeInTheDocument();
 
   await act(async () => {

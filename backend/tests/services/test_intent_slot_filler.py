@@ -41,6 +41,46 @@ def test_merges_multi_turn_slot_context():
     assert missing_required_slots(second) == []
 
 
+def test_new_route_without_date_does_not_reuse_previous_search_date():
+    previous = SlotBundle(
+        intent="search_flight",
+        origin="北京",
+        destination="上海",
+        depart_date="2026-08-01",
+    )
+
+    slots = fill_slots(
+        "帮我查广州到成都",
+        previous,
+        today=date(2026, 7, 19),
+    )
+
+    assert slots.origin == "广州"
+    assert slots.destination == "成都"
+    assert slots.depart_date is None
+    assert missing_required_slots(slots) == ["depart_date"]
+
+
+def test_changed_destination_requires_date_reconfirmation():
+    previous = SlotBundle(
+        intent="search_flight",
+        origin="北京",
+        destination="上海",
+        depart_date="2026-08-01",
+    )
+
+    slots = fill_slots(
+        "改去三亚",
+        previous,
+        today=date(2026, 7, 19),
+    )
+
+    assert slots.origin == "北京"
+    assert slots.destination == "三亚"
+    assert slots.depart_date is None
+    assert missing_required_slots(slots) == ["depart_date"]
+
+
 def test_clarify_question_carries_known_destination():
     slots = SlotBundle(intent="search_flight", destination="三亚", depart_date="2026-05-16")
 

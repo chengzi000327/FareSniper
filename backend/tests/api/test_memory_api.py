@@ -94,6 +94,27 @@ async def test_get_combines_learned_preferences_manual_memory_and_query_history(
 
 
 @pytest.mark.asyncio
+async def test_get_omits_unlearned_empty_preference_fields(
+    seeded_pg, client: AsyncClient, valid_jwt_for_u1
+):
+    from backend.infrastructure.db.base import get_session
+    from backend.memory.long_term import LongTermMemory
+
+    async with get_session() as db:
+        await LongTermMemory(db).upsert_preferences(
+            "u1", {"budget": 680, "frequent_cities": []}
+        )
+        await db.commit()
+
+    response = await client.get(
+        "/api/memory", headers={"authorization": f"Bearer {valid_jwt_for_u1}"}
+    )
+
+    by_field = {item["field"]: item for item in response.json()["memories"]}
+    assert set(by_field) == {"budget"}
+
+
+@pytest.mark.asyncio
 async def test_patch_upserts(seeded_pg, client: AsyncClient, valid_jwt_for_u1):
     r = await client.patch(
         "/api/memory",

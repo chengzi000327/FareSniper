@@ -3,6 +3,7 @@
 import React from 'react'
 import { ArrowRight, Bell, Briefcase, Equal, ExternalLink, Plane, Plus, ShieldCheck } from 'lucide-react'
 import { formatCurrency } from '@/lib/currency'
+import { EventName, track } from '@/lib/analytics'
 import type { DataFreshness, PriceItem, ProviderStatus } from '@/lib/api'
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647
@@ -85,6 +86,9 @@ export type DiscoveryCardContentProps = {
   from: string
   to: string
   date?: string
+  flightNo?: string
+  airline?: string
+  signals?: string[]
   basePrice: number | null
   totalPrice?: number | null
   tax: number | null
@@ -101,6 +105,7 @@ export type DiscoveryCardContentProps = {
   compact?: boolean
   onMonitorPrice?: () => void
   bookingUrl?: string | null
+  onSearch?: () => void
   placeholder?: boolean
 }
 
@@ -108,6 +113,9 @@ export function DiscoveryCardContent({
   from,
   to,
   date,
+  flightNo,
+  airline,
+  signals = [],
   basePrice,
   totalPrice,
   tax,
@@ -123,13 +131,18 @@ export function DiscoveryCardContent({
   compact,
   onMonitorPrice,
   bookingUrl,
+  onSearch,
   placeholder = false,
 }: DiscoveryCardContentProps) {
-  const computedTotal =
-    totalPrice ??
-    (basePrice !== null && tax !== null && baggageFee !== null
+  const componentTotal =
+    basePrice !== null && tax !== null && baggageFee !== null
       ? basePrice + tax + baggageFee
-      : null)
+      : null
+  const computedTotal = totalPrice ?? componentTotal
+  const feeBreakdownComplete =
+    componentTotal !== null &&
+    hasBaggage !== null &&
+    (totalPrice === null || totalPrice === undefined || totalPrice === componentTotal)
   const money = (value: number | null) => formatCurrency(value, currency)
   const statusText: Partial<Record<ProviderStatus, string>> = {
     loading: '正在获取数据',
@@ -186,6 +199,19 @@ export function DiscoveryCardContent({
     bookingUrl === selectedWinner.url
       ? bookingUrl
       : null
+  const trackPurchaseJump = () => {
+    if (!flightNo) return
+    void track(EventName.PurchaseJumped, {
+      flight_no: flightNo,
+      platform,
+      price: computedTotal,
+      signals,
+      airline,
+      origin: from,
+      destination: to,
+      depart_date: date,
+    }).catch(() => undefined)
+  }
   const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
   const sectionGap = compact ? 'mb-3.5' : 'mb-5'
 
@@ -251,7 +277,9 @@ export function DiscoveryCardContent({
         />
         <Equal className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <div className="col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0">
-          <span className="mb-1 text-[11px] font-bold text-brand-orange sm:text-xs">综合总价</span>
+          <span className="mb-1 text-[11px] font-bold text-brand-orange sm:text-xs">
+            {feeBreakdownComplete ? '综合总价' : '平台展示价'}
+          </span>
           <span className={`font-black leading-none text-brand-orange ${compact ? 'text-2xl' : 'text-3xl'}`}>{money(computedTotal)}</span>
         </div>
       </div>
@@ -283,8 +311,17 @@ export function DiscoveryCardContent({
           <p className={`text-sm leading-6 ${hasRealtimeWinner ? 'text-green-800' : 'text-brand-muted'}`}>
             {hasRealtimeWinner ? (
               <>
-                AI 监测：该价格为综合行李后的全网<span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
-                <span className="font-bold text-brand-orange">{platform}</span> 下单。
+                {feeBreakdownComplete ? (
+                  <>
+                    AI 监测：该价格含机建燃油与行李费用，是当前全网
+                    <span className="font-bold underline decoration-green-300 decoration-2 underline-offset-2">最优解</span>，建议在{' '}
+                    <span className="font-bold text-brand-orange">{platform}</span> 下单。
+                  </>
+                ) : (
+                  <>
+                    当前为 <span className="font-bold text-brand-orange">{platform}</span> 平台展示价，机建燃油与行李额待平台确认。
+                  </>
+                )}
               </>
             ) : (
               '价格、税费与行李规则以预订页为准。'
@@ -353,6 +390,16 @@ export function DiscoveryCardContent({
       </div>
 
       <div className="mt-auto flex flex-col gap-2 sm:flex-row">
+        {onSearch ? (
+          <button
+            type="button"
+            onClick={onSearch}
+            className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-orange px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-text"
+          >
+            <Plane className="h-4 w-4" />
+            在对话中查询
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onMonitorPrice}
@@ -364,6 +411,7 @@ export function DiscoveryCardContent({
         {safeBookingUrl ? (
           <a
             href={safeBookingUrl}
+            onClick={trackPurchaseJump}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-1 items-center justify-center gap-2 rounded-2xl bg-brand-text px-4 py-2 text-sm font-bold text-white shadow-card transition hover:bg-brand-orange"

@@ -116,6 +116,7 @@ def _has_stale_price(
 @dataclass(frozen=True, slots=True)
 class ResponseRow:
     flight_no: str
+    platform: str
     depart_time: str
     arrive_time: str
     display_price: int | None
@@ -161,6 +162,11 @@ def build_response_facts(
         response_rows.append(
             ResponseRow(
                 flight_no=str(deal.get("flight_no") or "待确认"),
+                platform=str(
+                    (winner or {}).get("name")
+                    or deal.get("platform")
+                    or "待确认"
+                ),
                 depart_time=str(deal.get("depart_time") or "待确认"),
                 arrive_time=str(deal.get("arrive_time") or "待确认"),
                 display_price=display_price,
@@ -210,14 +216,15 @@ def render_flight_markdown(facts: ResponseFacts) -> str:
     lines = [f"### 航班结果（{len(facts.rows)}）", ""]
     lines.extend(
         [
-            "| 航班 | 出发 | 到达 | 平台展示价 |",
-            "| --- | --- | --- | --- |",
+            "| 航班 | 平台 | 出发 | 到达 | 平台展示价 |",
+            "| --- | --- | --- | --- | --- |",
         ]
     )
     for row in facts.rows:
         lines.append(
-            "| {flight} | {depart} | {arrive} | {price} |".format(
+            "| {flight} | {platform} | {depart} | {arrive} | {price} |".format(
                 flight=_markdown_cell(row.flight_no),
+                platform=_markdown_cell(row.platform),
                 depart=_markdown_cell(row.depart_time),
                 arrive=_markdown_cell(row.arrive_time),
                 price=_format_price(row.display_price, row.currency),
@@ -234,7 +241,8 @@ def render_flight_markdown(facts: ResponseFacts) -> str:
         best = facts.best_deal
         lines.append(
             f"推荐优先查看 {_markdown_cell(best.flight_no)}，"
-            f"平台展示价 {_format_price(best.display_price, best.currency)}。"
+            f"在 {_markdown_cell(best.platform)} 的平台展示价为 "
+            f"{_format_price(best.display_price, best.currency)}。"
         )
 
     if facts.minimum_display_price is not None and facts.budget is not None:

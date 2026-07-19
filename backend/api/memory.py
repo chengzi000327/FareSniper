@@ -73,6 +73,10 @@ _VALUE_LABELS = {
 }
 
 
+def _has_meaningful_value(value: Any) -> bool:
+    return value is not None and value != "" and value != [] and value != {}
+
+
 def _display_value(field: str, value: Any) -> str:
     if value is None or value == [] or value == "":
         return "尚未学习"
@@ -114,9 +118,9 @@ async def get_memory(uid: str = Depends(current_user_id)) -> MemoryRsp:
     merged: dict[str, MemoryItemOut] = {}
     if preferences is not None:
         for field in _PREFERENCE_FIELDS:
-            merged[field] = _memory_item(
-                field, preferences.get(field), source="learned"
-            )
+            value = preferences.get(field)
+            if _has_meaningful_value(value):
+                merged[field] = _memory_item(field, value, source="learned")
     for row in rows:
         merged[row.field] = _memory_item(row.field, row.value, row.source)
 

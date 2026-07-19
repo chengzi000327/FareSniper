@@ -8,6 +8,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from backend.application.services.airport_catalog import AirportCatalog
+from backend.utils.airport_codes import code_to_city
 
 # 北京出发热门目的地（国内高频 OD 对）。
 # 从最初的 5 条扩到 14 条，给探索页瀑布流足够的卡片池做无限滚动。
@@ -40,7 +41,7 @@ CITY_NAMES = MappingProxyType(
 
 
 def route_city_name(code: str) -> str:
-    return _AIRPORT_CATALOG.code_to_city(code)
+    return code_to_city(code)
 
 # 路线运营标签（卡片上展示的氛围标签）
 ROUTE_TAGS: dict[tuple[str, str], list[str]] = {

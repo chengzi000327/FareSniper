@@ -12,6 +12,12 @@ type Tab = 'chat' | 'explore' | 'memory' | 'personal'
 
 export function MainLayout({ onBack }: { onBack: () => void }) {
   const [activeTab, setActiveTab] = React.useState<Tab>('chat')
+  const [chatQuery, setChatQuery] = React.useState<string | null>(null)
+
+  const openChatSearch = (query: string) => {
+    setChatQuery(query)
+    setActiveTab('chat')
+  }
 
   return (
     <div className="flex min-h-screen flex-col bg-brand-bg lg:h-screen lg:flex-row lg:overflow-hidden">
@@ -34,8 +40,13 @@ export function MainLayout({ onBack }: { onBack: () => void }) {
       </aside>
 
       <main className="min-h-[calc(100vh-76px)] flex-1 lg:min-h-0 lg:overflow-hidden">
-        {activeTab === 'chat' && <ChatPage />}
-        {activeTab === 'explore' && <ExplorePage />}
+        {activeTab === 'chat' && (
+          <ChatPage
+            initialQuery={chatQuery}
+            onInitialQueryConsumed={() => setChatQuery(null)}
+          />
+        )}
+        {activeTab === 'explore' && <ExplorePage onSearch={openChatSearch} />}
         {activeTab === 'memory' && <MemoryPage />}
         {activeTab === 'personal' && <PersonalPage />}
       </main>
