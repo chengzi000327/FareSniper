@@ -119,7 +119,7 @@ COLLECTOR_ENV_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/faresniper/collector.env"
 
 ## Clash Verge
 
-携程 Chrome 只为 `ctrip.com`、`*.ctrip.com`、`ctrip.com.cn` 和 `*.ctrip.com.cn` 配置 Chrome proxy bypass，其他页面子资源继续遵循系统代理。collector 到 Railway backend 的 HTTP 请求仍可使用进程环境中的代理设置；localhost 已自动加入 `NO_PROXY`。
+携程 Chrome 只为 `ctrip.com`、`*.ctrip.com`、`ctrip.com.cn` 和 `*.ctrip.com.cn` 配置 Chrome proxy bypass，其他页面子资源继续遵循系统代理。collector 到 Railway backend 的 HTTP 请求不读取 `HTTP_PROXY`/`HTTPS_PROXY`，并使用 macOS 系统信任库校验证书，避免 Clash 环境代理的证书链影响报价上传；localhost 已自动加入 `NO_PROXY`。
 
 如果 Clash 的 TUN/增强模式仍接管所有流量，请在 Clash Verge 规则中把 `flights.ctrip.com` 和相关携程域名设为 `DIRECT`。切换外网节点不会复制或上传 profile，但出口地区频繁变化可能触发携程重新验证。
 

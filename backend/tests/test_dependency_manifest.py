@@ -30,6 +30,7 @@ def test_selenium_is_isolated_to_the_mac_collector_manifest():
 
     assert not any(line.casefold().startswith("selenium") for line in runtime)
     assert collector.count("selenium>=4.22,<5.0") == 1
+    assert collector.count("truststore>=0.10,<1.0") == 1
     assert collector[0] == "-r requirements.txt"
 
 

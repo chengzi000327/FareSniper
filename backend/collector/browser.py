@@ -186,6 +186,31 @@ def detect_page_error(driver: object) -> CollectorErrorCode | None:
     return None
 
 
+def _is_inventory_payload(payload: Mapping[str, Any]) -> bool:
+    data = payload.get("data")
+    return isinstance(data, Mapping) and isinstance(
+        data.get("flightItineraryList"), list
+    )
+
+
+def _requests_auth_challenge(payload: Mapping[str, Any]) -> bool:
+    data = payload.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    context = data.get("context")
+    return isinstance(context, Mapping) and context.get("showAuthCode") is True
+
+
+def _is_preflight_payload(payload: Mapping[str, Any]) -> bool:
+    data = payload.get("data")
+    return (
+        payload.get("status") == 0
+        and payload.get("msg") == "success"
+        and isinstance(data, Mapping)
+        and isinstance(data.get("context"), Mapping)
+    )
+
+
 class CtripBrowser:
     def __init__(
         self,
@@ -287,6 +312,7 @@ class CtripBrowser:
             driver = self._driver_for(headless=self._capture_headless)
             getattr(driver, "get")(build_search_url(job))
             deadline = time.monotonic() + self.timeout_seconds
+            saw_auth_challenge = False
             while time.monotonic() < deadline:
                 page_error = detect_page_error(driver)
                 if page_error is not None:
@@ -297,12 +323,28 @@ class CtripBrowser:
                 )
                 if ready:
                     payloads = self._extract_payloads(driver)
-                    if not payloads:
+                    inventory_payloads = [
+                        payload
+                        for payload in payloads
+                        if _is_inventory_payload(payload)
+                    ]
+                    if inventory_payloads:
+                        return CaptureResult(payloads=inventory_payloads)
+                    if payloads and not all(
+                        _is_preflight_payload(payload) for payload in payloads
+                    ):
                         return self._capture_failure(
                             CollectorErrorCode.parse_error
                         )
-                    return CaptureResult(payloads=payloads)
+                    saw_auth_challenge = saw_auth_challenge or any(
+                        _requests_auth_challenge(payload)
+                        for payload in payloads
+                    )
                 time.sleep(0.25)
+            if saw_auth_challenge:
+                return self._capture_failure(
+                    CollectorErrorCode.captcha_required
+                )
             return self._capture_failure(
                 detect_page_error(driver) or CollectorErrorCode.timeout
             )

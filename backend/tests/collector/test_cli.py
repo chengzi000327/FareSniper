@@ -1221,6 +1221,7 @@ def test_collector_requirements_are_isolated_from_railway_runtime():
     assert "selenium" not in runtime.casefold()
     assert "-r requirements.txt" in collector
     assert "selenium>=4.22,<5.0" in collector
+    assert "truststore>=0.10,<1.0" in collector
 
 
 @pytest.mark.asyncio

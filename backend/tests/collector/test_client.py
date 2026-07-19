@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from datetime import datetime, timezone
 
 import httpx
@@ -49,6 +50,25 @@ async def test_client_uses_bearer_token_and_claims_one_job():
     assert requests[0].url.path == "/internal/collector/claim"
     assert requests[0].headers["Authorization"] == "Bearer collector-secret"
     assert json.loads(requests[0].content) == {"node_id": "mac-1"}
+
+
+def test_client_uses_system_tls_trust_without_environment_proxy(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
+
+    CollectorApiClient(
+        base_url="https://backend.example.test",
+        token="collector-secret",
+        node_id="mac-1",
+    )
+
+    assert captured["trust_env"] is False
+    assert isinstance(captured["verify"], ssl.SSLContext)
 
 
 @pytest.mark.asyncio

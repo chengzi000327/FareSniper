@@ -240,6 +240,80 @@ async def test_capture_uses_configured_headed_browser_mode(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_capture_ignores_preflight_auth_context_until_inventory_arrives(
+    tmp_path,
+):
+    responses = [
+        {
+            "data": {
+                "context": {
+                    "finished": True,
+                    "flag": 2,
+                    "showAuthCode": True,
+                }
+            },
+            "msg": "success",
+            "status": 0,
+        },
+        {
+            "data": {
+                "context": {"finished": True, "flag": 0},
+                "flightItineraryList": [],
+            },
+            "msg": "success",
+            "status": 0,
+        },
+    ]
+
+    class Driver:
+        current_url = "https://flights.ctrip.com/online/list"
+        title = "机票"
+        page_source = ""
+
+        def execute_cdp_cmd(self, *_args):
+            pass
+
+        def get(self, url):
+            self.current_url = url
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text="航班列表")
+
+        def execute_script(self, script):
+            if script.startswith("return !!"):
+                return True
+            payload = responses.pop(0)
+            return json.dumps([json.dumps(payload)])
+
+        def quit(self):
+            pass
+
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        timeout_seconds=1,
+        headless=False,
+        driver_factory=lambda **_kwargs: Driver(),
+        options_factory=_options_factory,
+    )
+    try:
+        result = await browser.capture(_job())
+    finally:
+        await browser.close()
+
+    assert result.error_code is None
+    assert result.payloads == [
+        {
+            "data": {
+                "context": {"finished": True, "flag": 0},
+                "flightItineraryList": [],
+            },
+            "msg": "success",
+            "status": 0,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_generic_logged_out_homepage_is_not_authenticated(tmp_path):
     class Driver:
         current_url = "https://www.ctrip.com/"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import ssl
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 
@@ -12,6 +13,14 @@ from backend.schemas.collector import ClaimResponse, CollectorJobResponse
 
 
 _TOKEN68_PATTERN = re.compile(r"[A-Za-z0-9\-._~+/]+=*\Z")
+
+
+def _system_trust_context() -> ssl.SSLContext:
+    try:
+        import truststore
+    except ImportError:
+        return ssl.create_default_context()
+    return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
 
 class CollectorApiClient:
@@ -53,6 +62,8 @@ class CollectorApiClient:
             headers={"Authorization": f"Bearer {token}"},
             timeout=timeout_seconds,
             transport=transport,
+            trust_env=False,
+            verify=_system_trust_context(),
         )
 
     async def heartbeat(self, status: str = "idle") -> None:
