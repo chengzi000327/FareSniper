@@ -3,6 +3,7 @@
 import React from 'react'
 import Image from 'next/image'
 import { AnimatePresence, motion } from 'motion/react'
+import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import {
   ArrowLeft,
   ArrowRight,
@@ -192,26 +193,26 @@ export function OpenMicDeck() {
   const slide = SLIDES[index]
 
   return (
-    <div className="fixed inset-0 z-50 flex min-h-[100dvh] flex-col overflow-hidden bg-[#F6F7F4] text-[#182228]">
-      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-[#182228]/10 bg-white/95 px-4 sm:px-7">
+    <div className="fixed inset-0 z-50 flex min-h-[100dvh] flex-col overflow-hidden bg-brand-bg text-brand-text selection:bg-brand-orange selection:text-white">
+      <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 border-b border-brand-text/10 bg-brand-bg/95 px-4 backdrop-blur sm:px-7">
         <button
           type="button"
           aria-label="返回 FareSniper"
           title="返回 FareSniper"
           onClick={() => window.open(PRODUCT_URL, '_blank', 'noopener,noreferrer')}
-          className="flex h-9 w-9 items-center justify-center rounded-md bg-[#FF8A3D] text-white"
+          className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-orange text-white shadow-sm"
         >
           <Plane className="h-5 w-5" />
         </button>
         <div className="min-w-0">
           <div className="truncate text-sm font-black">FareSniper</div>
-          <div className="truncate text-[11px] text-[#65727A]">产品开放麦 · 陈永琪</div>
+          <div className="truncate text-[11px] text-brand-muted">产品开放麦 · 陈永琪</div>
         </div>
         <div className="ml-auto hidden min-w-32 items-center gap-3 sm:flex">
-          <span className="text-xs font-semibold text-[#65727A]">{slide.duration}</span>
-          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-[#DDE3DF]">
+          <span className="text-xs font-semibold text-brand-muted">{slide.duration}</span>
+          <div className="h-1.5 w-28 overflow-hidden rounded-full bg-brand-orange-light">
             <motion.div
-              className="h-full rounded-full bg-[#FF8A3D]"
+              className="h-full rounded-full bg-brand-orange"
               animate={{ width: `${((index + 1) / SLIDES.length) * 100}%` }}
             />
           </div>
@@ -247,7 +248,7 @@ export function OpenMicDeck() {
         </AnimatePresence>
       </main>
 
-      <footer className="relative z-30 flex h-16 shrink-0 items-center border-t border-[#182228]/10 bg-white px-4 sm:px-7">
+      <footer className="relative z-30 flex h-16 shrink-0 items-center border-t border-brand-text/10 bg-brand-bg/95 px-4 backdrop-blur sm:px-7">
         <div className="flex items-center gap-2">
           <IconButton label="上一页" onClick={() => goTo(index - 1)} disabled={index === 0}>
             <ArrowLeft className="h-4 w-4" />
@@ -266,12 +267,12 @@ export function OpenMicDeck() {
               title={item.label}
               onClick={() => goTo(slideIndex)}
               className={`h-2 rounded-full transition-all ${
-                slideIndex === index ? 'w-7 bg-[#FF8A3D]' : 'w-2 bg-[#B9C3BE] hover:bg-[#65727A]'
+                slideIndex === index ? 'w-7 bg-brand-orange' : 'w-2 bg-brand-text/20 hover:bg-brand-muted'
               }`}
             />
           ))}
         </nav>
-        <div className="w-[76px] text-right text-xs font-bold tabular-nums text-[#65727A]">
+        <div className="w-[76px] text-right text-xs font-bold tabular-nums text-brand-muted">
           {String(index + 1).padStart(2, '0')} / {String(SLIDES.length).padStart(2, '0')}
         </div>
       </footer>
@@ -284,11 +285,11 @@ export function OpenMicDeck() {
             exit={{ y: '100%' }}
             transition={{ duration: 0.24, ease: 'easeOut' }}
             aria-label="当前页讲稿"
-            className="absolute inset-x-0 bottom-16 z-40 max-h-[48dvh] overflow-y-auto border-t border-[#182228]/15 bg-[#182228] px-5 py-5 text-white shadow-2xl sm:px-10"
+            className="absolute inset-x-0 bottom-16 z-40 max-h-[52dvh] overflow-y-auto border-t border-brand-text/15 bg-brand-text px-5 py-5 text-white shadow-2xl sm:px-10"
           >
             <div className="mx-auto flex max-w-5xl items-start gap-5">
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-[#FFB17D]">{slide.label} · {slide.duration}</div>
+                <div className="text-xs font-bold text-brand-orange-light">{slide.label} · {slide.duration}</div>
                 <div className="mt-3 space-y-2">
                   {slide.notes.map((note) => (
                     <p key={note} className="text-sm leading-7 text-white/85 sm:text-base">{note}</p>
@@ -328,12 +329,12 @@ function IconButton({
       title={label}
       onClick={onClick}
       disabled={disabled}
-      className={`flex h-9 w-9 items-center justify-center rounded-md border transition disabled:cursor-not-allowed disabled:opacity-30 ${
+      className={`flex h-9 w-9 items-center justify-center rounded-2xl border transition disabled:cursor-not-allowed disabled:opacity-30 ${
         inverted
           ? 'border-white/20 text-white hover:bg-white/10'
           : active
-            ? 'border-[#FF8A3D] bg-[#FFF0E6] text-[#D75D0C]'
-            : 'border-[#182228]/10 bg-white text-[#182228] hover:border-[#FF8A3D] hover:text-[#D75D0C]'
+            ? 'border-brand-orange bg-brand-orange-light text-brand-orange'
+            : 'border-brand-text/10 bg-white text-brand-text hover:border-brand-orange hover:text-brand-orange'
       }`}
     >
       {children}
@@ -371,17 +372,17 @@ function OpeningSlide() {
         <FarePreview compact />
       </div>
       <div className="relative z-10 max-w-3xl py-10">
-        <div className="mb-6 inline-flex items-center gap-2 border-l-4 border-[#FF8A3D] pl-3 text-sm font-bold text-[#D75D0C]">
+        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-brand-orange/20 bg-orange-50 px-4 py-2 text-sm font-bold text-brand-orange">
           <Radar className="h-4 w-4" />
           产品开放麦 · 15 MIN
         </div>
-        <h1 className="font-serif text-6xl font-black leading-[0.95] text-[#182228] sm:text-7xl lg:text-8xl">
+        <h1 className="font-serif text-6xl font-black leading-[0.95] text-brand-text sm:text-7xl lg:text-8xl">
           FareSniper
         </h1>
-        <p className="mt-7 max-w-2xl text-2xl font-bold leading-tight text-[#24343B] sm:text-3xl">
+        <p className="mt-7 max-w-2xl text-2xl font-bold leading-tight text-brand-text sm:text-3xl">
           会记住你如何定义“特价”的<br className="hidden sm:block" />机票决策 Agent
         </p>
-        <p className="mt-7 max-w-xl text-base leading-8 text-[#65727A] sm:text-lg">
+        <p className="mt-7 max-w-lg text-base leading-8 text-brand-muted sm:text-lg">
           不是替所有人寻找同一个最低数字，而是在用户约束下，用多平台完整成本找到相对最优解。
         </p>
         <div className="mt-10 flex flex-wrap gap-3 text-sm font-semibold">
@@ -419,42 +420,42 @@ function ProfileSlide() {
   return (
     <div className="mx-auto grid min-h-full max-w-7xl items-center gap-8 lg:grid-cols-[0.68fr_1.32fr] lg:gap-12">
       <div className="relative mx-auto w-full max-w-sm lg:max-w-[17rem] 2xl:max-w-sm">
-        <div className="absolute -bottom-4 -left-4 h-full w-full rounded-md bg-[#FF8A3D]" />
+        <div className="absolute -bottom-4 -left-4 h-full w-full rounded-[28px] bg-brand-orange" />
         <Image
           src="/open-mic/chen-yongqi.png"
           alt="陈永琪"
           width={617}
           height={617}
           priority
-          className="relative aspect-square w-full rounded-md border border-[#182228]/10 bg-white object-cover object-top"
+          className="relative aspect-square w-full rounded-[28px] border border-brand-text/10 bg-white object-cover object-top shadow-card"
         />
-        <div className="relative mt-4 border-l-4 border-[#2C8C76] pl-4">
+        <div className="relative mt-4 border-l-4 border-brand-orange pl-4">
           <h2 className="text-3xl font-black">陈永琪</h2>
-          <p className="mt-2 text-base font-semibold text-[#65727A]">AI 产品经理 · Agent 产品实践者</p>
+          <p className="mt-2 text-base font-semibold text-brand-muted">AI 产品经理 · Agent 产品实践者</p>
         </div>
       </div>
 
       <div className="min-w-0 lg:py-0">
         <SlideHeading eyebrow="01 · ABOUT ME" title="把复杂 AI 系统，变成可验证的产品" />
-        <div className="mt-4 flex items-start gap-3 border-y border-[#182228]/10 py-2 text-sm leading-7 text-[#44545B] sm:text-base">
-          <GraduationCap className="mt-1 h-5 w-5 shrink-0 text-[#D75D0C]" />
-          <span><strong className="text-[#182228]">中国科学院大学</strong> · 信息系统工程管理硕士在读</span>
+        <div className="mt-4 flex items-start gap-3 border-y border-brand-text/10 py-2 text-sm leading-7 text-brand-muted sm:text-base">
+          <GraduationCap className="mt-1 h-5 w-5 shrink-0 text-brand-orange" />
+          <span><strong className="text-brand-text">中国科学院大学</strong> · 信息系统工程管理硕士在读</span>
         </div>
-        <div className="mt-3 divide-y divide-[#182228]/10">
+        <div className="mt-3 divide-y divide-brand-text/10">
           {experiences.map((experience) => (
             <div key={experience.company} className="grid gap-3 py-3 sm:grid-cols-[2.2rem_11rem_minmax(0,1fr)] sm:items-start">
-              <div className="flex h-9 w-9 items-center justify-center rounded-md bg-[#E8F4EF] text-[#2C8C76]">
+              <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-orange/10 text-brand-orange">
                 {experience.icon}
               </div>
               <div>
                 <div className="font-black">{experience.company}</div>
-                <div className="mt-1 text-sm text-[#65727A]">{experience.role}</div>
+                <div className="mt-1 text-sm text-brand-muted">{experience.role}</div>
               </div>
-              <p className="text-sm leading-6 text-[#44545B]">{experience.detail}</p>
+              <p className="text-sm leading-6 text-brand-muted">{experience.detail}</p>
             </div>
           ))}
         </div>
-        <p className="mt-4 max-w-3xl text-base font-bold leading-7 text-[#24343B]">
+        <p className="mt-4 max-w-3xl text-base font-bold leading-7 text-brand-text">
           FareSniper 是三段经历的交汇点：Agent 架构、评测闭环，以及复杂平台的工程落地。
         </p>
       </div>
@@ -469,45 +470,45 @@ function DealDefinitionSlide() {
       quote: '我只能周五晚上走',
       answer: '合适时段 > 最低裸价',
       icon: <Clock3 className="h-7 w-7" />,
-      color: 'bg-[#E8F1F5] text-[#31677C]',
+      color: 'bg-brand-orange/10 text-brand-orange',
     },
     {
       title: '价格优先',
       quote: '日期可以改，只要够便宜',
       answer: '可调整日期换取低价',
       icon: <Coins className="h-7 w-7" />,
-      color: 'bg-[#FFF0E6] text-[#D75D0C]',
+      color: 'bg-brand-orange-light text-brand-orange',
     },
     {
       title: '完整成本优先',
       quote: '我要带一个 20kg 行李箱',
       answer: '裸票价 ≠ 最终成本',
       icon: <Luggage className="h-7 w-7" />,
-      color: 'bg-[#E8F4EF] text-[#2C8C76]',
+      color: 'bg-green-50 text-green-600',
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <SlideHeading eyebrow="02 · INSIGHT" title="特价，从来不是统一的最低数字" />
-      <p className="mt-4 max-w-3xl text-lg leading-8 text-[#65727A]">
+      <p className="mt-4 max-w-5xl text-base leading-7 text-brand-muted sm:text-lg">
         同一张机票，对不同的人可能有完全不同的价值。产品真正要求解的是用户约束下的相对最优解。
       </p>
-      <div className="mt-9 grid gap-4 lg:grid-cols-3">
+      <div className="mt-6 grid gap-4 lg:grid-cols-3">
         {personas.map((persona, order) => (
-          <article key={persona.title} className="rounded-md border border-[#182228]/10 bg-white p-6 shadow-[0_18px_45px_-34px_rgba(24,34,40,0.42)]">
-            <div className={`flex h-12 w-12 items-center justify-center rounded-md ${persona.color}`}>{persona.icon}</div>
-            <div className="mt-8 text-xs font-black text-[#65727A]">0{order + 1}</div>
-            <h3 className="mt-2 text-2xl font-black">{persona.title}</h3>
-            <p className="mt-4 min-h-16 border-l-2 border-[#182228]/15 pl-4 text-base leading-7 text-[#44545B]">“{persona.quote}”</p>
-            <div className="mt-5 flex items-center gap-2 text-sm font-bold text-[#D75D0C]">
+          <article key={persona.title} className="rounded-[28px] border border-brand-text/5 bg-white p-5 shadow-card">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-2xl [&>svg]:h-6 [&>svg]:w-6 ${persona.color}`}>{persona.icon}</div>
+            <div className="mt-5 text-xs font-black text-brand-muted">0{order + 1}</div>
+            <h3 className="mt-2 text-xl font-black">{persona.title}</h3>
+            <p className="mt-3 min-h-12 border-l-2 border-brand-orange/30 pl-4 text-base leading-6 text-brand-muted">“{persona.quote}”</p>
+            <div className="mt-3 flex items-center gap-2 text-sm font-bold text-brand-orange">
               <ArrowRight className="h-4 w-4" />
               {persona.answer}
             </div>
           </article>
         ))}
       </div>
-      <div className="mt-8 flex flex-wrap items-center gap-3 border-y border-[#182228]/10 py-5 text-base font-bold sm:text-lg">
-        <span className="text-[#D75D0C]">个人特价</span>
+      <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[24px] border border-brand-orange/10 bg-brand-orange/5 px-6 py-4 text-base font-bold sm:text-lg">
+        <span className="text-brand-orange">个人特价</span>
         <span>=</span>
         <span>满足出行约束</span>
         <span>+</span>
@@ -529,7 +530,7 @@ function TrustSlide() {
     <div className="mx-auto grid min-h-full max-w-7xl items-center gap-10 lg:grid-cols-[0.88fr_1.12fr] lg:gap-14">
       <div>
         <SlideHeading eyebrow="03 · TRUST GAP" title="用户不缺推荐，缺的是验证推荐的证据" />
-        <p className="mt-6 text-lg leading-9 text-[#65727A]">
+        <p className="mt-6 text-lg leading-9 text-brand-muted">
           黑箱推荐让用户难以判断：这是最适合我的结果，还是平台最希望我购买的结果？
         </p>
         <div className="mt-8 space-y-4">
@@ -538,24 +539,24 @@ function TrustSlide() {
           <TrustPoint icon={<ShieldCheck />} text="缺失字段保持未知，不伪造免费" />
         </div>
       </div>
-      <div className="min-w-0 overflow-hidden rounded-md border border-[#182228]/10 bg-white shadow-[0_20px_60px_-38px_rgba(24,34,40,0.5)]">
-        <div className="flex items-center justify-between border-b border-[#182228]/10 px-5 py-4">
+      <div className="min-w-0 overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card">
+        <div className="flex items-center justify-between border-b border-brand-text/10 px-5 py-4">
           <div>
             <div className="text-sm font-black">同一航班 · 不同答案</div>
-            <div className="mt-1 text-xs text-[#65727A]">裸价并不等于完整成本</div>
+            <div className="mt-1 text-xs text-brand-muted">裸价并不等于完整成本</div>
           </div>
-          <SearchCheck className="h-5 w-5 text-[#2C8C76]" />
+          <SearchCheck className="h-5 w-5 text-green-600" />
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
-            <thead className="bg-[#EEF2EF] text-[#65727A]">
+            <thead className="bg-brand-orange/5 text-brand-muted">
               <tr>{['来源', '票价', '机建燃油', '行李', '可比较总价'].map((title) => <th key={title} className="px-5 py-3 font-bold">{title}</th>)}</tr>
             </thead>
-            <tbody className="divide-y divide-[#182228]/8">
+            <tbody className="divide-y divide-brand-text/5">
               {rows.map((row, rowIndex) => (
-                <tr key={row[0]} className={rowIndex === 1 ? 'bg-[#E8F4EF]' : ''}>
+                <tr key={row[0]} className={rowIndex === 1 ? 'bg-green-50/70' : ''}>
                   {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className={`px-5 py-4 ${cellIndex === 4 ? 'font-black text-[#D75D0C]' : ''}`}>{cell}</td>
+                    <td key={cellIndex} className={`px-5 py-4 ${cellIndex === 4 ? 'font-black text-brand-orange' : ''}`}>{cell}</td>
                   ))}
                 </tr>
               ))}
@@ -577,22 +578,22 @@ function ProductSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <SlideHeading eyebrow="04 · PRODUCT" title="从一次搜索，走向持续决策" />
-      <p className="mt-4 max-w-4xl text-lg leading-8 text-[#65727A]">
+      <p className="mt-4 max-w-4xl text-lg leading-8 text-brand-muted">
         FareSniper 的核心不是增加一个聊天入口，而是把用户标准、多平台事实和可解释记忆放进同一个决策闭环。
       </p>
-      <div className="mt-10 grid gap-4 lg:grid-cols-4">
+      <div className="mt-8 grid gap-4 lg:grid-cols-4">
         {steps.map((step, index) => (
           <React.Fragment key={step.label}>
-            <div className="relative rounded-md border border-[#182228]/10 bg-white p-6">
-              <div className="flex h-11 w-11 items-center justify-center rounded-md bg-[#182228] text-white [&>svg]:h-5 [&>svg]:w-5">{step.icon}</div>
-              <div className="mt-8 text-xs font-black text-[#FF8A3D]">STEP 0{index + 1}</div>
+            <div className="relative rounded-[28px] border border-brand-text/5 bg-white p-6 shadow-card">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{step.icon}</div>
+              <div className="mt-8 text-xs font-black text-brand-orange">STEP 0{index + 1}</div>
               <h3 className="mt-2 text-2xl font-black">{step.label}</h3>
-              <p className="mt-3 text-sm leading-7 text-[#65727A]">{step.detail}</p>
+              <p className="mt-3 text-sm leading-7 text-brand-muted">{step.detail}</p>
             </div>
           </React.Fragment>
         ))}
       </div>
-      <div className="mt-8 grid gap-4 border-t border-[#182228]/10 pt-7 md:grid-cols-3">
+      <div className="mt-8 grid gap-4 border-t border-brand-text/10 pt-7 md:grid-cols-3">
         <Metric value="< 5 min" label="目标决策时间" />
         <Metric value="同源" label="AI 回答与价格卡片" />
         <Metric value="可解释" label="推荐依据与记忆来源" />
@@ -606,13 +607,13 @@ function DemoSlide() {
     <div className="mx-auto grid min-h-full max-w-7xl items-center gap-9 lg:grid-cols-[0.72fr_1.28fr] lg:gap-12">
       <div>
         <SlideHeading eyebrow="05 · LIVE DEMO" title="一句自然语言，完成一次可验证决策" />
-        <div className="mt-7 rounded-md bg-[#182228] p-5 text-lg font-semibold leading-8 text-white">
+        <div className="mt-7 rounded-[24px] bg-brand-text p-5 text-lg font-semibold leading-8 text-white shadow-card">
           “下周五从北京到长治”
         </div>
         <div className="mt-6 space-y-3">
           {['相对日期转换为具体日期', '城市映射到机场查询范围', '多来源结果统一成完整成本', '结果写入记忆并支持持续盯价'].map((item) => (
-            <div key={item} className="flex items-center gap-3 text-sm font-semibold text-[#44545B] sm:text-base">
-              <Check className="h-4 w-4 shrink-0 text-[#2C8C76]" />
+            <div key={item} className="flex items-center gap-3 text-sm font-semibold text-brand-muted sm:text-base">
+              <Check className="h-4 w-4 shrink-0 text-green-600" />
               {item}
             </div>
           ))}
@@ -621,13 +622,13 @@ function DemoSlide() {
           href={PRODUCT_URL}
           target="_blank"
           rel="noreferrer"
-          className="mt-8 inline-flex h-11 items-center gap-2 rounded-md bg-[#FF8A3D] px-5 text-sm font-black text-white transition hover:bg-[#D75D0C]"
+          className="mt-8 inline-flex h-11 items-center gap-2 rounded-2xl bg-brand-orange px-5 text-sm font-black text-white shadow-card transition hover:bg-brand-text"
         >
           打开现场产品
           <ExternalLink className="h-4 w-4" />
         </a>
       </div>
-      <FarePreview />
+      <FarePreview compact />
     </div>
   )
 }
@@ -646,12 +647,12 @@ function ArchitectureSlide() {
       <div className="mt-9 grid items-stretch gap-3 lg:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr_auto_1fr]">
         {nodes.map((node, index) => (
           <React.Fragment key={node.label}>
-            <div className={`rounded-md border p-5 ${index === 1 ? 'border-[#FF8A3D] bg-[#FFF0E6]' : index === 4 ? 'border-[#2C8C76] bg-[#E8F4EF]' : 'border-[#182228]/10 bg-white'}`}>
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-[#182228] text-white [&>svg]:h-5 [&>svg]:w-5">{node.icon}</div>
+            <div className={`rounded-[24px] border p-5 shadow-sm ${index === 1 ? 'border-brand-orange/30 bg-brand-orange-light' : index === 4 ? 'border-green-200 bg-green-50' : 'border-brand-text/5 bg-white'}`}>
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{node.icon}</div>
               <h3 className="mt-5 text-lg font-black">{node.label}</h3>
-              <p className="mt-2 text-sm leading-6 text-[#65727A]">{node.detail}</p>
+              <p className="mt-2 text-sm leading-6 text-brand-muted">{node.detail}</p>
             </div>
-            {index < nodes.length - 1 ? <ArrowRight className="mx-auto hidden h-5 w-5 self-center text-[#98A49F] lg:block" /> : null}
+            {index < nodes.length - 1 ? <ArrowRight className="mx-auto hidden h-5 w-5 self-center text-brand-muted/60 lg:block" /> : null}
           </React.Fragment>
         ))}
       </div>
@@ -675,16 +676,16 @@ function DecisionsSlide() {
     <div className="mx-auto grid min-h-full max-w-7xl items-center gap-10 lg:grid-cols-[0.72fr_1.28fr] lg:gap-16">
       <div>
         <SlideHeading eyebrow="07 · DESIGN DECISIONS" title="每个架构选择，都来自一个产品约束" />
-        <div className="mt-8 border-l-4 border-[#2C8C76] pl-5 text-xl font-bold leading-9 text-[#24343B]">
+        <div className="mt-8 rounded-r-[24px] border-l-4 border-brand-orange bg-brand-orange/5 py-4 pl-5 text-xl font-bold leading-9 text-brand-text">
           可信不是一句产品文案，<br />而是一组可以被验证的系统设计。
         </div>
       </div>
-      <div className="divide-y divide-[#182228]/10 border-y border-[#182228]/10">
+      <div className="divide-y divide-brand-text/10 overflow-hidden rounded-[28px] border border-brand-text/5 bg-white px-6 shadow-card">
         {decisions.map(([question, answer], index) => (
           <div key={question} className="grid gap-2 py-5 sm:grid-cols-[2.5rem_14rem_minmax(0,1fr)] sm:items-start">
-            <div className="text-sm font-black text-[#FF8A3D]">0{index + 1}</div>
+            <div className="text-sm font-black text-brand-orange">0{index + 1}</div>
             <h3 className="font-black">{question}</h3>
-            <p className="text-sm leading-7 text-[#65727A] sm:text-base">{answer}</p>
+            <p className="text-sm leading-7 text-brand-muted sm:text-base">{answer}</p>
           </div>
         ))}
       </div>
@@ -696,11 +697,11 @@ function ClosingSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="max-w-5xl">
-        <div className="text-sm font-black text-[#D75D0C]">08 · WHAT NEXT</div>
+        <div className="text-sm font-black text-brand-orange">08 · WHAT NEXT</div>
         <h2 className="mt-4 font-serif text-5xl font-black leading-tight sm:text-6xl">
           不做另一个卖票平台，<br />做一个代表用户决策的 Agent。
         </h2>
-        <p className="mt-4 max-w-3xl text-lg leading-8 text-[#65727A]">
+        <p className="mt-4 max-w-3xl text-lg leading-8 text-brand-muted">
           它记住用户真正关心的东西，用多平台证据验证价格，并在合适的时间给出可解释的购买建议。
         </p>
       </div>
@@ -709,12 +710,12 @@ function ClosingSlide() {
         <ClosingItem icon={<Radar />} title="持续价格监控" detail="从一次搜索走向主动发现机会" />
         <ClosingItem icon={<Sparkles />} title="记忆驱动排序" detail="让每一次使用都更接近个人标准" />
       </div>
-      <div className="mt-6 flex flex-col gap-4 border-t border-[#182228]/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-6 flex flex-col gap-4 border-t border-brand-text/10 pt-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="text-2xl font-black">FareSniper</div>
-          <div className="mt-1 text-sm text-[#65727A]">懂你的标准，才叫真特价。</div>
+          <div className="mt-1 text-sm text-brand-muted">懂你的标准，才叫真特价。</div>
         </div>
-        <a href={PRODUCT_URL} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center gap-2 self-start rounded-md bg-[#182228] px-5 text-sm font-black text-white hover:bg-[#D75D0C] sm:self-auto">
+        <a href={PRODUCT_URL} target="_blank" rel="noreferrer" className="inline-flex h-11 items-center gap-2 self-start rounded-2xl bg-brand-text px-5 text-sm font-black text-white shadow-card hover:bg-brand-orange sm:self-auto">
           体验产品
           <ExternalLink className="h-4 w-4" />
         </a>
@@ -726,7 +727,7 @@ function ClosingSlide() {
 function SlideHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
   return (
     <div>
-      <div className="text-xs font-black text-[#D75D0C] sm:text-sm">{eyebrow}</div>
+      <div className="text-xs font-black text-brand-orange sm:text-sm">{eyebrow}</div>
       <h2 className="mt-3 max-w-5xl font-serif text-4xl font-black leading-tight sm:text-5xl">{title}</h2>
     </div>
   )
@@ -734,7 +735,7 @@ function SlideHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
 
 function Tag({ icon, label }: { icon: React.ReactElement; label: string }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-md border border-[#182228]/10 bg-white px-3 py-2 text-[#44545B] [&>svg]:h-4 [&>svg]:w-4 [&>svg]:text-[#D75D0C]">
+    <span className="inline-flex items-center gap-2 rounded-2xl border border-brand-text/5 bg-white px-3 py-2 text-brand-muted shadow-sm [&>svg]:h-4 [&>svg]:w-4 [&>svg]:text-brand-orange">
       {icon}{label}
     </span>
   )
@@ -742,7 +743,7 @@ function Tag({ icon, label }: { icon: React.ReactElement; label: string }) {
 
 function TrustPoint({ icon, text }: { icon: React.ReactElement; text: string }) {
   return (
-    <div className="flex items-center gap-3 border-b border-[#182228]/10 pb-4 text-base font-semibold text-[#44545B] [&>svg]:h-5 [&>svg]:w-5 [&>svg]:text-[#2C8C76]">
+    <div className="flex items-center gap-3 rounded-2xl border border-brand-text/5 bg-white px-4 py-3 text-base font-semibold text-brand-muted shadow-sm [&>svg]:h-5 [&>svg]:w-5 [&>svg]:text-green-600">
       {icon}{text}
     </div>
   )
@@ -751,19 +752,19 @@ function TrustPoint({ icon, text }: { icon: React.ReactElement; text: string }) 
 function Metric({ value, label }: { value: string; label: string }) {
   return (
     <div>
-      <div className="text-3xl font-black text-[#D75D0C]">{value}</div>
-      <div className="mt-2 text-sm font-semibold text-[#65727A]">{label}</div>
+      <div className="text-3xl font-black text-brand-orange">{value}</div>
+      <div className="mt-2 text-sm font-semibold text-brand-muted">{label}</div>
     </div>
   )
 }
 
 function ArchitectureBand({ icon, title, detail }: { icon: React.ReactElement; title: string; detail: string }) {
   return (
-    <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 border-t-2 border-[#182228] pt-4">
-      <div className="flex h-9 w-9 items-center justify-center rounded-md bg-[#E8F4EF] text-[#2C8C76] [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
+    <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 rounded-[24px] border border-brand-text/5 bg-white p-4 shadow-sm">
+      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-orange/10 text-brand-orange [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
       <div>
         <h3 className="font-black">{title}</h3>
-        <p className="mt-1 text-sm leading-6 text-[#65727A]">{detail}</p>
+        <p className="mt-1 text-sm leading-6 text-brand-muted">{detail}</p>
       </div>
     </div>
   )
@@ -771,53 +772,56 @@ function ArchitectureBand({ icon, title, detail }: { icon: React.ReactElement; t
 
 function ClosingItem({ icon, title, detail }: { icon: React.ReactElement; title: string; detail: string }) {
   return (
-    <div className="rounded-md border border-[#182228]/10 bg-white p-4">
-      <div className="text-[#2C8C76] [&>svg]:h-6 [&>svg]:w-6">{icon}</div>
+    <div className="rounded-[28px] border border-brand-text/5 bg-white p-4 shadow-card">
+      <div className="text-brand-orange [&>svg]:h-6 [&>svg]:w-6">{icon}</div>
       <h3 className="mt-3 text-lg font-black">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-[#65727A]">{detail}</p>
+      <p className="mt-2 text-sm leading-6 text-brand-muted">{detail}</p>
     </div>
   )
 }
 
 function FarePreview({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={`rounded-md border border-[#182228]/10 bg-white shadow-[0_30px_80px_-44px_rgba(24,34,40,0.58)] ${compact ? 'p-5' : 'p-5 sm:p-7'}`}>
-      <div className="flex items-start justify-between gap-4 border-b border-[#182228]/10 pb-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-md bg-[#FFF0E6] text-[#FF8A3D]"><Plane className="h-5 w-5" /></div>
-          <div>
-            <div className="flex items-center gap-2 text-xl font-black sm:text-2xl"><span>北京</span><ArrowRight className="h-4 w-4 text-[#98A49F]" /><span>长治</span></div>
-            <div className="mt-1 text-xs font-semibold text-[#65727A]">直飞特惠 · 2026-07-24</div>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="rounded-md bg-[#2C8C76] px-2 py-1 text-[10px] font-black text-white">发现指数</div>
-          <div className="mt-2 text-2xl font-black text-[#2C8C76]">8.6</div>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-4 border-b border-[#182228]/10 py-5 sm:grid-cols-4">
-        <FarePart label="票价" value="¥250" />
-        <FarePart label="机建燃油" value="¥100" />
-        <FarePart label="行李额" value="20KG" />
-        <FarePart label="平台展示价" value="¥350" emphasis />
-      </div>
-      <div className="mt-4 flex items-start gap-3 bg-[#E8F4EF] px-4 py-3 text-sm leading-6 text-[#226B5A]">
-        <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-        当前价格来自可验证的平台报价；费用缺失时保持未知，不由模型补全。
-      </div>
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div className="flex items-center justify-between border-b border-[#182228]/10 py-2"><span className="font-bold">携程</span><span className="font-black text-[#D75D0C]">¥350</span></div>
-        <div className="flex items-center justify-between border-b border-[#182228]/10 py-2"><span className="font-bold">飞猪</span><span className="font-black">¥390</span></div>
-      </div>
-    </div>
-  )
-}
-
-function FarePart({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
-  return (
-    <div>
-      <div className="text-xs font-semibold text-[#65727A]">{label}</div>
-      <div className={`mt-2 text-xl font-black sm:text-2xl ${emphasis ? 'text-[#D75D0C]' : ''}`}>{value}</div>
+    <div className="overflow-hidden rounded-[28px] border border-brand-orange/10 bg-white shadow-card">
+      <DiscoveryCardContent
+        from="北京"
+        to="长治"
+        date="2026-07-24"
+        basePrice={250}
+        totalPrice={350}
+        tax={100}
+        taxSource="regulatory_estimate"
+        baggageFee={0}
+        baggageAllowance="20KG"
+        hasBaggage
+        currency="CNY"
+        platform="携程旅行"
+        recommendScore="8.6"
+        prices={[
+          {
+            id: 'open-mic-ctrip',
+            name: '携程旅行',
+            price: 350,
+            currency: 'CNY',
+            price_status: 'stale',
+            provider_status: 'stale',
+            data_provider: 'ctrip_snapshot',
+            data_freshness: 'stale',
+          },
+          {
+            id: 'open-mic-flyai',
+            name: '飞猪旅行',
+            price: 390,
+            currency: 'CNY',
+            price_status: 'priced',
+            provider_status: 'success',
+            data_provider: 'flyai',
+            data_freshness: 'unknown',
+          },
+        ]}
+        compact={compact}
+        demo
+      />
     </div>
   )
 }
