@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
+from backend.application.contracts.intent import SlotBundle
 from backend.application.graph.nodes.react_agent import react_agent
 
 
@@ -51,6 +52,32 @@ async def test_react_routes_missing_date_to_deterministic_clarification(monkeypa
 
     assert out == {"llm_failed": True}
     assert model_built is False
+
+
+@pytest.mark.asyncio
+async def test_react_routes_date_only_followup_to_accumulated_search(monkeypatch):
+    import backend.application.graph.nodes.react_agent as ra
+
+    def _build_model(*args, **kwargs):
+        raise AssertionError("a slot follow-up must not be handled as fresh chat")
+
+    monkeypatch.setattr(ra, "build_chat_model", _build_model)
+
+    out = await ra.react_agent(
+        {
+            "messages": [HumanMessage(content="2026年7月25日")],
+            "request_message": "2026年7月25日",
+            "accumulated_slots": SlotBundle(
+                intent="search_flight",
+                origin="北京",
+                destination="三亚",
+            ),
+            "intent_definitions": [],
+            "request_user_id": "u1",
+        }
+    )
+
+    assert out == {"llm_failed": True}
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ LLM_TIMEOUT_SECONDS = 8.0
 
 async def react_agent(state: dict) -> dict:
     """ReAct LLM node: bind tools and invoke the chat model; on failure flag llm_failed for rule fallback."""
-    if _search_requires_clarification(state):
+    if _search_uses_deterministic_path(state):
         return {"llm_failed": True}
 
     tools = load_available_tools()
@@ -65,19 +65,41 @@ async def react_agent(state: dict) -> dict:
     return {"messages": [ai]}
 
 
-def _search_requires_clarification(state: dict) -> bool:
+def _search_uses_deterministic_path(state: dict) -> bool:
     text = str(state.get("request_message") or _latest_user_text(state))
     if not text.strip():
         return False
     definitions = state.get("intent_definitions") or None
+    accumulated = state.get("accumulated_slots")
     slots = fill_slots(
         text,
-        state.get("accumulated_slots"),
+        accumulated,
         intent_definitions=definitions,
     )
-    return slots.intent == "search_flight" and bool(
-        missing_required_slots(slots, definitions)
+    if slots.intent != "search_flight":
+        return False
+    if missing_required_slots(slots, definitions):
+        return True
+    return bool(
+        accumulated
+        and accumulated.intent == "search_flight"
+        and _search_slots_changed(accumulated, slots)
     )
+
+
+def _search_slots_changed(before, after) -> bool:
+    fields = (
+        "origin",
+        "destination",
+        "depart_date",
+        "return_date",
+        "cabin_class",
+        "passengers",
+        "budget",
+        "constraints",
+        "target_price",
+    )
+    return any(getattr(before, field) != getattr(after, field) for field in fields)
 
 
 def _latest_user_text(state: dict) -> str:

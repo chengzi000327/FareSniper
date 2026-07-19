@@ -93,6 +93,69 @@ async def test_build_graph_searches_when_slots_complete(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_build_graph_restores_route_for_date_only_followup(
+    fake_redis, monkeypatch
+):
+    import backend.application.graph.nodes.bootstrap_session as bs
+    import backend.application.graph.nodes.react_agent as ra
+    import backend.application.graph.nodes.slot_filling as sf
+    import backend.infrastructure.redis.session_store as session_store
+    from backend.application.services.default_intents import DEFAULT_INTENTS
+    from backend.application.graph.factory import build_graph
+
+    class _FakeSearchTool:
+        async def ainvoke(self, args):
+            assert args == {
+                "origin": "北京",
+                "destination": "三亚",
+                "depart_date": "2026-07-25",
+            }
+            return {
+                "deals": [{"flight_no": "MU5137", "price": 480}],
+                "source": "cache",
+            }
+
+    def _unexpected_model(*args, **kwargs):
+        raise AssertionError("slot continuation must bypass the chat model")
+
+    monkeypatch.setattr(session_store, "_pool", fake_redis)
+    monkeypatch.setattr(
+        bs, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS)
+    )
+    monkeypatch.setattr(bs, "fast_intent_match", lambda text: _async_value(None))
+    monkeypatch.setattr(
+        sf, "load_intent_registry", lambda: _async_value(DEFAULT_INTENTS)
+    )
+    monkeypatch.setattr(sf, "search_flights", _FakeSearchTool())
+    monkeypatch.setattr(ra, "build_chat_model", _unexpected_model)
+
+    graph = build_graph()
+    first = await graph.ainvoke(
+        {
+            "messages": [HumanMessage(content="北京到三亚")],
+            "request_message": "北京到三亚",
+            "request_session_id": "s_followup",
+            "request_user_id": "u1",
+        }
+    )
+    assert first["response"].meta["missing_slots"] == ["depart_date"]
+
+    second = await graph.ainvoke(
+        {
+            "messages": [HumanMessage(content="2026年7月25日")],
+            "request_message": "2026年7月25日",
+            "request_session_id": "s_followup",
+            "request_user_id": "u1",
+        }
+    )
+
+    assert second["response"].deals[0]["flight_no"] == "MU5137"
+    assert second["response"].query["origin_city"] == "北京"
+    assert second["response"].query["destination_city"] == "三亚"
+    assert second["response"].query["date_start"] == "2026-07-25"
+
+
+@pytest.mark.asyncio
 async def test_build_graph_routes_dynamic_non_search_intent(monkeypatch):
     """Dynamic non-search intent is handled via rule fallback path."""
     import backend.application.graph.nodes.bootstrap_session as bs
