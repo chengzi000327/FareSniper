@@ -93,6 +93,39 @@ async def test_partial_success_survives_other_error():
 
 
 @pytest.mark.asyncio
+async def test_result_carries_authoritative_normalized_query_scope():
+    query = build_flight_query(
+        "北京大兴机场",
+        "上海虹桥机场",
+        "2099-08-01",
+    )
+    provider = FakeProvider(
+        "empty_query_scope",
+        ProviderResult(
+            provider="empty_query_scope",
+            status=ProviderStatus.empty,
+        ),
+    )
+
+    result = await FlightSearchAggregator(
+        [provider], timeout_seconds=0.2
+    ).collect(query)
+
+    assert result["query"] == {
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "origin_airport_ids": ["PKX"],
+        "origin_airport_scope": "PKX",
+        "destination_city": "上海",
+        "destination_code": "SHA",
+        "destination_airport_ids": ["SHA"],
+        "destination_airport_scope": "SHA",
+        "date_start": "2099-08-01",
+        "date_end": "2099-08-01",
+    }
+
+
+@pytest.mark.asyncio
 async def test_timeout_does_not_discard_fast_result_and_cancels_slow_search():
     cancelled = asyncio.Event()
 

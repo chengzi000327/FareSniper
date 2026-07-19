@@ -16,12 +16,16 @@ class SearchRequest(BaseModel):
 
 
 class SearchQueryDto(BaseModel):
-    raw_text: str
-    normalized_text: str
+    raw_text: str = ""
+    normalized_text: str = ""
     origin_city: str
     origin_code: str
+    origin_airport_ids: list[str] = Field(default_factory=list)
+    origin_airport_scope: Optional[str] = None
     destination_city: str
     destination_code: str
+    destination_airport_ids: list[str] = Field(default_factory=list)
+    destination_airport_scope: Optional[str] = None
     date_start: str
     date_end: str
     budget: Optional[int] = None

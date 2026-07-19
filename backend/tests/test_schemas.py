@@ -282,6 +282,32 @@ def test_api_meta_optional_fields():
 
 # ── SearchResponseDto ─────────────────────────────────────────────────────────
 
+def test_search_query_accepts_authoritative_airport_scope_without_intent_text():
+    from backend.schemas.search import SearchQueryDto
+
+    dto = SearchQueryDto.model_validate(
+        {
+            "origin_city": "北京",
+            "origin_code": "BJS",
+            "origin_airport_ids": ["PEK", "PKX"],
+            "origin_airport_scope": None,
+            "destination_city": "长治",
+            "destination_code": "CIH",
+            "destination_airport_ids": ["CIH"],
+            "destination_airport_scope": "CIH",
+            "date_start": "2026-07-26",
+            "date_end": "2026-07-26",
+        }
+    )
+
+    assert dto.raw_text == ""
+    assert dto.normalized_text == ""
+    assert dto.origin_airport_ids == ["PEK", "PKX"]
+    assert dto.origin_airport_scope is None
+    assert dto.destination_airport_ids == ["CIH"]
+    assert dto.destination_airport_scope == "CIH"
+
+
 def test_search_response_structure():
     """SearchResponseDto 含 user_id / query / deals / analysis / recommendation / meta。"""
     from backend.schemas.search import SearchResponseDto, SearchQueryDto, SearchAnalysisDto, SearchRecommendationDto

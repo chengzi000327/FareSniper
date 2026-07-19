@@ -63,6 +63,18 @@ def _snapshot(
         for deal in ranked
     ]
     return {
+        "query": {
+            "origin_city": query.origin_city,
+            "origin_code": query.origin_code,
+            "origin_airport_ids": list(query.origin_airport_ids),
+            "origin_airport_scope": query.origin_airport_scope,
+            "destination_city": query.destination_city,
+            "destination_code": query.destination_code,
+            "destination_airport_ids": list(query.destination_airport_ids),
+            "destination_airport_scope": query.destination_airport_scope,
+            "date_start": query.depart_date,
+            "date_end": query.depart_date,
+        },
         "deals": wire_deals,
         "source": "multi_provider",
         "provider_statuses": {

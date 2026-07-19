@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 from backend.api.search import router as search_router
 from backend.application.contracts.decision import FrontendResponse
+from backend.schemas.search import SearchResponseDto
 
 
 @pytest_asyncio.fixture
@@ -119,6 +120,62 @@ async def test_search_preserves_graph_input_and_response_contract(
     assert state["request_message"] == "北京到上海"
     assert state["messages"][0].content == "北京到上海"
     assert calls[0]["config"] == {"recursion_limit": 15}
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_authoritative_airport_query_without_intent_text(
+    search_client: AsyncClient, valid_jwt_for_u1, monkeypatch
+):
+    import backend.api.search as search_mod
+
+    authoritative_query = {
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "origin_airport_ids": ["PEK", "PKX"],
+        "origin_airport_scope": None,
+        "destination_city": "长治",
+        "destination_code": "CIH",
+        "destination_airport_ids": ["CIH"],
+        "destination_airport_scope": "CIH",
+        "date_start": "2026-07-26",
+        "date_end": "2026-07-26",
+    }
+
+    class _FakeGraph:
+        async def ainvoke(self, state, config=None):
+            return {
+                **state,
+                "response": FrontendResponse(
+                    user_id=state["request_user_id"],
+                    query=authoritative_query,
+                    deals=[],
+                    analysis={},
+                    recommendation={"text": "找到结果"},
+                    meta={"generated_at": "2026-07-26T00:00:00Z"},
+                ),
+                "request_session_id": "s_authoritative_query",
+            }
+
+    monkeypatch.setattr(search_mod, "get_graph", lambda: _FakeGraph())
+
+    response = await search_client.post(
+        "/api/search",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        json={"session_id": None, "message": "北京到长治"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["query"] == authoritative_query
+
+    dto = SearchResponseDto.model_validate(body)
+    assert dto.query is not None
+    assert dto.query.origin_airport_ids == ["PEK", "PKX"]
+    assert dto.query.origin_airport_scope is None
+    assert dto.query.destination_airport_ids == ["CIH"]
+    assert dto.query.destination_airport_scope == "CIH"
+    assert dto.query.raw_text == ""
+    assert dto.query.normalized_text == ""
 
 
 @pytest.mark.asyncio

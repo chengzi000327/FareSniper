@@ -64,6 +64,137 @@ async def test_render_combines_deals_and_decision():
 
 
 @pytest.mark.asyncio
+async def test_render_prefers_authoritative_search_query_when_intent_parse_failed():
+    authoritative_query = {
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "origin_airport_ids": ["PEK", "PKX"],
+        "origin_airport_scope": None,
+        "destination_city": "长治",
+        "destination_code": "CIH",
+        "destination_airport_ids": ["CIH"],
+        "destination_airport_scope": "CIH",
+        "date_start": "2026-07-26",
+        "date_end": "2026-07-26",
+    }
+    snapshot_query = {
+        **authoritative_query,
+        "raw_text": "snapshot must not supply raw text",
+        "normalized_text": "snapshot must not supply normalized text",
+        "budget": 1,
+        "unknown_key": "must not enter the API response",
+    }
+    state = {
+        "request_user_id": "u1",
+        "intent": NormalizedIntent(parse_failed=True),
+        "search_result": {
+            "source": "multi_provider",
+            "query": snapshot_query,
+            "deals": [deal("CA1103", 650)],
+        },
+    }
+
+    response = (await render_response(state))["response"]
+
+    assert response.query == authoritative_query
+
+
+@pytest.mark.asyncio
+async def test_render_merges_intent_context_with_authoritative_search_query():
+    intent = NormalizedIntent(
+        origin=LocationRef(city="北京", iata_code="PEK"),
+        destination=LocationRef(city="长治", iata_code="CIH"),
+        date_window=DateWindow(
+            start_date="2026-07-25",
+            end_date="2026-07-25",
+        ),
+        budget_cny=1200,
+        raw_text="2026-07-26 北京到长治的机票，预算1200",
+    )
+    authoritative_query = {
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "origin_airport_ids": ["PEK", "PKX"],
+        "origin_airport_scope": None,
+        "destination_city": "长治",
+        "destination_code": "CIH",
+        "destination_airport_ids": ["CIH"],
+        "destination_airport_scope": "CIH",
+        "date_start": "2026-07-26",
+        "date_end": "2026-07-26",
+        "raw_text": "snapshot must not override raw text",
+        "normalized_text": "snapshot must not override normalized text",
+        "budget": 1,
+        "unknown_key": "must not enter the API response",
+    }
+
+    response = (
+        await render_response(
+            {
+                "request_user_id": "u1",
+                "intent": intent,
+                "search_result": {
+                    "source": "multi_provider",
+                    "query": authoritative_query,
+                    "deals": [deal("CA1103", 650)],
+                },
+            }
+        )
+    )["response"]
+
+    assert response.query == {
+        "raw_text": "2026-07-26 北京到长治的机票，预算1200",
+        "normalized_text": "2026-07-26 北京到长治的机票，预算1200",
+        "budget": 1200,
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "origin_airport_ids": ["PEK", "PKX"],
+        "origin_airport_scope": None,
+        "destination_city": "长治",
+        "destination_code": "CIH",
+        "destination_airport_ids": ["CIH"],
+        "destination_airport_scope": "CIH",
+        "date_start": "2026-07-26",
+        "date_end": "2026-07-26",
+    }
+
+
+@pytest.mark.asyncio
+async def test_render_keeps_intent_query_fallback_without_search_metadata():
+    intent = NormalizedIntent(
+        origin=LocationRef(city="北京", iata_code="BJS"),
+        destination=LocationRef(city="长治", iata_code="CIH"),
+        date_window=DateWindow(
+            start_date="2026-07-26",
+            end_date="2026-07-26",
+        ),
+        raw_text="2026-07-26 北京到长治的机票",
+    )
+
+    response = (
+        await render_response(
+            {
+                "request_user_id": "u1",
+                "intent": intent,
+                "search_result": {"deals": [deal("CA1103", 650)]},
+            }
+        )
+    )["response"]
+
+    assert response.query == {
+        "raw_text": "2026-07-26 北京到长治的机票",
+        "normalized_text": "2026-07-26 北京到长治的机票",
+        "origin_city": "北京",
+        "origin_code": "BJS",
+        "destination_city": "长治",
+        "destination_code": "CIH",
+        "date_start": "2026-07-26",
+        "date_end": "2026-07-26",
+        "budget": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_chat_history_uses_the_grounded_final_snapshot(monkeypatch):
     persisted: dict[str, str] = {}
 

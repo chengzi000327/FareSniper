@@ -19,6 +19,20 @@ from backend.application.services.grounded_response import (
 )
 
 
+_AUTHORITATIVE_QUERY_FIELDS = (
+    "origin_city",
+    "origin_code",
+    "origin_airport_ids",
+    "origin_airport_scope",
+    "destination_city",
+    "destination_code",
+    "destination_airport_ids",
+    "destination_airport_scope",
+    "date_start",
+    "date_end",
+)
+
+
 def _now() -> str:
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -191,6 +205,20 @@ async def render_response(state: WorkflowState) -> WorkflowState:
             "date_end": intent.date_window.end_date if intent.date_window else "",
             "budget": response_facts.budget if response_facts else intent.budget_cny,
         }
+    if (
+        isinstance(search_result, dict)
+        and isinstance(search_result.get("query"), dict)
+    ):
+        snapshot_query = search_result["query"]
+        authoritative_query = {
+            field: snapshot_query[field]
+            for field in _AUTHORITATIVE_QUERY_FIELDS
+            if field in snapshot_query
+        }
+        if query_summary is None:
+            query_summary = authoritative_query
+        else:
+            query_summary.update(authoritative_query)
 
     empty_search_text = (
         _empty_search_text(search_result)
