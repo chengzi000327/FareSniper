@@ -181,6 +181,8 @@ async def enqueue_demand(
     priority: int,
     origin_airport_code: str | None = None,
     destination_airport_code: str | None = None,
+    *,
+    reactivate_completed: bool = True,
 ) -> str:
     validate_canonical_depart_date(depart_date)
     if source not in APPROVED_DEMAND_SOURCES:
@@ -268,12 +270,16 @@ async def enqueue_demand(
                 ),
                 "expires_at": now + timedelta(days=7),
                 "active": True,
-                "status": case(
-                    (
-                        FlightSearchDemandRow.status == "completed",
-                        "pending",
-                    ),
-                    else_=FlightSearchDemandRow.status,
+                "status": (
+                    case(
+                        (
+                            FlightSearchDemandRow.status == "completed",
+                            "pending",
+                        ),
+                        else_=FlightSearchDemandRow.status,
+                    )
+                    if reactivate_completed
+                    else FlightSearchDemandRow.status
                 ),
                 "updated_at": now,
             },

@@ -123,6 +123,7 @@ async def _enqueue_seed_demand(
             depart_date=depart_date,
             priority=priority,
             source=source,
+            reactivate_completed=False,
         )
         return True
     except ValueError:

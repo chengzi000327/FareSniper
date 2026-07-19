@@ -148,11 +148,13 @@ async def test_seed_ctrip_demands_uses_alert_and_hot_route_priorities(monkeypatc
         "depart_date": "2099-08-01",
         "priority": 100,
         "source": "price_alert",
+        "reactivate_completed": False,
     }
     hot_calls = calls[1:]
     assert len(hot_calls) == 3
     assert all(call["priority"] == 5 for call in hot_calls)
     assert all(call["source"] == "hot_route" for call in hot_calls)
+    assert all(call["reactivate_completed"] is False for call in hot_calls)
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     assert all(call["depart_date"] > today.isoformat() for call in hot_calls)
 
@@ -186,6 +188,7 @@ async def test_seed_skips_same_day_alert_and_keeps_future_alert(monkeypatch):
             "depart_date": "2099-08-02",
             "priority": 100,
             "source": "price_alert",
+            "reactivate_completed": False,
         }
     ]
 
@@ -248,9 +251,10 @@ async def test_seed_skips_malicious_alert_and_continues_all_routes(
         "origin_code": "CAN",
         "destination_code": "SHA",
         "depart_date": "2099-08-02",
-        "priority": 100,
-        "source": "price_alert",
-    }
+            "priority": 100,
+            "source": "price_alert",
+            "reactivate_completed": False,
+        }
     assert [call["source"] for call in calls[1:]] == ["hot_route"] * 3
     assert sentinel not in repr(calls)
     assert sentinel not in caplog.text

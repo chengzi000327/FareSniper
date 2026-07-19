@@ -518,6 +518,29 @@ async def test_reenqueue_completed_hourly_demand_creates_a_new_claim(seeded_pg):
     assert duplicate_id == job_id
     assert second is not None
     assert second.job_id == job_id
+
+
+@pytest.mark.asyncio
+async def test_worker_reenqueue_does_not_reactivate_completed_hour(
+    seeded_pg,
+):
+    job_id = await enqueue_demand(
+        "BJS", "SHA", "2099-08-01", "hot_route", 5
+    )
+    assert await claim_next("mac-1", lease_seconds=60) is not None
+    await complete_job(job_id, "mac-1", [_offer()])
+
+    duplicate_id = await enqueue_demand(
+        "BJS",
+        "SHA",
+        "2099-08-01",
+        "hot_route",
+        5,
+        reactivate_completed=False,
+    )
+
+    assert duplicate_id == job_id
+    assert await claim_next("mac-1", lease_seconds=60) is None
     assert second.attempts == 2
 
 
