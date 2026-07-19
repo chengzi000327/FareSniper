@@ -22,6 +22,8 @@ describe('OpenMicDeck', () => {
     fireEvent.keyDown(window, { key: 'ArrowRight' })
 
     expect(await screen.findByRole('heading', { name: '陈永琪' })).toBeInTheDocument()
+    expect(screen.getByText('AI 产品经理')).toBeInTheDocument()
+    expect(screen.getByText('Agent 产品实践者')).toBeInTheDocument()
     expect(screen.getByText(/中国科学院大学/)).toBeInTheDocument()
     expect(screen.getByText(/Keep · AI 平台事业部/)).toBeInTheDocument()
   })

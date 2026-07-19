@@ -419,19 +419,24 @@ function ProfileSlide() {
 
   return (
     <div className="mx-auto grid min-h-full max-w-7xl items-center gap-8 lg:grid-cols-[0.68fr_1.32fr] lg:gap-12">
-      <div className="relative mx-auto w-full max-w-[15rem] sm:max-w-[16rem] lg:max-w-[14rem] 2xl:max-w-[16rem]">
-        <div className="absolute -bottom-4 -left-4 h-full w-full rounded-[28px] bg-brand-orange" />
-        <Image
-          src="/open-mic/chen-yongqi-open-mic.jpg"
-          alt="陈永琪"
-          width={1366}
-          height={2048}
-          priority
-          className="relative aspect-[3/4] w-full rounded-[28px] border border-brand-text/10 bg-white object-cover object-[center_52%] shadow-card"
-        />
-        <div className="relative mt-4 border-l-4 border-brand-orange pl-4">
+      <div className="mx-auto w-full max-w-[15rem] sm:max-w-[16rem] lg:max-w-[14rem] 2xl:max-w-[16rem]">
+        <div className="relative">
+          <div className="absolute -bottom-3 -left-3 h-full w-full rounded-[28px] bg-brand-orange" />
+          <Image
+            src="/open-mic/chen-yongqi-open-mic.jpg"
+            alt="陈永琪"
+            width={1366}
+            height={2048}
+            priority
+            className="relative aspect-[3/4] w-full rounded-[28px] border border-brand-text/10 bg-white object-cover object-[center_52%] shadow-card"
+          />
+        </div>
+        <div className="mt-5 border-l-4 border-brand-orange pl-4">
           <h2 className="text-3xl font-black">陈永琪</h2>
-          <p className="mt-2 text-base font-semibold text-brand-muted">AI 产品经理 · Agent 产品实践者</p>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm font-semibold">
+            <span className="whitespace-nowrap text-brand-muted">AI 产品经理</span>
+            <span className="whitespace-nowrap text-brand-orange">Agent 产品实践者</span>
+          </div>
         </div>
       </div>
 
