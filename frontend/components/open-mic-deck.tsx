@@ -100,22 +100,22 @@ const SLIDES: SlideDefinition[] = [
   },
   {
     id: 'architecture',
-    label: '意图识别',
-    duration: '02:20',
+    label: '技术架构',
+    duration: '02:30',
     notes: [
-      '意图识别不是一次模型分类，而是候选召回、语义路由、确定性抽槽和状态校验四层协作。',
-      '动态意图定义来自 PostgreSQL 并缓存 60 秒；规则和可选 Embedding 只生成 hint，最终由 ReAct 结合会话上下文选择工具。',
-      '机场、相对日期和必填槽位由确定性代码校验；模型 8 秒超时后进入 fallback，搜索仍能追问或继续执行。',
+      '先沿一条请求讲完整链路：API 与会话 → 意图与状态 → LangGraph 编排 → Provider 数据面 → 事实冻结与输出。',
+      '意图识别位于 Context 和 Orchestration 之间：动态 Intent Registry 召回候选，ReAct 理解歧义，确定性代码抽槽与校验。',
+      'Harness 横跨整条链路，拥有状态、权限、超时、数据资格、事实边界和 Trace；模型只负责理解、规划与解释。',
     ],
   },
   {
     id: 'decisions',
-    label: 'Harness 工程',
+    label: '评测闭环',
     duration: '02:00',
     notes: [
-      '我理解的 Harness，是围绕概率模型建立 Context、State、Tools、Guardrails、Truth 和 Evaluation。',
-      '模型只负责理解歧义和规划工具；权限、超时、供应商隔离、价格资格、冻结事实和回归测试都由 Harness 承担。',
-      '因此系统的正确性不依赖某个模型、Embedding 或单一 Provider：组件可以替换，边界和不变量保持稳定。',
+      '离线有 50 条种子样本，覆盖正常、相对日期、多轮追问、边界异常与对抗；评测意图、追问、信号、建议和格式。',
+      '线上 LangSmith Trace 发现问题后，按 P0–P3 定级，再固化为最小复现样本和单元、契约或 E2E 回归测试。',
+      '典型 Bad Case 包括旧日期串线、慢 Provider 拖垮请求、过期或异币种报价误胜，以及 AI 文案与卡片价格不一致。',
     ],
   },
   {
@@ -642,129 +642,153 @@ function ArchitectureSlide() {
   const stages = [
     {
       step: '01',
-      label: '候选召回',
-      detail: '意图定义从 PostgreSQL 加载，Redis 缓存 60 秒；关键词、示例和模糊匹配先召回候选。',
-      flow: 'Intent Registry → hint',
+      label: '交互与上下文',
+      tag: 'API / SESSION',
+      detail: 'FastAPI 接收请求，SSE 推送搜索进度；Redis 恢复 30 分钟会话，PostgreSQL 注入长期偏好。',
+      flow: 'request → bootstrap_session',
       icon: <Database />,
     },
     {
       step: '02',
-      label: '可选快速路径',
-      detail: 'Embedding 可用时匹配最近示例；当前 DeepSeek 不支持就自动跳过，正确性不依赖它。',
-      flow: 'optional embedding fastpath',
+      label: '意图与状态',
+      tag: 'INTENT HARNESS',
+      detail: 'Intent Registry 规则召回并缓存 60 秒；可选 Embedding 只做 hint，确定性代码抽取机场、日期与预算。',
+      flow: 'recall → route → parse → validate',
       icon: <SearchCheck />,
     },
     {
       step: '03',
-      label: '语义路由',
-      detail: 'ReAct 读取当前日期、会话槽位、长期偏好、意图定义和 hint，决定追问或调用工具。',
-      flow: 'ask_user | search | memory | alert',
+      label: 'Agent 编排',
+      tag: 'LANGGRAPH / REACT',
+      detail: 'ReAct 理解歧义并规划工具；Tool Router 执行 Typed Tools，用户身份由服务端注入。',
+      flow: 'ReAct ⇄ tools · 8s fallback',
       icon: <BrainCircuit />,
     },
     {
       step: '04',
-      label: '抽槽与校验',
-      detail: '确定性代码解析机场、相对日期、预算和约束，再与会话状态合并并检查必填项。',
-      flow: 'parse → merge → validate',
-      icon: <Route />,
+      label: '多源数据面',
+      tag: 'PROVIDER CONTRACT',
+      detail: 'Aggregator 并发调用飞猪、携程快照与国际来源；单源 10 秒超时，连续失败触发熔断。',
+      flow: 'started → status → partial results',
+      icon: <Network />,
+    },
+    {
+      step: '05',
+      label: '事实与输出',
+      tag: 'TRUTH BOUNDARY',
+      detail: 'FlightOffer 归一、去重和排序；winner 校验后冻结 ResponseFacts，文案与卡片读取同一事实。',
+      flow: 'normalize → rank → freeze → render',
+      icon: <BadgeCheck />,
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="06 · INTENT ROUTING" title="意图识别不是一次分类，而是一条分层路由" />
+      <SlideHeading eyebrow="06 · END-TO-END ARCHITECTURE" title="一条请求，如何穿过完整 Agent 系统" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
-        输入“下周五从北京到长治”后，模型负责理解歧义，Harness 负责把理解约束成可执行状态。
+        从“下周五北京到长治”到可验证推荐，模型只处理不确定性，Harness 负责把每一步约束成可执行、可回退、可追溯的状态。
       </p>
-      <div className="mt-5 grid items-stretch gap-3 lg:grid-cols-4">
+      <div className="mt-5 grid items-stretch gap-3 lg:grid-cols-5">
         {stages.map((stage, index) => (
-          <div
-            key={stage.label}
-            className={`relative rounded-[20px] border p-4 shadow-sm ${
-              index === 2
-                ? 'border-brand-orange/30 bg-brand-orange-light'
-                : index === 3
-                  ? 'border-green-200 bg-green-50'
-                  : 'border-brand-text/5 bg-white'
-            }`}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{stage.icon}</div>
-              <span className="text-xs font-black text-brand-orange">{stage.step}</span>
-            </div>
-            <h3 className="mt-3 text-lg font-black">{stage.label}</h3>
-            <p className="mt-2 text-sm leading-6 text-brand-muted">{stage.detail}</p>
-            <div className="mt-3 border-t border-brand-text/10 pt-3 text-xs font-bold text-brand-text">{stage.flow}</div>
-            {index < stages.length - 1 ? (
-              <ArrowRight className="absolute -right-3 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" />
-            ) : null}
-          </div>
+          <ArchitectureStage key={stage.label} {...stage} index={index} />
         ))}
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        <IntentGuard label="必填槽位" value="出发地 · 目的地 · 出发日期" />
-        <IntentGuard label="多轮防串线" value="强新意图 ≥ 0.90 打破 sticky intent" />
-        <IntentGuard label="异常回退" value="LLM 8s 超时 → deterministic fallback" />
+      <div className="mt-4 grid gap-3 lg:grid-cols-[0.8fr_1.35fr_0.95fr]">
+        <HarnessRail label="MODEL OWNS" value="理解歧义 · 规划工具 · 生成解释" tone="model" />
+        <HarnessRail label="HARNESS OWNS" value="Context · State · Tools · Guardrails · Truth · Evaluation" tone="harness" />
+        <HarnessRail label="FAILURE PATH" value="8s 模型回退 · 10s 单源隔离 · 部分结果可用" tone="failure" />
       </div>
     </div>
   )
 }
 
 function DecisionsSlide() {
-  const layers = [
+  const evalFacts = [
     {
-      label: 'Context',
-      title: '给模型正确上下文',
-      detail: 'Redis 30 分钟会话、PostgreSQL 长期记忆、动态 Intent Registry。',
-      icon: <Database />,
+      value: '50',
+      label: '离线种子样本',
+      detail: '正常 · 日期 · 多轮 · 边界 · 对抗',
     },
     {
-      label: 'State & Policy',
-      title: '约束任务状态流转',
-      detail: 'LangGraph 状态机、槽位合并、缺项追问、超时 fallback。',
-      icon: <RefreshCw />,
+      value: '5',
+      label: '评测维度',
+      detail: '意图 · 追问 · 信号 · 建议 · 格式',
     },
     {
-      label: 'Tools & Data',
-      title: '隔离外部不确定性',
-      detail: 'Typed Tools、服务端身份注入、Provider 超时/熔断/部分返回。',
-      icon: <Network />,
+      value: 'P0–P3',
+      label: '风险分级',
+      detail: '安全 / 崩溃 → 体验与长尾',
     },
     {
-      label: 'Truth',
-      title: '建立事实边界',
-      detail: 'FlightOffer 归一化、winner 资格校验、ResponseFacts 冻结同源。',
-      icon: <BadgeCheck />,
+      value: 'Trace→Gate',
+      label: '修复闭环',
+      detail: '线上发现 → 样本固化 → 回归门禁',
+    },
+  ]
+  const badCases = [
+    {
+      layer: 'Intent / State',
+      symptom: '用户改了航线，旧日期被错误沿用',
+      guard: '清空旧日期 + 必填槽位追问 + 多轮回归',
     },
     {
-      label: 'Evaluation',
-      title: '让错误进入闭环',
-      detail: 'LangSmith Trace、字段脱敏、Bad Case 定位、回归测试。',
-      icon: <Radar />,
+      layer: 'Provider / Data',
+      symptom: '慢来源拖垮请求，快来源结果也丢失',
+      guard: '并发隔离 + 10s 超时 + 熔断与部分返回测试',
+    },
+    {
+      layer: 'Truth / Ranking',
+      symptom: '过期或异币种报价错误成为最低价',
+      guard: 'winner 资格 / 币种原子性 / 新鲜度契约测试',
+    },
+    {
+      layer: 'Output / UX',
+      symptom: 'AI 说 ¥700，卡片 ¥650；未知行李被当作免费',
+      guard: 'ResponseFacts 同源 + null 保真 + 前后端契约测试',
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="07 · HARNESS ENGINEERING" title="把概率模型，装进一个可控系统" />
+      <SlideHeading eyebrow="07 · EVALUATION HARNESS" title="Bad Case 不是事故记录，而是回归资产" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
-        Harness 不是模型外面的一层胶水，而是决定 Agent 能否可靠完成任务的工程主体。
+        线上 Trace 负责发现问题，离线数据集负责稳定复现，自动化门禁负责阻止同类错误再次上线。
       </p>
-      <div className="mt-5 grid gap-3 lg:grid-cols-5">
-        {layers.map((layer, index) => (
-          <HarnessLayer key={layer.label} {...layer} index={index} />
+      <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {evalFacts.map((fact) => (
+          <EvalFact key={fact.label} {...fact} />
         ))}
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-[0.72fr_1.28fr]">
-        <div className="rounded-[20px] border border-brand-orange/20 bg-brand-orange-light px-4 py-3">
-          <div className="text-xs font-black text-brand-orange">MODEL OWNS</div>
-          <div className="mt-1 text-sm font-bold">理解歧义 · 规划工具 · 生成解释</div>
+        <div className="rounded-[20px] bg-brand-text p-4 text-white shadow-card">
+          <div className="flex items-center gap-2 text-xs font-black text-brand-orange-light">
+            <RefreshCw className="h-4 w-4" />
+            HARNESS QUALITY LOOP
+          </div>
+          <div className="mt-3 space-y-2.5">
+            {[
+              ['01', 'Observe', 'LangSmith span + 安全脱敏'],
+              ['02', 'Triage', '按影响范围分为 P0–P3'],
+              ['03', 'Reproduce', '固化最小输入、状态与 Provider fixture'],
+              ['04', 'Gate', '单元 / 契约 / E2E 回归后再部署'],
+            ].map(([step, title, detail]) => (
+              <div key={step} className="grid grid-cols-[2rem_4.2rem_minmax(0,1fr)] items-baseline gap-2 border-b border-white/10 pb-2 last:border-0 last:pb-0">
+                <span className="text-xs font-black text-brand-orange-light">{step}</span>
+                <span className="text-sm font-black">{title}</span>
+                <span className="text-xs leading-5 text-white/70">{detail}</span>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="rounded-[20px] bg-brand-text px-4 py-3 text-white shadow-card">
-          <div className="text-xs font-black text-brand-orange-light">HARNESS OWNS</div>
-          <div className="mt-1 text-sm font-bold">Context · State · Tools · Guardrails · Truth · Evaluation</div>
+        <div className="overflow-hidden rounded-[20px] border border-brand-text/5 bg-white shadow-sm">
+          <div className="hidden grid-cols-[0.68fr_1.05fr_1.27fr] gap-3 border-b border-brand-text/10 bg-brand-orange-light px-4 py-2 text-xs font-black text-brand-text lg:grid">
+            <span>失效层</span><span>真实 Bad Case</span><span>沉淀为 Harness Guard</span>
+          </div>
+          {badCases.map((badCase) => (
+            <BadCaseRow key={badCase.layer} {...badCase} />
+          ))}
         </div>
       </div>
       <p className="mt-3 text-center text-sm font-black text-brand-text">
-        模型、Embedding 或单一 Provider 都可以替换；正确性边界不随之漂移。
+        评测目标不是证明模型聪明，而是持续扩大 Harness 能够确定兜住的边界。
       </p>
     </div>
   )
@@ -835,39 +859,84 @@ function Metric({ value, label }: { value: string; label: string }) {
   )
 }
 
-function IntentGuard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[18px] border border-brand-text/5 bg-white px-4 py-3 shadow-sm">
-      <div className="text-xs font-black text-brand-orange">{label}</div>
-      <div className="mt-1 text-sm font-bold text-brand-text">{value}</div>
-    </div>
-  )
-}
-
-function HarnessLayer({
+function ArchitectureStage({
   icon,
+  step,
+  tag,
   label,
-  title,
   detail,
+  flow,
   index,
 }: {
   icon: React.ReactElement
+  step: string
+  tag: string
   label: string
-  title: string
   detail: string
+  flow: string
   index: number
 }) {
   return (
     <div className={`relative rounded-[20px] border p-4 shadow-sm ${
-      index === 3 ? 'border-green-200 bg-green-50' : 'border-brand-text/5 bg-white'
+      index === 1
+        ? 'border-brand-orange/30 bg-brand-orange-light'
+        : index === 4
+          ? 'border-green-200 bg-green-50'
+          : 'border-brand-text/5 bg-white'
     }`}>
       <div className="flex items-center justify-between gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-orange/10 text-brand-orange [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
-        <span className="text-[10px] font-black uppercase text-brand-muted">{label}</span>
+        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
+        <span className="text-xs font-black text-brand-orange">{step}</span>
       </div>
-      <h3 className="mt-3 text-base font-black">{title}</h3>
-      <p className="mt-2 text-sm leading-6 text-brand-muted">{detail}</p>
+      <div className="mt-3 text-[10px] font-black text-brand-muted">{tag}</div>
+      <h3 className="mt-1 text-base font-black">{label}</h3>
+      <p className="mt-2 text-[13px] leading-5 text-brand-muted">{detail}</p>
+      <div className="mt-3 border-t border-brand-text/10 pt-2 text-[11px] font-bold text-brand-text">{flow}</div>
       {index < 4 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
+    </div>
+  )
+}
+
+function HarnessRail({
+  label,
+  value,
+  tone,
+}: {
+  label: string
+  value: string
+  tone: 'model' | 'harness' | 'failure'
+}) {
+  const toneClass = tone === 'harness'
+    ? 'bg-brand-text text-white'
+    : tone === 'model'
+      ? 'border-brand-orange/20 bg-brand-orange-light text-brand-text'
+      : 'border-green-200 bg-green-50 text-brand-text'
+  return (
+    <div className={`rounded-[18px] border border-transparent px-4 py-3 shadow-sm ${toneClass}`}>
+      <div className={`text-[10px] font-black ${tone === 'harness' ? 'text-brand-orange-light' : 'text-brand-orange'}`}>{label}</div>
+      <div className="mt-1 text-xs font-bold">{value}</div>
+    </div>
+  )
+}
+
+function EvalFact({ value, label, detail }: { value: string; label: string; detail: string }) {
+  return (
+    <div className="rounded-[18px] border border-brand-text/5 bg-white px-4 py-3 shadow-sm sm:grid sm:grid-cols-[auto_minmax(0,1fr)] sm:items-center sm:gap-3">
+      <div className="whitespace-nowrap text-lg font-black text-brand-orange sm:text-xl">{value}</div>
+      <div className="mt-2 sm:mt-0">
+        <div className="text-sm font-black">{label}</div>
+        <div className="mt-0.5 text-[11px] text-brand-muted">{detail}</div>
+      </div>
+    </div>
+  )
+}
+
+function BadCaseRow({ layer, symptom, guard }: { layer: string; symptom: string; guard: string }) {
+  return (
+    <div className="grid gap-1.5 border-b border-brand-text/10 px-4 py-3 text-xs leading-5 last:border-0 lg:grid-cols-[0.68fr_1.05fr_1.27fr] lg:gap-3 lg:py-2.5">
+      <span className="font-black text-brand-orange">{layer}</span>
+      <span className="font-semibold text-brand-text">{symptom}</span>
+      <span className="text-brand-muted">{guard}</span>
     </div>
   )
 }

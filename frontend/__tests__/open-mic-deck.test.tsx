@@ -37,17 +37,19 @@ describe('OpenMicDeck', () => {
     expect(screen.getByText(/搜索机票并不难/)).toBeInTheDocument()
   })
 
-  test('explains layered intent routing and the agent harness', async () => {
+  test('explains the end-to-end architecture and evaluation harness', async () => {
     render(<OpenMicDeck />)
 
-    fireEvent.click(screen.getByRole('button', { name: '第 7 页：意图识别' }))
-    expect(await screen.findByRole('heading', { name: '意图识别不是一次分类，而是一条分层路由' })).toBeInTheDocument()
-    expect(screen.getByText(/当前 DeepSeek 不支持就自动跳过/)).toBeInTheDocument()
-    expect(screen.getByText(/LLM 8s 超时 → deterministic fallback/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '第 8 页：Harness 工程' }))
-    expect(await screen.findByRole('heading', { name: '把概率模型，装进一个可控系统' })).toBeInTheDocument()
-    expect(screen.getByText(/FlightOffer 归一化、winner 资格校验、ResponseFacts 冻结同源/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '第 7 页：技术架构' }))
+    expect(await screen.findByRole('heading', { name: '一条请求，如何穿过完整 Agent 系统' })).toBeInTheDocument()
+    expect(screen.getByText(/Intent Registry 规则召回并缓存 60 秒/)).toBeInTheDocument()
+    expect(screen.getByText(/ReAct ⇄ tools · 8s fallback/)).toBeInTheDocument()
     expect(screen.getByText(/Context · State · Tools · Guardrails · Truth · Evaluation/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '第 8 页：评测闭环' }))
+    expect(await screen.findByRole('heading', { name: 'Bad Case 不是事故记录，而是回归资产' })).toBeInTheDocument()
+    expect(screen.getByText(/LangSmith span \+ 安全脱敏/)).toBeInTheDocument()
+    expect(screen.getByText(/AI 说 ¥700，卡片 ¥650；未知行李被当作免费/)).toBeInTheDocument()
+    expect(screen.getByText(/ResponseFacts 同源 \+ null 保真 \+ 前后端契约测试/)).toBeInTheDocument()
   })
 })
