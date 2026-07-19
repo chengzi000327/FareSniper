@@ -18,6 +18,8 @@ from backend.collector.client import CollectorApiClient
 
 DEFAULT_ENV_FILE = Path.home() / ".config" / "faresniper" / "collector.env"
 LOGIN_MARKER = ".login-confirmed"
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -40,6 +42,20 @@ def _parser() -> argparse.ArgumentParser:
 def _profile_dir() -> Path:
     configured = os.getenv("FARESNIPER_CTRIP_PROFILE", "").strip()
     return Path(configured).expanduser() if configured else DEFAULT_PROFILE_DIR
+
+
+def _ctrip_headless() -> bool:
+    configured = os.getenv("FARESNIPER_CTRIP_HEADLESS")
+    if configured is None:
+        return True
+    normalized = configured.strip().casefold()
+    if normalized in _TRUE_VALUES:
+        return True
+    if normalized in _FALSE_VALUES:
+        return False
+    raise ValueError(
+        "FARESNIPER_CTRIP_HEADLESS must be true or false"
+    )
 
 
 def _chrome_exists() -> bool:
@@ -126,6 +142,7 @@ async def _run_once() -> int:
         timeout_seconds=float(
             os.getenv("CTRIP_COLLECTION_TIMEOUT_SECONDS", "90")
         ),
+        headless=_ctrip_headless(),
     )
     try:
         result = await CollectorRunner(client, browser).run_once()
@@ -145,6 +162,7 @@ async def _run_daemon(interval: float | None) -> int:
         timeout_seconds=float(
             os.getenv("CTRIP_COLLECTION_TIMEOUT_SECONDS", "90")
         ),
+        headless=_ctrip_headless(),
     )
     runner = CollectorRunner(client, browser)
     stop = asyncio.Event()

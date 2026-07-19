@@ -33,6 +33,16 @@ def test_selenium_is_isolated_to_the_mac_collector_manifest():
     assert collector[0] == "-r requirements.txt"
 
 
+def test_collector_virtualenv_is_ignored():
+    entries = {
+        line.strip()
+        for line in Path(".gitignore").read_text().splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    assert ".venv-collector/" in entries
+
+
 def test_backend_requires_validated_langsmith_conditional_tracing_runtime():
     requirements = [
         line.strip()

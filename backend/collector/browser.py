@@ -192,11 +192,13 @@ class CtripBrowser:
         *,
         profile_dir: Path = DEFAULT_PROFILE_DIR,
         timeout_seconds: float = 90.0,
+        headless: bool = True,
         driver_factory: Callable[..., object] | None = None,
         options_factory: Callable[[], object] | None = None,
     ) -> None:
         self.profile_dir = _ensure_dedicated_profile(profile_dir)
         self.timeout_seconds = timeout_seconds
+        self._capture_headless = headless
         self._driver_factory = driver_factory
         self._options_factory = options_factory
         self._driver: object | None = None
@@ -282,7 +284,7 @@ class CtripBrowser:
 
     def _capture_sync(self, job: object) -> CaptureResult:
         try:
-            driver = self._driver_for(headless=True)
+            driver = self._driver_for(headless=self._capture_headless)
             getattr(driver, "get")(build_search_url(job))
             deadline = time.monotonic() + self.timeout_seconds
             while time.monotonic() < deadline:

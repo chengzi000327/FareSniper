@@ -40,12 +40,18 @@ FARESNIPER_API_URL=
 CTRIP_COLLECTOR_TOKEN=
 FARESNIPER_COLLECTOR_NODE_ID=
 FARESNIPER_CTRIP_PROFILE="$HOME/.faresniper/ctrip-profile"
+FARESNIPER_CTRIP_HEADLESS=false
 FARESNIPER_COLLECTOR_INTERVAL_SECONDS=60
 CTRIP_COLLECTION_TIMEOUT_SECONDS=90
 FARESNIPER_LANGSMITH_TRACING=false
 LANGSMITH_API_KEY=
 LANGSMITH_PROJECT=faresniper
 ```
+
+Mac 安装器显式使用可见浏览器采集，因为携程可能阻止 headless
+会话。CLI 在未配置 `FARESNIPER_CTRIP_HEADLESS` 时仍默认为 `true`，
+以保持原有行为；本机采集应保留安装器写入的 `false`。该变量只接受
+常见布尔值，例如 `true`、`false`、`1` 和 `0`。
 
 ## Doctor 与首次登录
 

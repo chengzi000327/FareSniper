@@ -193,6 +193,53 @@ async def test_login_is_visible_and_uses_dedicated_profile(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_capture_uses_configured_headed_browser_mode(tmp_path):
+    calls: dict[str, object] = {}
+
+    class Driver:
+        current_url = "https://flights.ctrip.com/online/list"
+        title = "机票"
+        page_source = ""
+
+        def execute_cdp_cmd(self, *_args):
+            pass
+
+        def get(self, url):
+            self.current_url = url
+
+        def find_element(self, *_args):
+            return SimpleNamespace(text="航班列表")
+
+        def execute_script(self, script):
+            if script.startswith("return !!"):
+                return True
+            return json.dumps(
+                [json.dumps({"data": {"flightItineraryList": []}})]
+            )
+
+        def quit(self):
+            pass
+
+    def factory(*, options):
+        calls["arguments"] = options.arguments
+        return Driver()
+
+    browser = CtripBrowser(
+        profile_dir=tmp_path,
+        headless=False,
+        driver_factory=factory,
+        options_factory=_options_factory,
+    )
+    try:
+        result = await browser.capture(_job())
+    finally:
+        await browser.close()
+
+    assert result.error_code is None
+    assert all("--headless" not in arg for arg in calls["arguments"])
+
+
+@pytest.mark.asyncio
 async def test_generic_logged_out_homepage_is_not_authenticated(tmp_path):
     class Driver:
         current_url = "https://www.ctrip.com/"
