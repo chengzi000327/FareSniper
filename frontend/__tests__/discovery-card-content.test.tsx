@@ -412,6 +412,29 @@ test("uses the backend winning row for badge, seller copy, and booking action", 
   );
 });
 
+test("shows the platform quote in the ticket-price field for legacy offers without a base-price split", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="长治"
+      date="2026-07-24"
+      basePrice={null}
+      totalPrice={250}
+      tax={null}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="携程"
+      prices={[]}
+    />
+  );
+
+  expect(screen.getAllByText("¥250")).toHaveLength(2);
+  expect(
+    screen.getByText(/票价栏暂按平台展示价显示/)
+  ).toBeInTheDocument();
+});
+
 test("renders a stale Ctrip winner without realtime copy", () => {
   render(
     <DiscoveryCardContent

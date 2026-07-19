@@ -145,6 +145,9 @@ export function DiscoveryCardContent({
       ? basePrice + tax + baggageFee
       : null
   const computedTotal = totalPrice ?? componentTotal
+  const displayedTicketPrice = basePrice ?? totalPrice ?? null
+  const usesPlatformQuoteAsTicket =
+    basePrice === null && displayedTicketPrice !== null
   const feeBreakdownComplete =
     componentTotal !== null &&
     hasBaggage !== null &&
@@ -265,7 +268,7 @@ export function DiscoveryCardContent({
         }`}
       >
         <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-transparent via-brand-orange/20 to-transparent" />
-        <PriceBlock label="票价" value={money(basePrice)} compact={compact} />
+        <PriceBlock label="票价" value={money(displayedTicketPrice)} compact={compact} />
         <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
         <PriceBlock
           label={taxSource === 'regulatory_estimate' ? '机建燃油（现行）' : '机建燃油'}
@@ -352,6 +355,8 @@ export function DiscoveryCardContent({
                   </>
                 )}
               </>
+            ) : usesPlatformQuoteAsTicket ? (
+              '平台未单独拆分基础票价，票价栏暂按平台展示价显示；税费与行李规则以预订页为准。'
             ) : (
               '价格、税费与行李规则以预订页为准。'
             )}
