@@ -64,7 +64,7 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'deal-definition',
     label: '核心洞察',
-    duration: '01:20',
+    duration: '01:10',
     notes: [
       '特价不是统一的最低数字。时间、预算和行李不同，用户眼里的最优解也不同。',
       '所以产品目标不是找出一个全网统一最低价，而是求出用户约束下的相对最优解。',
@@ -82,7 +82,7 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'product',
     label: '产品方案',
-    duration: '01:30',
+    duration: '01:20',
     notes: [
       'FareSniper 用一个闭环完成四件事：理解需求、聚合比较、解释价格、沉淀记忆。',
       '它的差异不是多一个聊天框，而是把用户标准和多平台事实放进同一个决策过程。',
@@ -91,7 +91,7 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'demo',
     label: '现场演示',
-    duration: '03:00',
+    duration: '02:30',
     notes: [
       '现场输入：下周五从北京到长治。',
       '依次说明日期归一化、机场范围、多来源查询、完整成本拆分、平台跳转与记忆写回。',
@@ -100,22 +100,22 @@ const SLIDES: SlideDefinition[] = [
   },
   {
     id: 'architecture',
-    label: 'Agent 内部',
-    duration: '02:30',
+    label: '意图识别',
+    duration: '02:20',
     notes: [
-      '不要按组件名念架构。沿着一次请求讲：恢复上下文 → 识别与追问 → 并行搜索 → 归一化证据 → 冻结后输出。',
-      '模型 8 秒超时或关键要素不完整时进入确定性槽位链；单个 Provider 10 秒超时或熔断时，其他来源仍可继续返回。',
-      '核心分工是：LLM 负责理解与工具编排，工程系统负责日期、机场、价格、新鲜度和最终事实。',
+      '意图识别不是一次模型分类，而是候选召回、语义路由、确定性抽槽和状态校验四层协作。',
+      '动态意图定义来自 PostgreSQL 并缓存 60 秒；规则和可选 Embedding 只生成 hint，最终由 ReAct 结合会话上下文选择工具。',
+      '机场、相对日期和必填槽位由确定性代码校验；模型 8 秒超时后进入 fallback，搜索仍能追问或继续执行。',
     ],
   },
   {
     id: 'decisions',
-    label: '可信闭环',
-    duration: '01:50',
+    label: 'Harness 工程',
+    duration: '02:00',
     notes: [
-      '可信依赖四个不变量：关键槽位完整、未知字段不补全、winner 资格可复算、文案和卡片共享冻结快照。',
-      '形成两个反馈环：用户行为进入可编辑记忆并影响下一次排序；LangSmith Trace 进入 Bad Case、修正规则或 Provider、再做回归测试。',
-      '因此闭环不是“模型越用越聪明”，而是每次错误都能定位，每次改动都能验证。',
+      '我理解的 Harness，是围绕概率模型建立 Context、State、Tools、Guardrails、Truth 和 Evaluation。',
+      '模型只负责理解歧义和规划工具；权限、超时、供应商隔离、价格资格、冻结事实和回归测试都由 Harness 承担。',
+      '因此系统的正确性不依赖某个模型、Embedding 或单一 Provider：组件可以替换，边界和不变量保持稳定。',
     ],
   },
   {
@@ -419,15 +419,15 @@ function ProfileSlide() {
 
   return (
     <div className="mx-auto grid min-h-full max-w-7xl items-center gap-8 lg:grid-cols-[0.68fr_1.32fr] lg:gap-12">
-      <div className="relative mx-auto w-full max-w-sm lg:max-w-[17rem] 2xl:max-w-sm">
+      <div className="relative mx-auto w-full max-w-[15rem] sm:max-w-[16rem] lg:max-w-[14rem] 2xl:max-w-[16rem]">
         <div className="absolute -bottom-4 -left-4 h-full w-full rounded-[28px] bg-brand-orange" />
         <Image
-          src="/open-mic/chen-yongqi.png"
+          src="/open-mic/chen-yongqi-open-mic.jpg"
           alt="陈永琪"
-          width={617}
-          height={617}
+          width={1366}
+          height={2048}
           priority
-          className="relative aspect-square w-full rounded-[28px] border border-brand-text/10 bg-white object-cover object-top shadow-card"
+          className="relative aspect-[3/4] w-full rounded-[28px] border border-brand-text/10 bg-white object-cover object-[center_52%] shadow-card"
         />
         <div className="relative mt-4 border-l-4 border-brand-orange pl-4">
           <h2 className="text-3xl font-black">陈永琪</h2>
@@ -637,45 +637,45 @@ function ArchitectureSlide() {
   const stages = [
     {
       step: '01',
-      label: '上下文与路由',
-      detail: 'Redis 恢复 30 分钟会话槽位，PostgreSQL 偏好注入上下文。',
-      flow: '动态意图 → ReAct',
-      icon: <BrainCircuit />,
+      label: '候选召回',
+      detail: '意图定义从 PostgreSQL 加载，Redis 缓存 60 秒；关键词、示例和模糊匹配先召回候选。',
+      flow: 'Intent Registry → hint',
+      icon: <Database />,
     },
     {
       step: '02',
-      label: '要素校验与工具',
-      detail: '缺少出发地、目的地或日期就先追问；用户身份由服务端注入。',
-      flow: 'ask_user | search_flights',
-      icon: <Route />,
+      label: '可选快速路径',
+      detail: 'Embedding 可用时匹配最近示例；当前 DeepSeek 不支持就自动跳过，正确性不依赖它。',
+      flow: 'optional embedding fastpath',
+      icon: <SearchCheck />,
     },
     {
       step: '03',
-      label: '并行数据面',
-      detail: '飞猪实时、携程快照与国际来源按航线并发，逐来源返回状态。',
-      flow: 'async + 10s timeout',
-      icon: <Network />,
+      label: '语义路由',
+      detail: 'ReAct 读取当前日期、会话槽位、长期偏好、意图定义和 hint，决定追问或调用工具。',
+      flow: 'ask_user | search | memory | alert',
+      icon: <BrainCircuit />,
     },
     {
       step: '04',
-      label: '证据与输出',
-      detail: 'FlightOffer 归一、去重和排序；冻结事实后同时生成文案与卡片。',
-      flow: 'Normalize → Freeze → Render',
-      icon: <BadgeCheck />,
+      label: '抽槽与校验',
+      detail: '确定性代码解析机场、相对日期、预算和约束，再与会话状态合并并检查必填项。',
+      flow: 'parse → merge → validate',
+      icon: <Route />,
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="06 · REQUEST LIFECYCLE" title="一次请求，如何变成一份可验证的推荐" />
+      <SlideHeading eyebrow="06 · INTENT ROUTING" title="意图识别不是一次分类，而是一条分层路由" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
-        主链负责完成任务，异常链保证可退化，证据链确保每一个价格都能追溯。
+        输入“下周五从北京到长治”后，模型负责理解歧义，Harness 负责把理解约束成可执行状态。
       </p>
-      <div className="mt-6 grid items-stretch gap-4 lg:grid-cols-4">
+      <div className="mt-5 grid items-stretch gap-3 lg:grid-cols-4">
         {stages.map((stage, index) => (
           <div
             key={stage.label}
-            className={`relative rounded-[24px] border p-5 shadow-sm ${
-              index === 1
+            className={`relative rounded-[20px] border p-4 shadow-sm ${
+              index === 2
                 ? 'border-brand-orange/30 bg-brand-orange-light'
                 : index === 3
                   ? 'border-green-200 bg-green-50'
@@ -686,8 +686,8 @@ function ArchitectureSlide() {
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{stage.icon}</div>
               <span className="text-xs font-black text-brand-orange">{stage.step}</span>
             </div>
-            <h3 className="mt-4 text-lg font-black">{stage.label}</h3>
-            <p className="mt-2 min-h-12 text-sm leading-6 text-brand-muted">{stage.detail}</p>
+            <h3 className="mt-3 text-lg font-black">{stage.label}</h3>
+            <p className="mt-2 text-sm leading-6 text-brand-muted">{stage.detail}</p>
             <div className="mt-3 border-t border-brand-text/10 pt-3 text-xs font-bold text-brand-text">{stage.flow}</div>
             {index < stages.length - 1 ? (
               <ArrowRight className="absolute -right-3 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" />
@@ -695,48 +695,72 @@ function ArchitectureSlide() {
           </div>
         ))}
       </div>
-      <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <ArchitectureBand icon={<RefreshCw />} title="模型失败可退化" detail="LLM 8 秒超时后转入确定性槽位链，继续追问或搜索。" />
-        <ArchitectureBand icon={<ShieldCheck />} title="来源失败可隔离" detail="Provider 10 秒超时；连续失败触发熔断，其他来源仍返回部分结果。" />
-        <ArchitectureBand icon={<Radar />} title="链路全程可观测" detail="flight_search → provider.* → normalize → rank → stream_results。" />
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <IntentGuard label="必填槽位" value="出发地 · 目的地 · 出发日期" />
+        <IntentGuard label="多轮防串线" value="强新意图 ≥ 0.90 打破 sticky intent" />
+        <IntentGuard label="异常回退" value="LLM 8s 超时 → deterministic fallback" />
       </div>
     </div>
   )
 }
 
 function DecisionsSlide() {
-  const invariants = [
-    ['输入完整', '机场目录与未来日期确定性校验；关键槽位不全，不启动搜索。'],
-    ['数据诚实', '未知税费和行李保留 null；实时、过期、排队、超时状态全部显式。'],
-    ['赢家可复算', '只有满足新鲜度、价格与链接条件的报价能成为 winning_price。'],
-    ['输出同源', 'ResponseFacts 深拷贝并冻结；AI 文案和卡片只读取同一份快照。'],
+  const layers = [
+    {
+      label: 'Context',
+      title: '给模型正确上下文',
+      detail: 'Redis 30 分钟会话、PostgreSQL 长期记忆、动态 Intent Registry。',
+      icon: <Database />,
+    },
+    {
+      label: 'State & Policy',
+      title: '约束任务状态流转',
+      detail: 'LangGraph 状态机、槽位合并、缺项追问、超时 fallback。',
+      icon: <RefreshCw />,
+    },
+    {
+      label: 'Tools & Data',
+      title: '隔离外部不确定性',
+      detail: 'Typed Tools、服务端身份注入、Provider 超时/熔断/部分返回。',
+      icon: <Network />,
+    },
+    {
+      label: 'Truth',
+      title: '建立事实边界',
+      detail: 'FlightOffer 归一化、winner 资格校验、ResponseFacts 冻结同源。',
+      icon: <BadgeCheck />,
+    },
+    {
+      label: 'Evaluation',
+      title: '让错误进入闭环',
+      detail: 'LangSmith Trace、字段脱敏、Bad Case 定位、回归测试。',
+      icon: <Radar />,
+    },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="07 · TRUSTED SYSTEM" title="可信不是模型说对，而是系统让它难以说错" />
-      <div className="mt-6 grid gap-4 lg:grid-cols-4">
-        {invariants.map(([title, detail], index) => (
-          <div key={title} className="rounded-[24px] border border-brand-text/5 bg-white p-5 shadow-card">
-            <div className="text-xs font-black text-brand-orange">INVARIANT 0{index + 1}</div>
-            <h3 className="mt-3 text-lg font-black">{title}</h3>
-            <p className="mt-2 text-sm leading-6 text-brand-muted">{detail}</p>
-          </div>
+      <SlideHeading eyebrow="07 · HARNESS ENGINEERING" title="把概率模型，装进一个可控系统" />
+      <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
+        Harness 不是模型外面的一层胶水，而是决定 Agent 能否可靠完成任务的工程主体。
+      </p>
+      <div className="mt-5 grid gap-3 lg:grid-cols-5">
+        {layers.map((layer, index) => (
+          <HarnessLayer key={layer.label} {...layer} index={index} />
         ))}
       </div>
-      <div className="mt-5 grid gap-4 lg:grid-cols-2">
-        <FeedbackLoop
-          icon={<Database />}
-          title="个性化反馈环"
-          flow="查询 / 点击 → 偏好提取 → PostgreSQL → 下一轮 Context"
-          detail="记忆只改变排序与解释，不修改供应商价格，并允许用户查看和编辑。"
-        />
-        <FeedbackLoop
-          icon={<Radar />}
-          title="质量反馈环"
-          flow="LangSmith Trace → Bad Case → 规则 / Prompt / Provider → 回归测试"
-          detail="错误能定位到模型、参数、数据源或映射层，每次修复都有可验证出口。"
-        />
+      <div className="mt-4 grid gap-3 lg:grid-cols-[0.72fr_1.28fr]">
+        <div className="rounded-[20px] border border-brand-orange/20 bg-brand-orange-light px-4 py-3">
+          <div className="text-xs font-black text-brand-orange">MODEL OWNS</div>
+          <div className="mt-1 text-sm font-bold">理解歧义 · 规划工具 · 生成解释</div>
+        </div>
+        <div className="rounded-[20px] bg-brand-text px-4 py-3 text-white shadow-card">
+          <div className="text-xs font-black text-brand-orange-light">HARNESS OWNS</div>
+          <div className="mt-1 text-sm font-bold">Context · State · Tools · Guardrails · Truth · Evaluation</div>
+        </div>
       </div>
+      <p className="mt-3 text-center text-sm font-black text-brand-text">
+        模型、Embedding 或单一 Provider 都可以替换；正确性边界不随之漂移。
+      </p>
     </div>
   )
 }
@@ -806,39 +830,39 @@ function Metric({ value, label }: { value: string; label: string }) {
   )
 }
 
-function ArchitectureBand({ icon, title, detail }: { icon: React.ReactElement; title: string; detail: string }) {
+function IntentGuard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 rounded-[24px] border border-brand-text/5 bg-white p-4 shadow-sm">
-      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-orange/10 text-brand-orange [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
-      <div>
-        <h3 className="font-black">{title}</h3>
-        <p className="mt-1 text-sm leading-6 text-brand-muted">{detail}</p>
-      </div>
+    <div className="rounded-[18px] border border-brand-text/5 bg-white px-4 py-3 shadow-sm">
+      <div className="text-xs font-black text-brand-orange">{label}</div>
+      <div className="mt-1 text-sm font-bold text-brand-text">{value}</div>
     </div>
   )
 }
 
-function FeedbackLoop({
+function HarnessLayer({
   icon,
+  label,
   title,
-  flow,
   detail,
+  index,
 }: {
   icon: React.ReactElement
+  label: string
   title: string
-  flow: string
   detail: string
+  index: number
 }) {
   return (
-    <div className="grid grid-cols-[2.75rem_minmax(0,1fr)] gap-3 rounded-[24px] border border-brand-orange/10 bg-brand-orange/5 p-4">
-      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-orange text-white [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
-      <div>
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h3 className="font-black">{title}</h3>
-          <span className="text-xs font-bold text-brand-orange">{flow}</span>
-        </div>
-        <p className="mt-1 text-sm leading-6 text-brand-muted">{detail}</p>
+    <div className={`relative rounded-[20px] border p-4 shadow-sm ${
+      index === 3 ? 'border-green-200 bg-green-50' : 'border-brand-text/5 bg-white'
+    }`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-orange/10 text-brand-orange [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
+        <span className="text-[10px] font-black uppercase text-brand-muted">{label}</span>
       </div>
+      <h3 className="mt-3 text-base font-black">{title}</h3>
+      <p className="mt-2 text-sm leading-6 text-brand-muted">{detail}</p>
+      {index < 4 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
     </div>
   )
 }
