@@ -30,6 +30,43 @@ def test_extracts_complete_route_with_relative_date():
     assert missing_required_slots(slots) == []
 
 
+def test_extracts_next_weekday_from_complete_route():
+    slots = fill_slots(
+        "下周五从北京到长治",
+        today=date(2026, 7, 19),
+    )
+
+    assert slots.origin == "北京"
+    assert slots.destination == "长治"
+    assert slots.depart_date == "2026-07-24"
+    assert missing_required_slots(slots) == []
+
+
+def test_date_only_next_weekday_completes_accumulated_route():
+    route = fill_slots(
+        "从北京到长治",
+        today=date(2026, 7, 19),
+    )
+    completed = fill_slots(
+        "下周五",
+        route,
+        today=date(2026, 7, 19),
+    )
+
+    assert completed.origin == "北京"
+    assert completed.destination == "长治"
+    assert completed.depart_date == "2026-07-24"
+    assert missing_required_slots(completed) == []
+
+
+def test_relative_weekday_supports_week_and_weekday_variants():
+    base = date(2026, 7, 20)
+
+    assert fill_slots("下星期五北京到长治", today=base).depart_date == "2026-07-31"
+    assert fill_slots("下下周一北京到长治", today=base).depart_date == "2026-08-03"
+    assert fill_slots("礼拜日北京到长治", today=base).depart_date == "2026-07-26"
+
+
 def test_merges_multi_turn_slot_context():
     first = fill_slots("下周末去三亚", today=date(2026, 5, 9))
     second = fill_slots("北京", first, today=date(2026, 5, 9))

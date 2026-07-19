@@ -53,6 +53,23 @@ _CHINESE_NUMERALS = {
     "九": 9,
     "十": 10,
 }
+_WEEKDAY_NUMBERS = {
+    "一": 0,
+    "二": 1,
+    "三": 2,
+    "四": 3,
+    "五": 4,
+    "六": 5,
+    "日": 6,
+    "天": 6,
+    "1": 0,
+    "2": 1,
+    "3": 2,
+    "4": 3,
+    "5": 4,
+    "6": 5,
+    "7": 6,
+}
 _CATALOG = AirportCatalog.load_default()
 
 
@@ -612,6 +629,11 @@ def _extract_depart_date(text: str, *, today: date | None = None) -> str | None:
         return _next_weekday(base + timedelta(days=7), 5).isoformat()
     if "周末" in text or "这个周末" in text or "本周末" in text:
         return _next_weekday(base, 5).isoformat()
+
+    relative_weekday = _extract_relative_weekday(text, base)
+    if relative_weekday is not None:
+        return relative_weekday.isoformat()
+
     if "国庆" in text:
         return date(base.year, 10, 1).isoformat()
     if "五一" in text:
@@ -634,6 +656,33 @@ def _extract_depart_date(text: str, *, today: date | None = None) -> str | None:
         return date(int(match.group(1)), int(match.group(2)), int(match.group(3))).isoformat()
 
     return None
+
+
+def _extract_relative_weekday(text: str, base: date) -> date | None:
+    match = re.search(
+        r"(?P<prefix>下下|下|这|本)?(?:周|星期|礼拜)"
+        r"(?P<weekday>[一二三四五六日天1-7])",
+        text,
+    )
+    if match is None:
+        return None
+
+    week_offset = {
+        "下下": 2,
+        "下": 1,
+        "这": 0,
+        "本": 0,
+        None: 0,
+    }[match.group("prefix")]
+    week_start = base - timedelta(days=base.weekday())
+    candidate = (
+        week_start
+        + timedelta(weeks=week_offset)
+        + timedelta(days=_WEEKDAY_NUMBERS[match.group("weekday")])
+    )
+    if candidate < base:
+        candidate += timedelta(weeks=1)
+    return candidate
 
 
 def _future_date(base: date, month: int, day: int) -> date:
