@@ -141,6 +141,16 @@ def _minutes(value: object) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _airport_code(value: object, fallback: object) -> str | None:
+    for candidate in (value, fallback):
+        if not isinstance(candidate, str):
+            continue
+        code = candidate.strip()
+        if len(code) == 3 and code.isascii() and code.isalpha():
+            return code.upper()
+    return None
+
+
 def _provider_location(query: FlightQuery, side: str) -> str:
     location = getattr(query, side, None)
     if location is not None:
@@ -186,6 +196,24 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
 
         first_segment = segments[0]
         last_segment = segments[-1]
+        origin_scope = _airport_code(query.origin_airport_scope, None)
+        destination_scope = _airport_code(
+            query.destination_airport_scope, None
+        )
+        origin_airport_code = _airport_code(
+            first_segment.get("depStationCode"), origin_scope
+        )
+        destination_airport_code = _airport_code(
+            last_segment.get("arrStationCode"), destination_scope
+        )
+        if (
+            origin_scope is not None
+            and origin_airport_code != origin_scope
+        ) or (
+            destination_scope is not None
+            and destination_airport_code != destination_scope
+        ):
+            continue
         flight_numbers = [
             str(segment.get("marketingTransportNo", "")).strip()
             for segment in segments
@@ -218,8 +246,10 @@ def parse_flyai_payload(payload: dict, query: FlightQuery) -> list[FlightOffer]:
                 airline="/".join(airlines),
                 origin_city=query.origin_city,
                 origin_code=query.origin_code,
+                origin_airport_code=origin_airport_code,
                 destination_city=query.destination_city,
                 destination_code=query.destination_code,
+                destination_airport_code=destination_airport_code,
                 depart_date=query.depart_date,
                 depart_time=_time_part(first_segment.get("depDateTime")),
                 arrive_time=_time_part(last_segment.get("arrDateTime")),

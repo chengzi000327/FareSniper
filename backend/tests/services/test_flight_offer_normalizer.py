@@ -29,6 +29,8 @@ def _offer(
     price: int | None,
     flight_no: str = "CA1835",
     depart_time: str = "08:00",
+    origin_airport_code: str | None = None,
+    destination_airport_code: str | None = None,
     stops: int = 0,
     status: PriceStatus = PriceStatus.priced,
     realtime: bool = True,
@@ -44,8 +46,10 @@ def _offer(
         airline="中国国航",
         origin_city="北京",
         origin_code="BJS",
+        origin_airport_code=origin_airport_code,
         destination_city="上海",
         destination_code="SHA",
+        destination_airport_code=destination_airport_code,
         depart_date="2099-08-01",
         depart_time=depart_time,
         arrive_time="10:10",
@@ -142,6 +146,43 @@ def test_deduplicates_identity_and_orders_price_rows_stably():
     assert deal["tax"] is None
     assert deal["baggage_fee"] is None
     assert deal["has_baggage"] is None
+
+
+def test_flyai_and_ctrip_offers_with_same_airports_merge_into_one_card():
+    results = {
+        "flyai": ProviderResult(
+            provider="flyai",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="flyai",
+                    seller="飞猪",
+                    price=550,
+                    origin_airport_code="PEK",
+                    destination_airport_code="PVG",
+                )
+            ],
+        ),
+        "ctrip": ProviderResult(
+            provider="ctrip",
+            status=ProviderStatus.success,
+            offers=[
+                _offer(
+                    provider="ctrip_snapshot",
+                    seller="携程",
+                    price=500,
+                    origin_airport_code="PEK",
+                    destination_airport_code="PVG",
+                    realtime=False,
+                )
+            ],
+        ),
+    }
+
+    deals = offers_to_deals(_query(), results)
+
+    assert len(deals) == 1
+    assert [row["name"] for row in deals[0]["prices"]] == ["携程", "飞猪"]
 
 
 def test_status_rows_cover_provider_without_offers():

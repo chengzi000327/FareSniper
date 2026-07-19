@@ -44,6 +44,88 @@ def test_parse_maps_price_flight_and_jump_url():
     assert offers[0].booking_url.startswith("https://")
 
 
+def test_parser_maps_airport_codes_from_first_and_last_segments():
+    offer = parse_flyai_payload(_payload(), _query())[0]
+
+    assert offer.origin_airport_code == "PEK"
+    assert offer.destination_airport_code == "PVG"
+
+
+@pytest.mark.parametrize(
+    "scope_update",
+    [
+        {"origin_airport_scope": "PKX"},
+        {"destination_airport_scope": "SHA"},
+    ],
+)
+def test_parser_filters_item_that_conflicts_with_explicit_airport_scope(
+    scope_update,
+):
+    query = _query().model_copy(update=scope_update)
+
+    assert parse_flyai_payload(_payload(), query) == []
+
+
+def test_parser_normalizes_station_codes_and_falls_back_to_query_airport_scope():
+    payload = _payload()
+    segment = payload["data"]["itemList"][0]["journeys"][0]["segments"][0]
+    segment["depStationCode"] = " invalid "
+    segment["arrStationCode"] = None
+    query = _query().model_copy(
+        update={
+            "origin_airport_scope": " pkx ",
+            "destination_airport_scope": " sha ",
+        }
+    )
+
+    offer = parse_flyai_payload(payload, query)[0]
+
+    assert offer.origin_airport_code == "PKX"
+    assert offer.destination_airport_code == "SHA"
+
+
+def test_parser_rejects_non_ascii_station_code_and_uses_query_airport_scope():
+    payload = _payload()
+    segment = payload["data"]["itemList"][0]["journeys"][0]["segments"][0]
+    segment["depStationCode"] = "北京首"
+    query = _query().model_copy(update={"origin_airport_scope": "PKX"})
+
+    offer = parse_flyai_payload(payload, query)[0]
+
+    assert offer.origin_airport_code == "PKX"
+
+
+@pytest.mark.parametrize(
+    ("origin_scope", "expected_airport_code"),
+    [("PKX", "PKX"), (None, None)],
+)
+def test_parser_rejects_non_ascii_station_code_before_uppercasing(
+    origin_scope,
+    expected_airport_code,
+):
+    payload = _payload()
+    segment = payload["data"]["itemList"][0]["journeys"][0]["segments"][0]
+    segment["depStationCode"] = "ſha"
+    query = _query().model_copy(update={"origin_airport_scope": origin_scope})
+
+    offers = parse_flyai_payload(payload, query)
+
+    assert len(offers) == 1
+    assert offers[0].origin_airport_code == expected_airport_code
+
+
+def test_parser_keeps_none_when_station_codes_and_airport_scopes_are_missing():
+    payload = _payload()
+    segment = payload["data"]["itemList"][0]["journeys"][0]["segments"][0]
+    segment.pop("depStationCode")
+    segment.pop("arrStationCode")
+
+    offer = parse_flyai_payload(payload, _query())[0]
+
+    assert offer.origin_airport_code is None
+    assert offer.destination_airport_code is None
+
+
 def test_parser_supports_legacy_adult_price_when_ticket_price_is_absent():
     payload = _payload()
     item = payload["data"]["itemList"][0]
@@ -98,6 +180,8 @@ def test_parser_flattens_segments_and_computes_stops():
         {
             "marketingTransportName": "东航",
             "marketingTransportNo": "MU5100",
+            "depStationCode": "PVG",
+            "arrStationCode": "CAN",
             "depDateTime": "2099-08-02 08:00:00",
             "arrDateTime": "2099-08-02 10:00:00",
             "seatClassName": "经济舱",
@@ -109,6 +193,8 @@ def test_parser_flattens_segments_and_computes_stops():
     assert offer.flight_no == "CA1883/MU5100"
     assert offer.airline == "国航/东航"
     assert offer.stops == 1
+    assert offer.origin_airport_code == "PEK"
+    assert offer.destination_airport_code == "CAN"
 
 
 def test_parser_skips_unpriced_item_without_valid_https_url():
@@ -179,12 +265,16 @@ async def test_search_uses_safe_arguments_and_inherited_key(monkeypatch):
 @pytest.mark.asyncio
 async def test_search_preserves_explicit_airport_in_provider_arguments(monkeypatch):
     calls = []
+    payload = _payload()
+    payload["data"]["itemList"][0]["journeys"][0]["segments"][0][
+        "depStationCode"
+    ] = "PKX"
 
     class FakeProcess:
         returncode = 0
 
         async def communicate(self):
-            return FIXTURE.read_bytes(), b""
+            return json.dumps(payload).encode(), b""
 
     async def fake_create(*args, **kwargs):
         calls.append(args)
@@ -197,17 +287,22 @@ async def test_search_preserves_explicit_airport_in_provider_arguments(monkeypat
 
     assert calls[0][3:7] == ("PKX", "--destination", "SHA", "--dep-date")
     assert result.status is ProviderStatus.success
+    assert result.offers[0].origin_airport_code == "PKX"
 
 
 @pytest.mark.asyncio
 async def test_search_preserves_exact_international_airports(monkeypatch):
     calls = []
+    payload = _payload()
+    segment = payload["data"]["itemList"][0]["journeys"][0]["segments"][0]
+    segment["depStationCode"] = "HND"
+    segment["arrStationCode"] = "GMP"
 
     class FakeProcess:
         returncode = 0
 
         async def communicate(self):
-            return FIXTURE.read_bytes(), b""
+            return json.dumps(payload).encode(), b""
 
     async def fake_create(*args, **kwargs):
         calls.append(args)
@@ -220,6 +315,8 @@ async def test_search_preserves_exact_international_airports(monkeypatch):
 
     assert calls[0][3:7] == ("HND", "--destination", "GMP", "--dep-date")
     assert result.status is ProviderStatus.success
+    assert result.offers[0].origin_airport_code == "HND"
+    assert result.offers[0].destination_airport_code == "GMP"
 
 
 @pytest.mark.asyncio
