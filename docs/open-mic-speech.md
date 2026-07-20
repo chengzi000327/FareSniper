@@ -96,29 +96,39 @@ FareSniper 就是这三段经历的交汇点：前面是自然语言交互，中
 
 “现场数据源还在返回，我先用这张相同结构的结果卡说明。产品会诚实保留‘正在获取’或‘暂时不可用’状态，而不会为了完成回答伪造价格。这也是我把供应商状态做成产品能力的一部分，而不是简单报错的原因。”
 
-## 第 7 页：在线决策链路（9:00—11:00）
+## 第 7 页：完整系统架构（9:00—11:00）
 
-这张图不是技术名词列表，而是一条请求真正经过的两个平面。
+这张图按职责把 FareSniper 拆成五层，而不是把所有逻辑塞进一个 Agent。
 
-上面是 Control Plane。用户请求从 Next.js 进入 FastAPI，服务端完成 JWT 和 request scope 校验；Bootstrap 从 Redis 恢复短期会话、从 PostgreSQL 读取长期记忆。Intent Harness 先通过 Registry 召回候选，再由确定性代码抽取航线、日期、预算和行李，并校验必填槽位。只有省略或歧义需要理解时才调用 ReAct，LangGraph 最后选择 Typed Tool；用户身份和数据源凭证都由 Tool Router 注入，模型本身没有权限。
+A 是交互与上下文层。Next.js 负责输入和 SSE 展示，FastAPI 完成鉴权与 request scope；Redis 保存短期会话，PostgreSQL 保存长期偏好和行为，模型不会自己猜历史。
 
-下面是 Data / Truth Plane。`search_flights` 进入 Aggregator 后并发调用统一 Provider Contract，目前包含 FlyAI、携程快照和 SerpAPI。每个来源独立超时和熔断，`asyncio.as_completed` 让已经完成的来源通过 SSE 先返回，慢来源不会拖垮整次请求。
+B 是意图与编排层。Intent Registry 先召回候选，确定性代码抽取机场、日期、预算和行李，再校验必填槽位；只有歧义部分交给 ReAct。LangGraph 选择 Typed Tool，用户身份和 Provider 凭证由 Tool Router 注入，所以模型不能越权直连数据源。
 
-所有结果先归一为 FlightOffer。未知税费和行李保留 null，不由模型补全；Truth Engine 再完成报价资格、完整成本和排序。最后冻结成 ResponseFacts，AI 文案、价格卡片和后续提醒都只能引用这份事实。
+C 是数据执行层。Aggregator 通过统一 FlightProvider Contract 并发调用 FlyAI、携程快照和 SerpAPI。每个来源独立超时和熔断，`as_completed` 让可用结果先返回，慢来源不会拖垮整次请求。
 
-所以这里有两个事实边界：FlightOffer 约束数据源，ResponseFacts 约束所有输出。模型负责歧义理解、工具规划和解释；Harness 负责状态、权限、超时、资格、Grounding 与回退。
+D 是事实与决策层。所有结果归一为 FlightOffer，保留来源、新鲜度和 null；Truth Engine 再做报价资格、完整成本和排序，最后冻结为 ResponseFacts。FlightOffer 约束输入事实，ResponseFacts 约束所有输出。
 
-转场：一次搜索结束后，真正的 Agent 还需要继续工作。
+E 是交付与反馈层。SSE、AI 文案和价格卡片都读取 ResponseFacts；PriceAlert 和 Worker 复用同一价格口径。用户点击、盯价和购买信号再写回 PostgreSQL，进入下一次 Context Bootstrap。
 
-## 第 8 页：异步监控链路（11:00—12:30）
+横向 Harness 贯穿五层，统一承担 Auth、State、Schema、Timeout、Grounding 和 Idempotency；LangSmith 与契约测试提供证据。模型只负责理解歧义、规划工具和解释结果。
 
-用户点击监控价格后，PriceAlert 保存航线、日期、目标价和完整约束。Worker 当前每 15 分钟检查一次，携程快照每小时刷新一次；它们复用相同的 Provider Contract 和 FlightOffer，而不是另造一套价格口径。
+转场：当前架构已经能运行，下一步工程重点不是继续堆功能，而是补齐可靠性和扩展性。
 
-图上前三个绿色节点已经实现：创建监控、定时调度、刷新价格与 Web Push。后两个橙色节点是下一步工程演进：PurchaseWindowEvaluator 不只判断是否低于目标价，还会确定性校验用户约束、报价资格和历史价格区间；满足条件后生成 `PurchaseWindowOpened` 事件，事务 Outbox 负责幂等、冷却、重试和投递日志，再分发到 Web Push、飞书或微信订阅消息。
+## 第 8 页：工程能力演进（11:00—12:30）
 
-状态只允许从 WATCHING 走到 CANDIDATE、WORTH_BUYING 和 NOTIFIED。同一报价事件通过 alert ID、offer ID 和决策版本生成幂等键，避免价格抖动反复骚扰用户。
+上方是监控链路。前三个绿色节点已经实现：PriceAlert、15 分钟 Scheduler 和数据刷新；后面三个是下一阶段：PurchaseWindowEvaluator、事务 Outbox 和多渠道通知。
 
-最重要的边界是：大模型只把 reason codes 解释成用户能理解的话，不负责触发提醒。这样即使换模型，也不会改变“什么时候值得买”的确定性标准。
+下面四项是我按风险排出的工程优先级。
+
+P1 是调度与扩展。当前单 Worker 固定轮询，下一步根据出发日期和接近目标价的程度做自适应频率，并加入优先级队列和分布式锁。
+
+P2 是事件可靠性。当前触发后直接 Web Push，下一步采用 Transactional Outbox、幂等键、重试与 DLQ，保证通知不丢、不重，也能审计。
+
+P3 是数据质量。在已有 status、freshness 和 null 保真的基础上，增加来源 SLO、Schema Version、Provenance 和 Fixture Replay，让异常报价可以离线重放。
+
+P4 是发布治理。在 LangSmith 和自动化测试之上，补齐业务与系统 SLO、Feature Flag、Canary 和一键回滚。
+
+购买窗口仍由确定性公式触发；大模型只解释 reason codes，不改变触发条件。这样扩容、换模型或增加微信与飞书渠道，都不会改变业务正确性。
 
 转场：链路能运行还不够，我还要证明错误能够被发现、复现，并且不再回来。
 
@@ -150,8 +160,8 @@ FareSniper 不想成为另一个卖票平台。它更希望站在用户这一边
 
 - 第 2 页不要逐条念简历，重点讲三段经历分别带来了什么产品方法。
 - 第 6 页最多 3 分钟。数据返回后只讲一个结果，不逐个展开所有航班。
-- 第 7 页沿 Control Plane 和 Data / Truth Plane 各讲一遍，最后只收束两个事实边界。
-- 第 8 页必须区分绿色已上线、橙色下一步；重点讲确定性触发、状态机与幂等，不逐个解释通知渠道。
+- 第 7 页从 A 到 E 每层只讲一句职责，最后收束 FlightOffer、ResponseFacts 和横向 Harness 三个边界。
+- 第 8 页必须区分绿色已上线、橙色下一步；四项工程能力只讲“当前问题 → 目标机制”，不要展开术语定义。
 - 第 9 页只展开四个 Bad Case，每个都按“问题—Guard—回归测试”讲一句。
 - 讲到“杀熟”时使用“信任缺口”“用户无法验证”，不要断言平台已经实施差别定价。
 - 剩余时间不足时，优先缩短第 4 页和第 9 页，保留核心洞察、Demo、两张技术链路和结尾。

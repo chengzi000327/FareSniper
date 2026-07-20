@@ -8,7 +8,6 @@ import {
   Activity,
   ArrowLeft,
   ArrowRight,
-  BadgeCheck,
   BellRing,
   BrainCircuit,
   Check,
@@ -17,7 +16,6 @@ import {
   Database,
   ExternalLink,
   Gauge,
-  GitBranch,
   GraduationCap,
   Luggage,
   Maximize2,
@@ -33,7 +31,6 @@ import {
   ServerCog,
   ShieldCheck,
   Sparkles,
-  Workflow,
   X,
 } from 'lucide-react'
 
@@ -108,19 +105,19 @@ const SLIDES: SlideDefinition[] = [
     label: '技术架构',
     duration: '02:00',
     notes: [
-      '同步链路分为 Control Plane 与 Data / Truth Plane。前者负责状态、意图与工具规划，后者负责并发取数、标准化、完整成本与事实冻结。',
-      '意图先走 Registry、确定性抽槽与必填校验，ReAct 只处理歧义；Provider 通过统一 Contract 并发执行，慢来源由超时、熔断和 partial result 隔离。',
-      'FlightOffer 是数据事实边界，ResponseFacts 是输出事实边界；AI 文案、SSE 和价格卡片必须引用同一份冻结事实。',
+      '系统按职责拆成五层：交互与上下文、意图与编排、数据执行、事实与决策、交付与反馈。请求只沿层间 Contract 流动，不允许模型跨层直连数据源。',
+      'Intent Registry、确定性抽槽和必填校验先处理可规则化部分，ReAct 只处理歧义；Provider Contract 负责多源并发，FlightOffer 与 ResponseFacts 构成两道事实边界。',
+      '同步结果、异步提醒和记忆反馈共享同一事实口径；横向 Harness 统一承担权限、状态、超时、熔断、Grounding 与 Trace。',
     ],
   },
   {
     id: 'monitoring',
-    label: '主动监控',
+    label: '工程演进',
     duration: '01:30',
     notes: [
-      '搜索结束后，PriceAlert 保存航线、日期、目标价与用户约束；Worker 定期刷新数据，并复用同一套 Provider Contract 与 FlightOffer。',
-      '当前已经上线 15 分钟阈值检查与 Web Push；下一步升级为 PurchaseWindowEvaluator、事务 Outbox 和多渠道 Adapter。',
-      '购买窗口由确定性规则触发，模型只解释原因。状态机、幂等键、冷却时间和投递日志保证同一波动不会重复骚扰用户。',
+      '上方链路区分当前与下一步：PriceAlert、15 分钟 Worker、数据刷新和 Web Push 已有；PurchaseWindowEvaluator、事务 Outbox 与多渠道 Adapter 是下一阶段。',
+      '工程补强按风险排序：先保证事件不丢不重，再让调度可扩展，然后补齐数据新鲜度与可回放，最后建设 SLO、灰度和快速回滚。',
+      '购买窗口仍由确定性规则触发，模型只解释 reason codes；这样扩容、换模型或增加通知渠道都不改变业务正确性。',
     ],
   },
   {
@@ -679,182 +676,189 @@ function DemoSlide() {
 }
 
 function ArchitectureSlide() {
-  const controlPlane = [
+  const layers = [
     {
-      tag: 'CLIENT',
-      label: 'Next.js / PWA',
-      detail: '自然语言 · JWT · SSE',
-      icon: <Plane />,
-    },
-    {
-      tag: 'ENTRY',
-      label: 'FastAPI',
-      detail: 'Auth · request scope',
+      code: 'A',
+      title: '交互与上下文层',
+      subtitle: '输入、身份与状态恢复',
+      tone: 'blue' as const,
       icon: <ServerCog />,
+      items: [
+        { tag: 'ENTRY', label: '用户 / Next.js', detail: '自然语言 · JWT · SSE' },
+        { tag: 'API', label: 'FastAPI Request Scope', detail: '鉴权 · user_id 注入 · 限流' },
+        { tag: 'STATE', label: 'Redis + PostgreSQL', detail: '30m 会话 · 长期偏好 · 历史行为' },
+      ],
     },
     {
-      tag: 'CONTEXT',
-      label: 'Bootstrap',
-      detail: 'Redis 会话 + PG 记忆',
-      icon: <Database />,
+      code: 'B',
+      title: '意图与编排层',
+      subtitle: '确定性优先，模型处理歧义',
+      tone: 'orange' as const,
+      icon: <BrainCircuit />,
+      items: [
+        { tag: 'RECALL', label: 'Intent Registry', detail: '关键词 · 示例 · Embedding hint' },
+        { tag: 'PARSE', label: 'Slot Extractor', detail: '机场 · 日期 · 预算 · 行李' },
+        { tag: 'GUARD', label: 'Required Validator', detail: '缺槽追问 · 状态失效规则' },
+        { tag: 'PLAN', label: 'LangGraph + ReAct', detail: '歧义理解 → Typed Tool Router' },
+      ],
     },
     {
-      tag: 'UNDERSTAND',
-      label: 'Intent Harness',
-      detail: 'Registry → slots → required',
-      icon: <SearchCheck />,
-    },
-    {
-      tag: 'ORCHESTRATE',
-      label: 'LangGraph',
-      detail: 'ReAct → Typed Tools → fallback',
-      icon: <Workflow />,
-    },
-  ]
-  const truthPlane = [
-    {
-      tag: 'FAN-OUT',
-      label: 'Aggregator',
-      detail: 'as_completed · partial SSE',
-      icon: <GitBranch />,
-    },
-    {
-      tag: 'DATA SOURCE',
-      label: 'Provider Contract',
-      detail: 'FlyAI｜Ctrip｜SerpAPI',
+      code: 'C',
+      title: '数据执行层',
+      subtitle: '统一 Contract，并发隔离',
+      tone: 'purple' as const,
       icon: <Network />,
+      items: [
+        { tag: 'FAN-OUT', label: 'Search Aggregator', detail: 'as_completed · partial result' },
+        { tag: 'CONTRACT', label: 'FlightProvider', detail: 'supports · search · ProviderResult' },
+        { tag: 'SOURCES', label: 'FlyAI · Ctrip · SerpAPI', detail: '实时结果 · 小时快照 · 国际来源' },
+        { tag: 'RESILIENCE', label: 'Provider Isolation', detail: '10s timeout · breaker · fallback' },
+      ],
     },
     {
-      tag: 'CANONICAL',
-      label: 'FlightOffer',
-      detail: 'normalize · null-preserving',
-      icon: <Database />,
-    },
-    {
-      tag: 'DECISION',
-      label: 'Truth Engine',
-      detail: 'eligibility · full cost · rank',
-      icon: <BadgeCheck />,
-    },
-    {
-      tag: 'FREEZE',
-      label: 'ResponseFacts',
-      detail: 'AI · card · alert 同源',
+      code: 'D',
+      title: '事实与决策层',
+      subtitle: '标准化、资格与排序',
+      tone: 'amber' as const,
       icon: <ShieldCheck />,
+      items: [
+        { tag: 'CANONICAL', label: 'FlightOffer', detail: 'schema · provenance · null 保真' },
+        { tag: 'RULES', label: 'Truth Engine', detail: 'freshness · eligibility · full cost' },
+        { tag: 'RANK', label: 'Winner + Reason Codes', detail: '确定性排序 · 记忆只影响偏好' },
+        { tag: 'FREEZE', label: 'ResponseFacts', detail: '输出前冻结唯一事实' },
+      ],
+    },
+    {
+      code: 'E',
+      title: '交付与反馈层',
+      subtitle: '同源输出，持续监控',
+      tone: 'green' as const,
+      icon: <Radio />,
+      items: [
+        { tag: 'SYNC', label: 'SSE · AI · Price Card', detail: '全部读取 ResponseFacts' },
+        { tag: 'ASYNC', label: 'PriceAlert + Worker', detail: '15m 检查 · 携程 1h 刷新' },
+        { tag: 'CHANNEL', label: 'WebPush · 飞书 · 微信', detail: '当前渠道 · 后续 Adapter' },
+        { tag: 'FEEDBACK', label: 'Memory Signals', detail: '点击 · 盯价 · 购买 → 下次排序' },
+      ],
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SlideHeading eyebrow="06 · ONLINE DECISION PLANE" title="一次请求，如何成为可验证的购买建议" />
+        <div>
+          <div className="text-xs font-black text-brand-orange sm:text-sm">06 · SYSTEM ARCHITECTURE</div>
+          <h2 className="mt-2 max-w-5xl font-serif text-3xl font-black leading-tight sm:text-4xl">FareSniper Agent：从自然语言到可信决策</h2>
+        </div>
         <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">CURRENT · 已上线</span>
       </div>
-      <p className="mt-2 max-w-5xl text-sm leading-6 text-brand-muted">
-        同步请求拆成控制面与事实面；模型处理不确定性，确定性系统守住状态、权限与价格事实。
+      <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">
+        五层职责通过明确 Contract 串联；模型不能越过 Tool Router，也不能改写 FlightOffer 与 ResponseFacts。
       </p>
-      <div className="mt-4 space-y-3">
-        <ArchitectureBand label="CONTROL PLANE" nodes={controlPlane} tone="control" />
-        <div className="flex items-center justify-center gap-2 text-[11px] font-black text-brand-orange">
-          <ArrowRight className="h-4 w-4 rotate-90" />
-          Typed Tool: search_flights(query)
-        </div>
-        <ArchitectureBand label="DATA / TRUTH" nodes={truthPlane} tone="truth" />
+      <div className="mt-2 grid gap-3 lg:grid-cols-5">
+        {layers.map((layer, index) => (
+          <ArchitectureLayer key={layer.code} {...layer} index={index} total={layers.length} />
+        ))}
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[0.82fr_1.35fr_1fr]">
-        <HarnessRail label="MODEL OWNS" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
-        <HarnessRail label="HARNESS OWNS" value="State · Auth · Timeout · Eligibility · Grounding" tone="harness" />
-        <HarnessRail label="RESILIENCE" value="8s fallback · 10s timeout · 熔断 · partial result" tone="failure" />
-      </div>
-      <div className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-brand-muted">
-        <Radio className="h-4 w-4 text-brand-orange" />
-        LangSmith spans: intent → tool → provider → normalize → rank → stream
+      <div className="mt-2 grid gap-3 lg:grid-cols-[0.82fr_1.35fr_1fr]">
+        <HarnessRail label="MODEL" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
+        <HarnessRail label="CROSS-LAYER HARNESS" value="Auth · State · Schema · Timeout · Grounding · Idempotency" tone="harness" />
+        <HarnessRail label="EVIDENCE" value="LangSmith Trace · Provider status · Contract tests" tone="failure" />
       </div>
     </div>
   )
 }
 
 function MonitoringSlide() {
-  const monitorNodes = [
+  const monitorChain = [
     {
-      tag: '01 · DEFINE',
       label: 'PriceAlert',
-      detail: 'route · date · target · constraints',
+      detail: 'route · date · target',
       status: 'live' as const,
       icon: <BellRing />,
     },
     {
-      tag: '02 · SCHEDULE',
-      label: 'Worker',
-      detail: '15m check · Ctrip 1h refresh',
+      label: 'Scheduler',
+      detail: '15m check · 1h refresh',
       status: 'live' as const,
       icon: <Clock3 />,
     },
     {
-      tag: '03 · REFRESH',
-      label: 'Demand + Providers',
-      detail: '复用 Contract 与 FlightOffer',
+      label: 'Data Refresh',
+      detail: 'Demand + Providers',
       status: 'live' as const,
       icon: <RefreshCw />,
     },
     {
-      tag: '04 · EVALUATE',
-      label: 'Purchase Window',
-      detail: 'constraints ∧ eligible ∧ low price',
+      label: 'Window Evaluator',
+      detail: 'constraints · percentile',
       status: 'next' as const,
       icon: <Radar />,
     },
     {
-      tag: '05 · DELIVER',
-      label: 'Outbox',
-      detail: 'idempotency · cooldown · retry',
+      label: 'Tx Outbox',
+      detail: 'idempotency · retry · DLQ',
       status: 'next' as const,
       icon: <Activity />,
+    },
+    {
+      label: 'Multi-channel',
+      detail: 'WebPush · 飞书 · 微信',
+      status: 'next' as const,
+      icon: <Radio />,
+    },
+  ]
+  const capabilities = [
+    {
+      title: '调度与扩展',
+      current: '单 Worker · 固定 15m',
+      target: 'adaptive cadence · priority queue · distributed lock',
+    },
+    {
+      title: '事件可靠性',
+      current: '触发后直接 Push',
+      target: 'transactional outbox · idempotency · retry / DLQ',
+    },
+    {
+      title: '数据质量',
+      current: 'status · freshness · null 保真',
+      target: 'source SLO · schema version · provenance · replay',
+    },
+    {
+      title: '可观测与发布',
+      current: 'LangSmith · tests',
+      target: 'metrics SLO · feature flag · canary · rollback',
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SlideHeading eyebrow="07 · ASYNC MONITORING PLANE" title="搜索结束后，Agent 仍在工作" />
+        <SlideHeading eyebrow="07 · ENGINEERING ROADMAP" title="从能运行，到可靠、可扩展、可回滚" />
         <div className="flex gap-2 text-[10px] font-black">
           <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">LIVE · 已上线</span>
           <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">NEXT · 演进</span>
         </div>
       </div>
       <p className="mt-2 max-w-5xl text-sm leading-6 text-brand-muted">
-        在线搜索与异步监控共享同一 Provider Contract、FlightOffer 和 Truth Engine，避免两套价格口径。
+        先补正确性与可靠性，再扩吞吐与渠道；所有新增能力继续复用 FlightOffer、Truth Engine 与 Trace。
       </p>
-      <div className="mt-5 grid gap-3 lg:grid-cols-5">
-        {monitorNodes.map((node, index) => (
-          <MonitorNode key={node.label} {...node} index={index} total={monitorNodes.length} />
+      <div className="mt-4 grid gap-2 lg:grid-cols-6">
+        {monitorChain.map((node, index) => (
+          <EngineeringChainNode key={node.label} {...node} index={index} total={monitorChain.length} />
         ))}
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[1.45fr_0.9fr]">
-        <div className="rounded-[20px] bg-brand-text px-5 py-4 text-white shadow-card">
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-[10px] font-black text-brand-orange-light">DETERMINISTIC TRIGGER</span>
-            <span className="text-[10px] font-bold text-white/60">LLM 只解释，不触发</span>
-          </div>
-          <div className="mt-2 font-mono text-sm font-bold leading-6 text-white">
-            constraints_ok ∧ offer_eligible ∧ (total ≤ target ∨ percentile ≤ P20)
-          </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold text-white/70">
-            {['WATCHING', 'CANDIDATE', 'WORTH_BUYING', 'NOTIFIED'].map((state, index) => (
-              <React.Fragment key={state}>
-                <span className={state === 'WORTH_BUYING' ? 'text-brand-orange-light' : ''}>{state}</span>
-                {index < 3 ? <ArrowRight className="h-3.5 w-3.5" /> : null}
-              </React.Fragment>
-            ))}
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          <ChannelNode label="Web Push" detail="VAPID" status="live" />
-          <ChannelNode label="飞书" detail="Bot API" status="next" />
-          <ChannelNode label="微信" detail="订阅消息" status="next" />
-        </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-4">
+        {capabilities.map((capability, index) => (
+          <EvolutionCapability key={capability.title} {...capability} priority={index + 1} />
+        ))}
       </div>
-      <div className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-brand-muted">
-        <ShieldCheck className="h-4 w-4 text-brand-orange" />
-        PurchaseWindowOpened(alert_id, offer_id, reason_codes, freshness) → delivery log
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.35fr_0.65fr]">
+        <div className="rounded-lg bg-brand-text px-4 py-3 text-white shadow-card">
+          <div className="text-[9px] font-black text-brand-orange-light">DETERMINISTIC PURCHASE WINDOW</div>
+          <div className="mt-1 font-mono text-xs font-bold leading-5">constraints_ok ∧ offer_eligible ∧ (total ≤ target ∨ percentile ≤ P20)</div>
+        </div>
+        <div className="flex items-center justify-center rounded-lg border border-brand-orange/20 bg-brand-orange-light px-4 py-3 text-center text-xs font-black text-brand-text">
+          LLM 只解释 reason_codes，不负责触发
+        </div>
       </div>
     </div>
   )
@@ -1027,110 +1031,119 @@ function Metric({ value, label }: { value: string; label: string }) {
   )
 }
 
-type ArchitectureNodeData = {
-  icon: React.ReactElement
+type ArchitectureLayerTone = 'blue' | 'orange' | 'purple' | 'amber' | 'green'
+
+type ArchitectureLayerItem = {
   tag: string
   label: string
   detail: string
 }
 
-function ArchitectureBand({
-  label,
-  nodes,
+function ArchitectureLayer({
+  code,
+  title,
+  subtitle,
   tone,
-}: {
-  label: string
-  nodes: ArchitectureNodeData[]
-  tone: 'control' | 'truth'
-}) {
-  return (
-    <div className="grid gap-3 lg:grid-cols-[7.5rem_minmax(0,1fr)] lg:items-stretch">
-      <div className={`flex items-center rounded-[18px] px-4 py-3 text-[10px] font-black ${
-        tone === 'truth'
-          ? 'bg-green-50 text-green-700'
-          : 'bg-brand-orange-light text-brand-orange'
-      }`}>
-        {label}
-      </div>
-      <div className="grid gap-3 sm:grid-cols-5">
-        {nodes.map((node, index) => (
-          <ArchitectureChainNode key={node.label} {...node} index={index} total={nodes.length} tone={tone} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function ArchitectureChainNode({
   icon,
-  tag,
-  label,
-  detail,
+  items,
   index,
   total,
-  tone,
-}: ArchitectureNodeData & {
+}: {
+  code: string
+  title: string
+  subtitle: string
+  tone: ArchitectureLayerTone
+  icon: React.ReactElement
+  items: ArchitectureLayerItem[]
   index: number
   total: number
-  tone: 'control' | 'truth'
 }) {
+  const toneClasses: Record<ArchitectureLayerTone, { shell: string; icon: string; tag: string }> = {
+    blue: { shell: 'border-sky-300 bg-sky-50/70', icon: 'bg-sky-600', tag: 'text-sky-700' },
+    orange: { shell: 'border-orange-300 bg-orange-50/70', icon: 'bg-orange-500', tag: 'text-orange-700' },
+    purple: { shell: 'border-violet-300 bg-violet-50/70', icon: 'bg-violet-600', tag: 'text-violet-700' },
+    amber: { shell: 'border-amber-300 bg-amber-50/70', icon: 'bg-amber-500', tag: 'text-amber-700' },
+    green: { shell: 'border-emerald-300 bg-emerald-50/70', icon: 'bg-emerald-600', tag: 'text-emerald-700' },
+  }
+  const classes = toneClasses[tone]
   return (
-    <div className={`relative min-h-24 rounded-[18px] border bg-white px-3 py-3 shadow-sm ${
-      tone === 'truth' && index >= total - 2 ? 'border-green-200' : 'border-brand-text/5'
-    }`}>
-      <div className="flex items-center gap-2">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-white [&>svg]:h-4 [&>svg]:w-4 ${
-          tone === 'truth' && index >= total - 2 ? 'bg-green-600' : 'bg-brand-text'
-        }`}>{icon}</span>
-        <span className="text-[9px] font-black text-brand-orange">{tag}</span>
+    <div className={`relative rounded-lg border-2 border-dashed p-2.5 ${classes.shell}`}>
+      <div className="flex items-start gap-2">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white [&>svg]:h-3.5 [&>svg]:w-3.5 ${classes.icon}`}>{icon}</span>
+        <div className="min-w-0">
+          <h3 className="text-xs font-black"><span className={classes.tag}>{code}.</span> {title}</h3>
+          <p className="mt-0.5 text-[8px] font-semibold text-brand-muted">{subtitle}</p>
+        </div>
       </div>
-      <h3 className="mt-2 text-sm font-black">{label}</h3>
-      <p className="mt-1 text-[10px] font-semibold leading-4 text-brand-muted">{detail}</p>
-      {index < total - 1 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange sm:block" /> : null}
+      <div className="mt-2">
+        {items.map((item, itemIndex) => (
+          <div key={item.label}>
+            <div className="rounded-md border border-brand-text/10 bg-white px-2.5 py-1.5 shadow-sm">
+              <div className="flex items-baseline gap-1.5">
+                <span className={`shrink-0 text-[7px] font-black ${classes.tag}`}>[{item.tag}]</span>
+                <span className="min-w-0 text-[10px] font-black leading-4 text-brand-text">{item.label}</span>
+              </div>
+              <div className="truncate text-[8px] font-semibold leading-3 text-brand-muted">{item.detail}</div>
+            </div>
+            {itemIndex < items.length - 1 ? <ArrowRight className="mx-auto my-0.5 h-2.5 w-2.5 rotate-90 text-brand-text/40" /> : null}
+          </div>
+        ))}
+      </div>
+      {index < total - 1 ? <ArrowRight className="absolute -right-3 top-1/2 z-10 hidden h-6 w-6 -translate-y-1/2 rounded-full bg-brand-bg text-brand-text lg:block" /> : null}
     </div>
   )
 }
 
-function MonitorNode({
+function EngineeringChainNode({
   icon,
-  tag,
   label,
   detail,
   status,
   index,
   total,
-}: ArchitectureNodeData & {
+}: {
+  icon: React.ReactElement
+  label: string
+  detail: string
   status: 'live' | 'next'
   index: number
   total: number
 }) {
   return (
-    <div className={`relative min-h-36 rounded-[20px] border p-4 shadow-sm ${
-      status === 'live' ? 'border-green-200 bg-white' : 'border-brand-orange/20 bg-brand-orange-light'
+    <div className={`relative min-h-24 rounded-lg border px-3 py-3 shadow-sm ${
+      status === 'live' ? 'border-emerald-200 bg-emerald-50/60' : 'border-brand-orange/20 bg-brand-orange-light'
     }`}>
       <div className="flex items-center justify-between gap-2">
-        <span className={`flex h-9 w-9 items-center justify-center rounded-2xl text-white [&>svg]:h-5 [&>svg]:w-5 ${status === 'live' ? 'bg-green-600' : 'bg-brand-text'}`}>{icon}</span>
-        <span className={`rounded-full px-2 py-1 text-[9px] font-black ${status === 'live' ? 'bg-green-50 text-green-700' : 'bg-white text-brand-orange'}`}>
-          {status === 'live' ? 'LIVE' : 'NEXT'}
-        </span>
+        <span className={`flex h-7 w-7 items-center justify-center rounded-md text-white [&>svg]:h-4 [&>svg]:w-4 ${status === 'live' ? 'bg-emerald-600' : 'bg-brand-text'}`}>{icon}</span>
+        <span className={`text-[8px] font-black ${status === 'live' ? 'text-emerald-700' : 'text-brand-orange'}`}>{status === 'live' ? 'LIVE' : 'NEXT'}</span>
       </div>
-      <div className="mt-4 text-[9px] font-black text-brand-orange">{tag}</div>
-      <h3 className="mt-1 text-base font-black">{label}</h3>
-      <p className="mt-2 text-[11px] font-semibold leading-5 text-brand-muted">{detail}</p>
-      {index < total - 1 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
+      <h3 className="mt-2 text-sm font-black">{label}</h3>
+      <p className="mt-1 text-[10px] font-semibold leading-4 text-brand-muted">{detail}</p>
+      {index < total - 1 ? <ArrowRight className="absolute -right-2 top-1/2 z-10 hidden h-4 w-4 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
     </div>
   )
 }
 
-function ChannelNode({ label, detail, status }: { label: string; detail: string; status: 'live' | 'next' }) {
+function EvolutionCapability({
+  title,
+  current,
+  target,
+  priority,
+}: {
+  title: string
+  current: string
+  target: string
+  priority: number
+}) {
   return (
-    <div className={`flex min-h-28 flex-col items-center justify-center rounded-[18px] border px-2 py-3 text-center shadow-sm ${
-      status === 'live' ? 'border-green-200 bg-green-50' : 'border-brand-orange/20 bg-white'
-    }`}>
-      <Radio className={`h-5 w-5 ${status === 'live' ? 'text-green-600' : 'text-brand-orange'}`} />
-      <div className="mt-2 text-sm font-black">{label}</div>
-      <div className="mt-1 text-[10px] font-semibold text-brand-muted">{detail}</div>
-      <div className={`mt-2 text-[9px] font-black ${status === 'live' ? 'text-green-700' : 'text-brand-orange'}`}>{status === 'live' ? 'LIVE' : 'NEXT'}</div>
+    <div className="rounded-lg border border-brand-text/10 bg-white px-4 py-3 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-black">{title}</h3>
+        <span className="text-[9px] font-black text-brand-orange">P{priority}</span>
+      </div>
+      <div className="mt-2 rounded-md bg-brand-bg px-3 py-2 text-[10px] font-semibold leading-4 text-brand-muted">NOW · {current}</div>
+      <ArrowRight className="mx-auto my-1 h-3.5 w-3.5 rotate-90 text-brand-orange" />
+      <div className="rounded-md bg-brand-orange-light px-3 py-2 text-[10px] font-bold leading-4 text-brand-text">TARGET · {target}</div>
     </div>
   )
 }
@@ -1150,9 +1163,9 @@ function HarnessRail({
       ? 'border-brand-orange/20 bg-brand-orange-light text-brand-text'
       : 'border-green-200 bg-green-50 text-brand-text'
   return (
-    <div className={`rounded-[18px] border border-transparent px-4 py-3 shadow-sm ${toneClass}`}>
-      <div className={`text-[10px] font-black ${tone === 'harness' ? 'text-brand-orange-light' : 'text-brand-orange'}`}>{label}</div>
-      <div className="mt-1 text-xs font-bold">{value}</div>
+    <div className={`rounded-lg border border-transparent px-4 py-2 shadow-sm ${toneClass}`}>
+      <div className={`text-[9px] font-black ${tone === 'harness' ? 'text-brand-orange-light' : 'text-brand-orange'}`}>{label}</div>
+      <div className="mt-0.5 text-[11px] font-bold">{value}</div>
     </div>
   )
 }
