@@ -58,9 +58,10 @@ describe('OpenMicDeck', () => {
     expect(await screen.findByRole('heading', { name: 'FareSniper Agent：从自然语言到可信决策' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /A\. 交互与上下文层/ })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /B\. 意图与编排层/ })).toBeInTheDocument()
-    expect(screen.getByText(/as_completed · partial result/)).toBeInTheDocument()
-    expect(screen.getByText(/freshness · eligibility · full cost/)).toBeInTheDocument()
-    expect(screen.getByText(/Auth · State · Schema · Timeout · Grounding · Idempotency/)).toBeInTheDocument()
+    expect(screen.getByText(/意图识别与要素校验/)).toBeInTheDocument()
+    expect(screen.getByText(/资格过滤 · 完整成本 · 排序/)).toBeInTheDocument()
+    expect(screen.getByText(/鉴权 · 状态 · 数据契约 · 超时熔断 · 事实约束 · 幂等/)).toBeInTheDocument()
+    expect(screen.getAllByTestId(/architecture-handoff-/)).toHaveLength(4)
 
     fireEvent.click(screen.getByRole('button', { name: '第 8 页：工程演进' }))
     expect(await screen.findByRole('heading', { name: '从能运行，到可靠、可扩展、可回滚' })).toBeInTheDocument()

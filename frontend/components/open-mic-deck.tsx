@@ -105,9 +105,9 @@ const SLIDES: SlideDefinition[] = [
     label: '技术架构',
     duration: '02:00',
     notes: [
-      '系统按职责拆成五层：交互与上下文、意图与编排、数据执行、事实与决策、交付与反馈。请求只沿层间 Contract 流动，不允许模型跨层直连数据源。',
-      'Intent Registry、确定性抽槽和必填校验先处理可规则化部分，ReAct 只处理歧义；Provider Contract 负责多源并发，FlightOffer 与 ResponseFacts 构成两道事实边界。',
-      '同步结果、异步提醒和记忆反馈共享同一事实口径；横向 Harness 统一承担权限、状态、超时、熔断、Grounding 与 Trace。',
+      '系统按职责拆成五层：交互与上下文、意图与编排、数据执行、事实与决策、交付与反馈。图中的横向箭头就是一次请求的主调用链，不允许模型跨层直连数据源。',
+      '意图注册表、确定性要素抽取和必填校验先处理可规则化部分，ReAct 只处理歧义；统一数据源接口负责多源并发，FlightOffer 与 ResponseFacts 构成两道事实边界。',
+      '同步结果、异步提醒和记忆反馈共享同一事实口径；跨层 Harness 工程护栏统一承担鉴权、状态、数据契约、超时熔断、事实约束与全链路追踪。',
     ],
   },
   {
@@ -684,9 +684,9 @@ function ArchitectureSlide() {
       tone: 'blue' as const,
       icon: <ServerCog />,
       items: [
-        { tag: 'ENTRY', label: '用户 / Next.js', detail: '自然语言 · JWT · SSE' },
-        { tag: 'API', label: 'FastAPI Request Scope', detail: '鉴权 · user_id 注入 · 限流' },
-        { tag: 'STATE', label: 'Redis + PostgreSQL', detail: '30m 会话 · 长期偏好 · 历史行为' },
+        { tag: '入口', label: '用户输入与身份', detail: '自然语言 · JWT · 流式连接' },
+        { tag: '请求', label: 'FastAPI 请求上下文', detail: '鉴权 · 用户注入 · 限流', handoff: true },
+        { tag: '状态', label: '会话与长期记忆', detail: 'Redis 会话 · PostgreSQL 偏好' },
       ],
     },
     {
@@ -696,10 +696,9 @@ function ArchitectureSlide() {
       tone: 'orange' as const,
       icon: <BrainCircuit />,
       items: [
-        { tag: 'RECALL', label: 'Intent Registry', detail: '关键词 · 示例 · Embedding hint' },
-        { tag: 'PARSE', label: 'Slot Extractor', detail: '机场 · 日期 · 预算 · 行李' },
-        { tag: 'GUARD', label: 'Required Validator', detail: '缺槽追问 · 状态失效规则' },
-        { tag: 'PLAN', label: 'LangGraph + ReAct', detail: '歧义理解 → Typed Tool Router' },
+        { tag: '召回', label: '意图注册表', detail: '关键词 · 示例 · 向量提示' },
+        { tag: '解析', label: '意图识别与要素校验', detail: '机场 · 日期 · 预算 · 行李', handoff: true },
+        { tag: '编排', label: 'LangGraph 任务编排', detail: '确定性优先 · ReAct 处理歧义' },
       ],
     },
     {
@@ -709,10 +708,9 @@ function ArchitectureSlide() {
       tone: 'purple' as const,
       icon: <Network />,
       items: [
-        { tag: 'FAN-OUT', label: 'Search Aggregator', detail: 'as_completed · partial result' },
-        { tag: 'CONTRACT', label: 'FlightProvider', detail: 'supports · search · ProviderResult' },
-        { tag: 'SOURCES', label: 'FlyAI · Ctrip · SerpAPI', detail: '实时结果 · 小时快照 · 国际来源' },
-        { tag: 'RESILIENCE', label: 'Provider Isolation', detail: '10s timeout · breaker · fallback' },
+        { tag: '接口', label: '统一数据源接口', detail: '能力声明 · 搜索 · 结构化返回' },
+        { tag: '并发', label: '多平台并发搜索', detail: '飞猪 · 携程 · Google 航班', handoff: true },
+        { tag: '隔离', label: '来源隔离与降级', detail: '10 秒超时 · 熔断 · 部分结果' },
       ],
     },
     {
@@ -722,10 +720,9 @@ function ArchitectureSlide() {
       tone: 'amber' as const,
       icon: <ShieldCheck />,
       items: [
-        { tag: 'CANONICAL', label: 'FlightOffer', detail: 'schema · provenance · null 保真' },
-        { tag: 'RULES', label: 'Truth Engine', detail: 'freshness · eligibility · full cost' },
-        { tag: 'RANK', label: 'Winner + Reason Codes', detail: '确定性排序 · 记忆只影响偏好' },
-        { tag: 'FREEZE', label: 'ResponseFacts', detail: '输出前冻结唯一事实' },
+        { tag: '事实', label: '统一航班事实 FlightOffer', detail: '来源 · 时效 · 缺失值保真' },
+        { tag: '决策', label: '可信决策引擎', detail: '资格过滤 · 完整成本 · 排序', handoff: true },
+        { tag: '输出', label: '结果事实 ResponseFacts', detail: '最优解 · 原因码 · 输出冻结' },
       ],
     },
     {
@@ -735,10 +732,9 @@ function ArchitectureSlide() {
       tone: 'green' as const,
       icon: <Radio />,
       items: [
-        { tag: 'SYNC', label: 'SSE · AI · Price Card', detail: '全部读取 ResponseFacts' },
-        { tag: 'ASYNC', label: 'PriceAlert + Worker', detail: '15m 检查 · 携程 1h 刷新' },
-        { tag: 'CHANNEL', label: 'WebPush · 飞书 · 微信', detail: '当前渠道 · 后续 Adapter' },
-        { tag: 'FEEDBACK', label: 'Memory Signals', detail: '点击 · 盯价 · 购买 → 下次排序' },
+        { tag: '读取', label: '唯一结果事实', detail: '统一读取 ResponseFacts' },
+        { tag: '交付', label: '回答、价格卡与预订', detail: '流式回答 · 同源价格 · 平台跳转', handoff: true },
+        { tag: '反馈', label: '监控通知与记忆', detail: '盯价 · 点击 · 购买 → 下次排序' },
       ],
     },
   ]
@@ -746,23 +742,23 @@ function ArchitectureSlide() {
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="text-xs font-black text-brand-orange sm:text-sm">06 · SYSTEM ARCHITECTURE</div>
+          <div className="text-xs font-black text-brand-orange sm:text-sm">06 · 技术架构</div>
           <h2 className="mt-2 max-w-5xl font-serif text-3xl font-black leading-tight sm:text-4xl">FareSniper Agent：从自然语言到可信决策</h2>
         </div>
-        <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">CURRENT · 已上线</span>
+        <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">当前版本 · 已上线</span>
       </div>
       <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">
-        五层职责通过明确 Contract 串联；模型不能越过 Tool Router，也不能改写 FlightOffer 与 ResponseFacts。
+        五层通过类型化接口逐框流转；模型只能处理歧义，不能绕过工具路由，也不能改写 FlightOffer 与 ResponseFacts。
       </p>
-      <div className="mt-2 grid gap-3 lg:grid-cols-5">
+      <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-5">
         {layers.map((layer, index) => (
           <ArchitectureLayer key={layer.code} {...layer} index={index} total={layers.length} />
         ))}
       </div>
       <div className="mt-2 grid gap-3 lg:grid-cols-[0.82fr_1.35fr_1fr]">
-        <HarnessRail label="MODEL" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
-        <HarnessRail label="CROSS-LAYER HARNESS" value="Auth · State · Schema · Timeout · Grounding · Idempotency" tone="harness" />
-        <HarnessRail label="EVIDENCE" value="LangSmith Trace · Provider status · Contract tests" tone="failure" />
+        <HarnessRail label="模型职责" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
+        <HarnessRail label="跨层 Harness 工程护栏" value="鉴权 · 状态 · 数据契约 · 超时熔断 · 事实约束 · 幂等" tone="harness" />
+        <HarnessRail label="证据与评测" value="LangSmith 全链路追踪 · 数据源状态 · 契约测试" tone="failure" />
       </div>
     </div>
   )
@@ -1037,6 +1033,7 @@ type ArchitectureLayerItem = {
   tag: string
   label: string
   detail: string
+  handoff?: boolean
 }
 
 function ArchitectureLayer({
@@ -1067,7 +1064,7 @@ function ArchitectureLayer({
   }
   const classes = toneClasses[tone]
   return (
-    <div className={`relative rounded-lg border-2 border-dashed p-2.5 ${classes.shell}`}>
+    <div className={`relative flex min-h-[330px] flex-col rounded-lg border-2 border-dashed p-3 ${classes.shell}`}>
       <div className="flex items-start gap-2">
         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white [&>svg]:h-3.5 [&>svg]:w-3.5 ${classes.icon}`}>{icon}</span>
         <div className="min-w-0">
@@ -1075,21 +1072,26 @@ function ArchitectureLayer({
           <p className="mt-0.5 text-[8px] font-semibold text-brand-muted">{subtitle}</p>
         </div>
       </div>
-      <div className="mt-2">
+      <div className="mt-3 flex flex-1 flex-col justify-between">
         {items.map((item, itemIndex) => (
           <div key={item.label}>
-            <div className="rounded-md border border-brand-text/10 bg-white px-2.5 py-1.5 shadow-sm">
+            <div className={`relative min-h-[60px] rounded-md bg-white px-2.5 py-2 shadow-sm ${item.handoff ? 'border border-brand-text/25 ring-1 ring-brand-text/5' : 'border border-brand-text/10'}`}>
               <div className="flex items-baseline gap-1.5">
-                <span className={`shrink-0 text-[7px] font-black ${classes.tag}`}>[{item.tag}]</span>
-                <span className="min-w-0 text-[10px] font-black leading-4 text-brand-text">{item.label}</span>
+                <span className={`shrink-0 text-[8px] font-black ${classes.tag}`}>[{item.tag}]</span>
+                <span className="min-w-0 text-[11px] font-black leading-4 text-brand-text">{item.label}</span>
               </div>
-              <div className="truncate text-[8px] font-semibold leading-3 text-brand-muted">{item.detail}</div>
+              <div className="mt-1 text-[9px] font-semibold leading-[13px] text-brand-muted">{item.detail}</div>
+              {item.handoff && index < total - 1 ? (
+                <div aria-hidden="true" data-testid={`architecture-handoff-${code}`} className="absolute left-full top-1/2 z-30 hidden w-9 -translate-y-1/2 items-center lg:flex">
+                  <span className="h-[2px] flex-1 bg-brand-text/65" />
+                  <ArrowRight className="-ml-1 h-4 w-4 shrink-0 text-brand-text" strokeWidth={2.5} />
+                </div>
+              ) : null}
             </div>
-            {itemIndex < items.length - 1 ? <ArrowRight className="mx-auto my-0.5 h-2.5 w-2.5 rotate-90 text-brand-text/40" /> : null}
+            {itemIndex < items.length - 1 ? <ArrowRight className="mx-auto my-1 h-3.5 w-3.5 rotate-90 text-brand-text/50" strokeWidth={2.25} /> : null}
           </div>
         ))}
       </div>
-      {index < total - 1 ? <ArrowRight className="absolute -right-3 top-1/2 z-10 hidden h-6 w-6 -translate-y-1/2 rounded-full bg-brand-bg text-brand-text lg:block" /> : null}
     </div>
   )
 }

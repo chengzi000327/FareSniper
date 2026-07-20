@@ -98,19 +98,19 @@ FareSniper 就是这三段经历的交汇点：前面是自然语言交互，中
 
 ## 第 7 页：完整系统架构（9:00—11:00）
 
-这张图按职责把 FareSniper 拆成五层，而不是把所有逻辑塞进一个 Agent。
+这张图按职责把 FareSniper 拆成五层，而不是把所有逻辑塞进一个 Agent。中间五个主框由横向箭头直接连接，就是一次请求真实经过的调用链：请求上下文、意图识别、多平台搜索、可信决策、结果交付。
 
 A 是交互与上下文层。Next.js 负责输入和 SSE 展示，FastAPI 完成鉴权与 request scope；Redis 保存短期会话，PostgreSQL 保存长期偏好和行为，模型不会自己猜历史。
 
-B 是意图与编排层。Intent Registry 先召回候选，确定性代码抽取机场、日期、预算和行李，再校验必填槽位；只有歧义部分交给 ReAct。LangGraph 选择 Typed Tool，用户身份和 Provider 凭证由 Tool Router 注入，所以模型不能越权直连数据源。
+B 是意图与编排层。意图注册表先召回候选，确定性代码抽取机场、日期、预算和行李，再校验必填要素；只有歧义部分交给 ReAct。LangGraph 选择类型化工具，用户身份和数据源凭证由工具路由注入，所以模型不能越权直连数据源。
 
-C 是数据执行层。Aggregator 通过统一 FlightProvider Contract 并发调用 FlyAI、携程快照和 SerpAPI。每个来源独立超时和熔断，`as_completed` 让可用结果先返回，慢来源不会拖垮整次请求。
+C 是数据执行层。搜索聚合器通过统一数据源接口并发调用飞猪、携程和 Google 航班。每个来源独立超时和熔断，可用结果先返回，慢来源不会拖垮整次请求。
 
-D 是事实与决策层。所有结果归一为 FlightOffer，保留来源、新鲜度和 null；Truth Engine 再做报价资格、完整成本和排序，最后冻结为 ResponseFacts。FlightOffer 约束输入事实，ResponseFacts 约束所有输出。
+D 是事实与决策层。所有结果归一为 FlightOffer，保留来源、时效和缺失值；可信决策引擎再做报价资格、完整成本和排序，最后冻结为 ResponseFacts。FlightOffer 约束输入事实，ResponseFacts 约束所有输出。
 
-E 是交付与反馈层。SSE、AI 文案和价格卡片都读取 ResponseFacts；PriceAlert 和 Worker 复用同一价格口径。用户点击、盯价和购买信号再写回 PostgreSQL，进入下一次 Context Bootstrap。
+E 是交付与反馈层。流式回答、AI 文案、价格卡片和预订跳转都读取 ResponseFacts；价格监控和后台任务复用同一价格口径。用户点击、盯价和购买信号再写回长期记忆，参与下一次排序。
 
-横向 Harness 贯穿五层，统一承担 Auth、State、Schema、Timeout、Grounding 和 Idempotency；LangSmith 与契约测试提供证据。模型只负责理解歧义、规划工具和解释结果。
+底部的跨层 Harness 工程护栏贯穿五层，统一承担鉴权、状态、数据契约、超时熔断、事实约束和幂等；LangSmith 全链路追踪与契约测试提供证据。模型只负责理解歧义、规划工具和解释结果。
 
 转场：当前架构已经能运行，下一步工程重点不是继续堆功能，而是补齐可靠性和扩展性。
 
