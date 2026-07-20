@@ -684,7 +684,14 @@ function ArchitectureSlide() {
       layer: '用户与偏好',
       title: '先知道是谁在问、他在意什么',
       detail: '确认登录身份，取回当前会话与长期偏好：常用机场、时间、行李、预算。',
-      tech: 'FastAPI · Redis · PostgreSQL',
+      tech: 'FastAPI · bootstrap_session · Redis · PostgreSQL',
+      flow: [
+        { label: '用户输入自然语言', detail: '航线 · 日期 · 预算 · 行李等约束' },
+        { label: '确认用户身份', detail: '登录凭证 JWT → user_id' },
+        { label: '接上当前对话', detail: 'Redis 取回已确认的航线、日期等条件' },
+        { label: '读取长期偏好', detail: 'PostgreSQL：常用机场、预算、航司与行李习惯' },
+        { label: '形成用户上下文', detail: '身份 + 当前对话 + 长期偏好 + 本轮原话' },
+      ],
       tone: 'blue' as const,
       icon: <ServerCog />,
     },
@@ -693,7 +700,20 @@ function ArchitectureSlide() {
       layer: '理解需求',
       title: '把一句话整理成查询条件',
       detail: '识别出发地、目的地、日期等信息；确实缺信息才追问，有歧义时再让模型判断。',
-      tech: '规则解析 · 意图识别 · LangGraph',
+      tech: 'fast_intent_match · ReAct · slot_filling · tool_router',
+      flow: [
+        { label: '判断用户要做什么', detail: '查航班 / 设置提醒 / 查询偏好' },
+        { label: '整理查询条件', detail: '出发地 · 目的地 · 日期 · 预算 · 约束' },
+        { label: '必要条件是否齐全？', detail: '先由规则检查，不让模型随意猜测' },
+        {
+          split: [
+            { label: '不齐全', detail: '只追问缺失的一项' },
+            { label: '齐全', detail: '选择下一步工具' },
+          ],
+          note: '用户补充后回到本层；有歧义时模型协助判断',
+        },
+        { label: '执行工具', detail: 'search_flights / set_alert / get_preferences' },
+      ],
       tone: 'orange' as const,
       icon: <BrainCircuit />,
     },
@@ -702,7 +722,19 @@ function ArchitectureSlide() {
       layer: '查询航班',
       title: '分别去多个来源查真实航班',
       detail: '飞猪、携程缓存和 Google 航班各有独立查询模块；同时发起查询，单个来源失败不影响其他来源。',
-      tech: '飞猪查询 · 携程快照 · SerpAPI',
+      tech: 'FlightQuery · search_flights · FlightSearchAggregator · 来源查询模块',
+      flow: [
+        { label: '整理统一查询', detail: '城市 → 机场范围；日期 → YYYY-MM-DD' },
+        { label: '同时启动来源查询', detail: '每个来源独立超时、熔断与状态' },
+        {
+          split: [
+            { label: '飞猪', detail: 'FlyAI CLI · 实时查询' },
+            { label: '携程', detail: '读取 Mac 上传的价格快照' },
+            { label: 'Google Flights', detail: 'SerpAPI · 国际来源' },
+          ],
+        },
+        { label: '收齐所有可用来源', detail: '成功 · 无结果 · 超时 · 停用 · 过期' },
+      ],
       tone: 'purple' as const,
       icon: <Network />,
     },
@@ -711,7 +743,15 @@ function ArchitectureSlide() {
       layer: '比较与推荐',
       title: '收齐可用结果，再统一比较',
       detail: '统一税费、行李、平台和更新时间，保留缺失项，再按完整成本与个人偏好筛选和排序。',
-      tech: 'FlightOffer · 完整成本计算 · 排序规则',
+      tech: 'FlightOffer · normalizer · preference_matcher · ResponseFacts',
+      flow: [
+        { label: '合并同一航班报价', detail: '航班号 + 机场 + 日期 + 时间' },
+        { label: '校验报价可信度', detail: '数字价格 · HTTPS 链接 · 数据时效' },
+        { label: '保留完整信息', detail: '票价 · 税费 · 行李 · 平台 · 更新时间' },
+        { label: '计算完整成本', detail: '未知字段保持未知，不能默认成 0' },
+        { label: '遍历全部候选', detail: '结合预算、航司、时间和行李偏好排序' },
+        { label: '生成共同事实', detail: '最低价、航班卡与推荐共用同一结果' },
+      ],
       tone: 'amber' as const,
       icon: <ShieldCheck />,
     },
@@ -720,13 +760,26 @@ function ArchitectureSlide() {
       layer: '回答与持续盯价',
       title: '给出结果，关注后继续盯价',
       detail: '回答与价格卡使用同一份结果；关注后持续检查目标价，命中时提醒并更新用户偏好。',
-      tech: 'SSE · Worker · Web Push',
+      tech: 'NDJSON · render_response · memory writeback · PriceAlert · Worker · Web Push',
+      flow: [
+        { label: '展示搜索过程', detail: '来源状态与阶段结果只用于进度反馈' },
+        { label: '交付最终结果', detail: '回答 + 航班卡 + 来源状态 + 推荐理由' },
+        {
+          split: [
+            { label: '写回记忆', detail: '搜索、点击、收藏与明确偏好' },
+            { label: '创建盯价', detail: '航线、日期与目标价' },
+          ],
+        },
+        { label: 'Worker 定期检查', detail: '读取缓存中的最新可用报价' },
+        { label: '达到目标价后提醒', detail: '标记已触发并发送 Web Push' },
+        { label: '进入下一次决策', detail: '新行为成为下一次排序的偏好信号' },
+      ],
       tone: 'green' as const,
       icon: <Radio />,
     },
   ]
   return (
-    <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
+    <div className="mx-auto flex min-h-full max-w-[1600px] flex-col justify-start py-1 2xl:justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-xs font-black text-brand-orange sm:text-sm">06 · 技术架构</div>
@@ -735,14 +788,17 @@ function ArchitectureSlide() {
         <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">当前版本 · 已上线</span>
       </div>
       <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">五层对应五个真实问题，请求从左到右经过：认识用户 → 听懂需求 → 查询航班 → 比较推荐 → 回答并持续盯价</p>
-      <div className="mt-4 grid items-stretch gap-3 lg:grid-cols-5">
+      <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-5">
         {steps.map((step, index) => (
           <RequestStep key={step.number} {...step} index={index} />
         ))}
       </div>
       <div className="mt-3 grid gap-3 border-t border-brand-text/10 pt-3 lg:grid-cols-2">
         <HarnessRail label="模型负责" value="理解歧义 · 选择工具 · 解释推荐" tone="model" />
-        <HarnessRail label="系统负责" value="身份与偏好 · 查询与超时 · 价格计算 · 排序与提醒" tone="harness" />
+        <HarnessRail label="系统负责" value="确认身份 · 接上对话 · 真实查询 · 来源状态 · 完整成本 · 全量比较 · 排序 · 提醒" tone="harness" />
+      </div>
+      <div className="mt-1 rounded-lg border border-dashed border-emerald-300 bg-emerald-50/60 px-4 py-1.5 text-[10px] font-bold text-emerald-800">
+        反馈闭环：第 5 层记录的搜索、点击、收藏和盯价行为，会在下一次请求中被第 1 层重新读取。
       </div>
     </div>
   )
@@ -1013,12 +1069,17 @@ function Metric({ value, label }: { value: string; label: string }) {
 
 type ArchitectureLayerTone = 'blue' | 'orange' | 'purple' | 'amber' | 'green'
 
+type ArchitectureFlowNode =
+  | { label: string; detail: string }
+  | { split: { label: string; detail: string }[]; note?: string }
+
 function RequestStep({
   number,
   layer,
   title,
   detail,
   tech,
+  flow,
   tone,
   icon,
   index,
@@ -1028,6 +1089,7 @@ function RequestStep({
   title: string
   detail: string
   tech: string
+  flow: ArchitectureFlowNode[]
   tone: ArchitectureLayerTone
   icon: React.ReactElement
   index: number
@@ -1041,7 +1103,7 @@ function RequestStep({
   }
   const classes = toneClasses[tone]
   return (
-    <div className={`relative flex min-h-[270px] flex-col rounded-xl border bg-white p-4 shadow-sm ${classes.border}`}>
+    <div className={`relative flex min-h-[590px] flex-col rounded-xl border bg-white p-3 shadow-sm 2xl:min-h-[650px] 2xl:p-4 ${classes.border}`}>
       <div className="flex items-center gap-2">
         <span className={`flex h-9 w-9 items-center justify-center rounded-lg text-white [&>svg]:h-4 [&>svg]:w-4 ${classes.icon}`}>{icon}</span>
         <div>
@@ -1049,10 +1111,38 @@ function RequestStep({
           <div className="text-xs font-black text-brand-text">{layer}</div>
         </div>
       </div>
-      <div className="mt-5 min-w-0 flex-1">
-        <h3 className="text-base font-black leading-6 text-brand-text">{title}</h3>
-        <p className="mt-3 text-[11px] font-semibold leading-[18px] text-brand-muted">{detail}</p>
-        <p className="mt-4 border-t border-brand-text/10 pt-3 text-[9px] font-bold leading-4 text-brand-text/55">仓库实现：{tech}</p>
+      <div className="mt-3 min-w-0">
+        <h3 className="text-sm font-black leading-5 text-brand-text 2xl:text-base 2xl:leading-6">{title}</h3>
+        <p className="mt-2 text-[9px] font-semibold leading-[14px] text-brand-muted 2xl:text-[11px] 2xl:leading-[18px]">{detail}</p>
+      </div>
+      <div className="mt-3 flex flex-1 flex-col border-t border-brand-text/10 pt-3">
+        <div className={`mb-2 text-[9px] font-black ${classes.number}`}>仓库实现 · 本层流程</div>
+        <div className="flex flex-1 flex-col justify-between">
+          {flow.map((item, flowIndex) => (
+            <React.Fragment key={'split' in item ? `split-${flowIndex}` : item.label}>
+              {'split' in item ? (
+                <div>
+                  <div className={`grid gap-1 ${item.split.length === 3 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    {item.split.map((branch) => (
+                      <div key={branch.label} className={`rounded-md border px-1.5 py-1.5 text-center ${classes.border} bg-brand-bg/50`}>
+                        <div className="text-[9px] font-black leading-3">{branch.label}</div>
+                        <div className="mt-0.5 text-[7px] font-semibold leading-[10px] text-brand-muted 2xl:text-[8px] 2xl:leading-3">{branch.detail}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {item.note ? <div className="mt-1 text-center text-[7px] font-semibold leading-[10px] text-brand-muted">{item.note}</div> : null}
+                </div>
+              ) : (
+                <div className={`rounded-md border px-2 py-1.5 text-center ${flowIndex === flow.length - 1 ? `${classes.border} bg-brand-bg/60` : 'border-brand-text/10 bg-white'}`}>
+                  <div className="text-[9px] font-black leading-3 2xl:text-[10px]">{item.label}</div>
+                  <div className="mt-0.5 text-[7px] font-semibold leading-[10px] text-brand-muted 2xl:text-[8px] 2xl:leading-3">{item.detail}</div>
+                </div>
+              )}
+              {flowIndex < flow.length - 1 ? <ArrowRight className="mx-auto h-3 w-3 rotate-90 text-brand-text/45" strokeWidth={2} /> : null}
+            </React.Fragment>
+          ))}
+        </div>
+        <p className="mt-2 border-t border-brand-text/10 pt-2 text-[7px] font-bold leading-[11px] text-brand-text/55 2xl:text-[8px]">实际模块：{tech}</p>
       </div>
       {index < 4 ? (
         <ArrowRight aria-hidden="true" data-testid={`architecture-handoff-${number}`} className="absolute -bottom-3 left-1/2 z-20 h-5 w-5 -translate-x-1/2 rotate-90 rounded-full bg-brand-bg text-brand-orange lg:-right-4 lg:bottom-auto lg:left-auto lg:top-1/2 lg:translate-x-0 lg:-translate-y-1/2 lg:rotate-0" />
