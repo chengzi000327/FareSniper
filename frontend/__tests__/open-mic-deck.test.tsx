@@ -37,14 +37,28 @@ describe('OpenMicDeck', () => {
     expect(screen.getByText(/搜索机票并不难/)).toBeInTheDocument()
   })
 
+  test('connects volatile prices, user segments, and competitive gaps', async () => {
+    render(<OpenMicDeck />)
+
+    fireEvent.click(screen.getByRole('button', { name: '第 3 页：用户洞察' }))
+    expect(await screen.findByRole('heading', { name: '用户不是在找最低价，而是在等购买窗口' })).toBeInTheDocument()
+    expect(screen.getByText(/机票价格随库存持续变化/)).toBeInTheDocument()
+    expect(screen.getAllByText('核心竞争力')).toHaveLength(3)
+
+    fireEvent.click(screen.getByRole('button', { name: '第 4 页：竞品与缺口' }))
+    expect(await screen.findByRole('heading', { name: '不是没有单点能力，而是缺少同一个决策闭环' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '什么时候买？' })).toBeInTheDocument()
+    expect(screen.getByText(/动态价格 × 完整成本 × 个人约束/)).toBeInTheDocument()
+  })
+
   test('explains the end-to-end architecture and evaluation harness', async () => {
     render(<OpenMicDeck />)
 
     fireEvent.click(screen.getByRole('button', { name: '第 7 页：技术架构' }))
-    expect(await screen.findByRole('heading', { name: '一条请求，如何穿过完整 Agent 系统' })).toBeInTheDocument()
-    expect(screen.getByText(/Intent Registry 规则召回并缓存 60 秒/)).toBeInTheDocument()
-    expect(screen.getByText(/ReAct ⇄ tools · 8s fallback/)).toBeInTheDocument()
-    expect(screen.getByText(/Context · State · Tools · Guardrails · Truth · Evaluation/)).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '从一句需求，到一条可验证的购买建议' })).toBeInTheDocument()
+    expect(screen.getByText(/Registry 召回 → 抽槽 → 必填校验/)).toBeInTheDocument()
+    expect(screen.getByText(/ReAct 决策 → Typed Tool Router/)).toBeInTheDocument()
+    expect(screen.getByText(/状态 · 权限 · 超时 · 报价资格 · Grounding/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '第 8 页：评测闭环' }))
     expect(await screen.findByRole('heading', { name: 'Bad Case 不是事故记录，而是回归资产' })).toBeInTheDocument()

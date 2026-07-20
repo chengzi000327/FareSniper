@@ -14,7 +14,6 @@ import {
   Coins,
   Database,
   ExternalLink,
-  Eye,
   Gauge,
   GraduationCap,
   Luggage,
@@ -27,7 +26,6 @@ import {
   RefreshCw,
   Route,
   SearchCheck,
-  ShieldCheck,
   Sparkles,
   X,
 } from 'lucide-react'
@@ -63,20 +61,20 @@ const SLIDES: SlideDefinition[] = [
   },
   {
     id: 'deal-definition',
-    label: '核心洞察',
+    label: '用户洞察',
     duration: '01:10',
     notes: [
-      '特价不是统一的最低数字。时间、预算和行李不同，用户眼里的最优解也不同。',
-      '所以产品目标不是找出一个全网统一最低价，而是求出用户约束下的相对最优解。',
+      '用户焦虑的不是找不到价格，而是价格一直在变：早上看、晚上看、第二天看，可能是三个数字。一次搜索只能截到一个点。',
+      '刚需用户等的是心理价进入固定时段，弹性用户等的是某一天出现低点，带行李用户等的是完整成本真正划算。FareSniper 监控的是每个人自己的购买窗口。',
     ],
   },
   {
     id: 'trust',
-    label: '信任缺口',
+    label: '竞品与缺口',
     duration: '01:00',
     notes: [
-      '我不需要证明某个平台一定在杀熟，但用户已经无法验证推荐究竟是在服务自己，还是服务平台转化。',
-      '解决办法不是再造一个更黑的推荐模型，而是让证据可比较、来源可追溯、缺失信息不伪造。',
+      '市场并不缺单点能力：OTA 和比价回答现在谁便宜，价格工具回答买还是等，通用 AI 负责自然语言。',
+      '真正缺口是三件事没有进入同一闭环：持续变化的多平台价格、含税费行李的完整成本，以及用户自己的时间和偏好。',
     ],
   },
   {
@@ -84,8 +82,8 @@ const SLIDES: SlideDefinition[] = [
     label: '产品方案',
     duration: '01:20',
     notes: [
-      'FareSniper 用一个闭环完成四件事：理解需求、聚合比较、解释价格、沉淀记忆。',
-      '它的差异不是多一个聊天框，而是把用户标准和多平台事实放进同一个决策过程。',
+      'FareSniper 把 Search 和 Monitor 分开：搜索时实时拉取当前事实，关注后持续刷新价格。',
+      '当价格进入个人阈值，再结合完整成本与记忆给出提醒。创新点不是多一个聊天框，而是把一次搜索变成持续决策关系。',
     ],
   },
   {
@@ -103,9 +101,9 @@ const SLIDES: SlideDefinition[] = [
     label: '技术架构',
     duration: '02:30',
     notes: [
-      '先沿一条请求讲完整链路：API 与会话 → 意图与状态 → LangGraph 编排 → Provider 数据面 → 事实冻结与输出。',
-      '意图识别位于 Context 和 Orchestration 之间：动态 Intent Registry 召回候选，ReAct 理解歧义，确定性代码抽槽与校验。',
-      'Harness 横跨整条链路，拥有状态、权限、超时、数据资格、事实边界和 Trace；模型只负责理解、规划与解释。',
+      '一条请求只走六步：组装 Context → 意图与槽位 → Agent 规划 → 多源并发 → 事实裁决 → SSE 输出与提醒。',
+      '意图链路是 Registry 召回候选、确定性抽槽和必填校验，ReAct 只处理歧义并选择 Typed Tool。',
+      '模型负责理解、规划和解释；Harness 负责状态、权限、超时、报价资格、同源输出与 Trace。',
     ],
   },
   {
@@ -115,7 +113,7 @@ const SLIDES: SlideDefinition[] = [
     notes: [
       '离线有 50 条种子样本，覆盖正常、相对日期、多轮追问、边界异常与对抗；评测意图、追问、信号、建议和格式。',
       '线上 LangSmith Trace 发现问题后，按 P0–P3 定级，再固化为最小复现样本和单元、契约或 E2E 回归测试。',
-      '典型 Bad Case 包括旧日期串线、慢 Provider 拖垮请求、过期或异币种报价误胜，以及 AI 文案与卡片价格不一致。',
+      '典型 Bad Case 包括旧日期串线、慢 Provider 拖垮请求、不合资格或异币种报价误胜，以及 AI 文案与卡片价格不一致。',
     ],
   },
   {
@@ -469,105 +467,129 @@ function ProfileSlide() {
 }
 
 function DealDefinitionSlide() {
-  const personas = [
+  const users = [
     {
-      title: '时间优先',
-      quote: '我只能周五晚上走',
-      answer: '合适时段 > 最低裸价',
+      title: '刚需型',
+      question: '周五晚必须走，现在该买吗？',
+      constraint: '日期与时段固定',
+      advantage: '持续盯同一路线，进入心理价就提醒',
       icon: <Clock3 className="h-7 w-7" />,
       color: 'bg-brand-orange/10 text-brand-orange',
     },
     {
-      title: '价格优先',
-      quote: '日期可以改，只要够便宜',
-      answer: '可调整日期换取低价',
+      title: '弹性型',
+      question: '日期能换，哪一天真的更便宜？',
+      constraint: '价格优先，日期可调',
+      advantage: '跨日期记录波动，识别个人低价窗口',
       icon: <Coins className="h-7 w-7" />,
       color: 'bg-brand-orange-light text-brand-orange',
     },
     {
-      title: '完整成本优先',
-      quote: '我要带一个 20kg 行李箱',
-      answer: '裸票价 ≠ 最终成本',
+      title: '全成本型',
+      question: '带 20KG 行李，低价票还便宜吗？',
+      constraint: '税费与行李不可忽略',
+      advantage: '统一票价、机建燃油与行李成本',
       icon: <Luggage className="h-7 w-7" />,
       color: 'bg-green-50 text-green-600',
     },
   ]
+  const priceMoments = [
+    ['08:00', '¥620'],
+    ['14:00', '¥480'],
+    ['22:00', '¥560'],
+  ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="02 · INSIGHT" title="特价，从来不是统一的最低数字" />
-      <p className="mt-4 max-w-5xl text-base leading-7 text-brand-muted sm:text-lg">
-        同一张机票，对不同的人可能有完全不同的价值。产品真正要求解的是用户约束下的相对最优解。
-      </p>
-      <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        {personas.map((persona, order) => (
-          <article key={persona.title} className="rounded-[28px] border border-brand-text/5 bg-white p-5 shadow-card">
-            <div className={`flex h-10 w-10 items-center justify-center rounded-2xl [&>svg]:h-6 [&>svg]:w-6 ${persona.color}`}>{persona.icon}</div>
-            <div className="mt-5 text-xs font-black text-brand-muted">0{order + 1}</div>
-            <h3 className="mt-2 text-xl font-black">{persona.title}</h3>
-            <p className="mt-3 min-h-12 border-l-2 border-brand-orange/30 pl-4 text-base leading-6 text-brand-muted">“{persona.quote}”</p>
-            <div className="mt-3 flex items-center gap-2 text-sm font-bold text-brand-orange">
-              <ArrowRight className="h-4 w-4" />
-              {persona.answer}
+      <SlideHeading eyebrow="02 · USER INSIGHT" title="用户不是在找最低价，而是在等购买窗口" />
+      <div className="mt-4 flex flex-col gap-3 rounded-[20px] border border-brand-orange/10 bg-brand-orange/5 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="text-xs font-black text-brand-orange">同一航线 · 同一天</div>
+          <div className="mt-1 text-sm font-bold text-brand-text">机票价格随库存持续变化，一次搜索只截到一个点。</div>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-4">
+          {priceMoments.map(([time, price], index) => (
+            <React.Fragment key={time}>
+              <div className="text-center">
+                <div className={`text-lg font-black ${index === 1 ? 'text-green-600' : 'text-brand-text'}`}>{price}</div>
+                <div className="text-[10px] font-bold text-brand-muted">{time}</div>
+              </div>
+              {index < priceMoments.length - 1 ? <ArrowRight className="h-4 w-4 text-brand-orange" /> : null}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        {users.map((user) => (
+          <article key={user.title} className="rounded-[24px] border border-brand-text/5 bg-white p-5 shadow-card">
+            <div className="flex items-center justify-between gap-3">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-2xl [&>svg]:h-6 [&>svg]:w-6 ${user.color}`}>{user.icon}</div>
+              <span className="text-xs font-black text-brand-muted">{user.constraint}</span>
+            </div>
+            <h3 className="mt-4 text-xl font-black">{user.title}</h3>
+            <p className="mt-2 min-h-12 text-base font-semibold leading-6 text-brand-text">“{user.question}”</p>
+            <div className="mt-3 border-t border-brand-text/10 pt-3">
+              <div className="text-[10px] font-black text-brand-orange">核心竞争力</div>
+              <div className="mt-1 text-sm font-bold leading-6 text-brand-muted">{user.advantage}</div>
             </div>
           </article>
         ))}
-      </div>
-      <div className="mt-5 flex flex-wrap items-center gap-3 rounded-[24px] border border-brand-orange/10 bg-brand-orange/5 px-6 py-4 text-base font-bold sm:text-lg">
-        <span className="text-brand-orange">个人特价</span>
-        <span>=</span>
-        <span>满足出行约束</span>
-        <span>+</span>
-        <span>完整成本较低</span>
-        <span>+</span>
-        <span>符合个人偏好</span>
       </div>
     </div>
   )
 }
 
 function TrustSlide() {
-  const rows = [
-    ['平台 A', '¥420', '待确认', '不含', '¥?'],
-    ['平台 B', '¥455', '¥100', '20KG', '¥555'],
-    ['平台 C', '¥399', '¥100', '+¥120', '¥619'],
+  const questions = [
+    {
+      question: '现在谁便宜？',
+      category: 'OTA / 比价',
+      answer: '擅长展示此刻的可售结果',
+      gap: '跨平台口径与完整成本仍需用户核对',
+      advantage: '多来源统一为同一份可比较事实',
+      icon: <Network />,
+    },
+    {
+      question: '什么时候买？',
+      category: '价格提醒 / 预测',
+      answer: '擅长追踪路线或判断买与等',
+      gap: '价格变化与个人时段、预算、行李彼此分离',
+      advantage: '监控的是个人购买窗口，不只是价格曲线',
+      icon: <Radar />,
+    },
+    {
+      question: '哪张适合我？',
+      category: '通用 AI',
+      answer: '擅长理解自然语言与偏好',
+      gap: '缺少持续、可追溯的交易级价格事实',
+      advantage: '记忆参与排序，结论绑定来源与数据状态',
+      icon: <BrainCircuit />,
+    },
   ]
   return (
-    <div className="mx-auto grid min-h-full max-w-7xl items-center gap-10 lg:grid-cols-[0.88fr_1.12fr] lg:gap-14">
-      <div>
-        <SlideHeading eyebrow="03 · TRUST GAP" title="用户不缺推荐，缺的是验证推荐的证据" />
-        <p className="mt-6 text-lg leading-9 text-brand-muted">
-          黑箱推荐让用户难以判断：这是最适合我的结果，还是平台最希望我购买的结果？
-        </p>
-        <div className="mt-8 space-y-4">
-          <TrustPoint icon={<Network />} text="同一航班，多平台并排比较" />
-          <TrustPoint icon={<Eye />} text="实时数据与历史快照明确标注" />
-          <TrustPoint icon={<ShieldCheck />} text="缺失字段保持未知，不伪造免费" />
-        </div>
+    <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
+      <SlideHeading eyebrow="03 · COMPETITIVE GAP" title="不是没有单点能力，而是缺少同一个决策闭环" />
+      <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
+        不列品牌功能表，只用用户最终要回答的三个问题看市场缺口。
+      </p>
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        {questions.map((item) => (
+          <article key={item.question} className="rounded-[24px] border border-brand-text/5 bg-white p-5 shadow-card">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-brand-orange [&>svg]:h-6 [&>svg]:w-6">{item.icon}</div>
+              <span className="text-[10px] font-black text-brand-muted">{item.category}</span>
+            </div>
+            <h3 className="mt-4 text-2xl font-black">{item.question}</h3>
+            <div className="mt-4 space-y-3 text-sm leading-6">
+              <MarketAnswer label="已有答案" value={item.answer} />
+              <MarketAnswer label="仍然缺少" value={item.gap} />
+              <MarketAnswer label="FareSniper" value={item.advantage} highlight />
+            </div>
+          </article>
+        ))}
       </div>
-      <div className="min-w-0 overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card">
-        <div className="flex items-center justify-between border-b border-brand-text/10 px-5 py-4">
-          <div>
-            <div className="text-sm font-black">同一航班 · 不同答案</div>
-            <div className="mt-1 text-xs text-brand-muted">裸价并不等于完整成本</div>
-          </div>
-          <SearchCheck className="h-5 w-5 text-green-600" />
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-left text-sm">
-            <thead className="bg-brand-orange/5 text-brand-muted">
-              <tr>{['来源', '票价', '机建燃油', '行李', '可比较总价'].map((title) => <th key={title} className="px-5 py-3 font-bold">{title}</th>)}</tr>
-            </thead>
-            <tbody className="divide-y divide-brand-text/5">
-              {rows.map((row, rowIndex) => (
-                <tr key={row[0]} className={rowIndex === 1 ? 'bg-green-50/70' : ''}>
-                  {row.map((cell, cellIndex) => (
-                    <td key={cellIndex} className={`px-5 py-4 ${cellIndex === 4 ? 'font-black text-brand-orange' : ''}`}>{cell}</td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div className="mt-5 flex items-center gap-3 rounded-[20px] bg-brand-text px-5 py-3 text-sm font-bold text-white">
+        <SearchCheck className="h-5 w-5 shrink-0 text-brand-orange-light" />
+        市场空白 = 动态价格 × 完整成本 × 个人约束，三者尚未形成一条可信链路。
       </div>
     </div>
   )
@@ -575,33 +597,32 @@ function TrustSlide() {
 
 function ProductSlide() {
   const steps = [
-    { label: '理解', detail: '城市、日期、预算、时段', icon: <BrainCircuit /> },
-    { label: '比较', detail: '飞猪实时 + 携程快照', icon: <Network /> },
-    { label: '解释', detail: '票价、税费、行李、来源', icon: <SearchCheck /> },
-    { label: '记住', detail: '查询、点击与长期偏好', icon: <Database /> },
+    { label: '定义购买条件', detail: '航线 · 日期 · 预算 · 时段 · 行李', icon: <BrainCircuit /> },
+    { label: '实时拉取', detail: '查询时并发获取当前可用报价', icon: <Network /> },
+    { label: '持续监控', detail: '关注后刷新价格并保留新鲜度', icon: <Radar /> },
+    { label: '解释并提醒', detail: '阈值 + 完整成本 + 记忆 → 建议', icon: <SearchCheck /> },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="04 · PRODUCT" title="从一次搜索，走向持续决策" />
+      <SlideHeading eyebrow="04 · PRODUCT" title="不是替你搜一次，而是替你盯到值得买" />
       <p className="mt-4 max-w-4xl text-lg leading-8 text-brand-muted">
-        FareSniper 的核心不是增加一个聊天入口，而是把用户标准、多平台事实和可解释记忆放进同一个决策闭环。
+        搜索回答“现在有什么”，监控回答“什么时候值得买”。
       </p>
-      <div className="mt-8 grid gap-4 lg:grid-cols-4">
+      <div className="mt-6 grid gap-4 lg:grid-cols-4">
         {steps.map((step, index) => (
-          <React.Fragment key={step.label}>
-            <div className="relative rounded-[28px] border border-brand-text/5 bg-white p-6 shadow-card">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{step.icon}</div>
-              <div className="mt-8 text-xs font-black text-brand-orange">STEP 0{index + 1}</div>
-              <h3 className="mt-2 text-2xl font-black">{step.label}</h3>
-              <p className="mt-3 text-sm leading-7 text-brand-muted">{step.detail}</p>
-            </div>
-          </React.Fragment>
+          <div key={step.label} className="relative rounded-[24px] border border-brand-text/5 bg-white p-5 shadow-card">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{step.icon}</div>
+            <div className="mt-6 text-xs font-black text-brand-orange">STEP 0{index + 1}</div>
+            <h3 className="mt-2 text-xl font-black">{step.label}</h3>
+            <p className="mt-3 text-sm leading-7 text-brand-muted">{step.detail}</p>
+            {index < steps.length - 1 ? <ArrowRight className="absolute -right-3 top-1/2 z-10 hidden h-6 w-6 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
+          </div>
         ))}
       </div>
-      <div className="mt-8 grid gap-4 border-t border-brand-text/10 pt-7 md:grid-cols-3">
-        <Metric value="< 5 min" label="目标决策时间" />
-        <Metric value="同源" label="AI 回答与价格卡片" />
-        <Metric value="可解释" label="推荐依据与记忆来源" />
+      <div className="mt-6 grid gap-4 border-t border-brand-text/10 pt-5 md:grid-cols-3">
+        <Metric value="实时" label="搜索时获取当前价格" />
+        <Metric value="持续" label="关注后追踪价格变化" />
+        <Metric value="同源" label="回答、卡片与提醒共用事实" />
       </div>
     </div>
   )
@@ -639,63 +660,63 @@ function DemoSlide() {
 }
 
 function ArchitectureSlide() {
-  const stages = [
+  const nodes = [
     {
-      step: '01',
-      label: '交互与上下文',
-      tag: 'API / SESSION',
-      detail: 'FastAPI 接收请求，SSE 推送搜索进度；Redis 恢复 30 分钟会话，PostgreSQL 注入长期偏好。',
-      flow: 'request → bootstrap_session',
+      tag: 'INPUT',
+      label: 'Context',
+      detail: 'API + Redis 会话 + PG 记忆',
       icon: <Database />,
     },
     {
-      step: '02',
-      label: '意图与状态',
-      tag: 'INTENT HARNESS',
-      detail: 'Intent Registry 规则召回并缓存 60 秒；可选 Embedding 只做 hint，确定性代码抽取机场、日期与预算。',
-      flow: 'recall → route → parse → validate',
+      tag: 'UNDERSTAND',
+      label: 'Intent',
+      detail: 'Registry 召回 → 抽槽 → 必填校验',
       icon: <SearchCheck />,
     },
     {
-      step: '03',
-      label: 'Agent 编排',
-      tag: 'LANGGRAPH / REACT',
-      detail: 'ReAct 理解歧义并规划工具；Tool Router 执行 Typed Tools，用户身份由服务端注入。',
-      flow: 'ReAct ⇄ tools · 8s fallback',
+      tag: 'PLAN',
+      label: 'Agent',
+      detail: 'ReAct 决策 → Typed Tool Router',
       icon: <BrainCircuit />,
     },
     {
-      step: '04',
-      label: '多源数据面',
-      tag: 'PROVIDER CONTRACT',
-      detail: 'Aggregator 并发调用飞猪、携程快照与国际来源；单源 10 秒超时，连续失败触发熔断。',
-      flow: 'started → status → partial results',
+      tag: 'FETCH',
+      label: 'Providers',
+      detail: '飞猪实时｜携程快照｜国际源',
       icon: <Network />,
     },
     {
-      step: '05',
-      label: '事实与输出',
-      tag: 'TRUTH BOUNDARY',
-      detail: 'FlightOffer 归一、去重和排序；winner 校验后冻结 ResponseFacts，文案与卡片读取同一事实。',
-      flow: 'normalize → rank → freeze → render',
+      tag: 'DECIDE',
+      label: 'Truth',
+      detail: 'FlightOffer → 完整成本 → winner',
       icon: <BadgeCheck />,
+    },
+    {
+      tag: 'DELIVER',
+      label: 'Output',
+      detail: 'ResponseFacts → SSE / 卡片 / 提醒',
+      icon: <Sparkles />,
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="06 · END-TO-END ARCHITECTURE" title="一条请求，如何穿过完整 Agent 系统" />
+      <SlideHeading eyebrow="06 · TECHNICAL CHAIN" title="从一句需求，到一条可验证的购买建议" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
-        从“下周五北京到长治”到可验证推荐，模型只处理不确定性，Harness 负责把每一步约束成可执行、可回退、可追溯的状态。
+        每个节点只有一个职责；任何模型或数据源失败，都不能越过事实边界。
       </p>
-      <div className="mt-5 grid items-stretch gap-3 lg:grid-cols-5">
-        {stages.map((stage, index) => (
-          <ArchitectureStage key={stage.label} {...stage} index={index} />
+      <div className="mt-6 grid items-stretch gap-3 lg:grid-cols-6">
+        {nodes.map((node, index) => (
+          <ArchitectureNode key={node.label} {...node} index={index} total={nodes.length} />
         ))}
       </div>
-      <div className="mt-4 grid gap-3 lg:grid-cols-[0.8fr_1.35fr_0.95fr]">
-        <HarnessRail label="MODEL OWNS" value="理解歧义 · 规划工具 · 生成解释" tone="model" />
-        <HarnessRail label="HARNESS OWNS" value="Context · State · Tools · Guardrails · Truth · Evaluation" tone="harness" />
-        <HarnessRail label="FAILURE PATH" value="8s 模型回退 · 10s 单源隔离 · 部分结果可用" tone="failure" />
+      <div className="mt-5 grid gap-3 lg:grid-cols-[0.82fr_1.38fr_1fr]">
+        <HarnessRail label="MODEL" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
+        <HarnessRail label="HARNESS" value="状态 · 权限 · 超时 · 报价资格 · Grounding" tone="harness" />
+        <HarnessRail label="OBSERVE" value="LangSmith Trace → Bad Case → Gate" tone="failure" />
+      </div>
+      <div className="mt-3 flex items-center justify-center gap-2 text-sm font-bold text-brand-muted">
+        <RefreshCw className="h-4 w-4 text-brand-orange" />
+        点击 / 盯价 / 购买信号 → 可解释记忆 → 下一次排序
       </div>
     </div>
   )
@@ -737,8 +758,8 @@ function DecisionsSlide() {
     },
     {
       layer: 'Truth / Ranking',
-      symptom: '过期或异币种报价错误成为最低价',
-      guard: 'winner 资格 / 币种原子性 / 新鲜度契约测试',
+      symptom: '不合资格或异币种报价错误成为最低价',
+      guard: '携程快照契约 / winner 资格 / 币种原子性测试',
     },
     {
       layer: 'Output / UX',
@@ -842,10 +863,19 @@ function Tag({ icon, label }: { icon: React.ReactElement; label: string }) {
   )
 }
 
-function TrustPoint({ icon, text }: { icon: React.ReactElement; text: string }) {
+function MarketAnswer({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string
+  value: string
+  highlight?: boolean
+}) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-brand-text/5 bg-white px-4 py-3 text-base font-semibold text-brand-muted shadow-sm [&>svg]:h-5 [&>svg]:w-5 [&>svg]:text-green-600">
-      {icon}{text}
+    <div className={`grid grid-cols-[4.5rem_minmax(0,1fr)] gap-2 border-b border-brand-text/10 pb-3 last:border-0 last:pb-0 ${highlight ? 'font-bold text-brand-text' : 'text-brand-muted'}`}>
+      <span className={`text-xs font-black ${highlight ? 'text-brand-orange' : 'text-brand-muted'}`}>{label}</span>
+      <span>{value}</span>
     </div>
   )
 }
@@ -859,40 +889,34 @@ function Metric({ value, label }: { value: string; label: string }) {
   )
 }
 
-function ArchitectureStage({
+function ArchitectureNode({
   icon,
-  step,
   tag,
   label,
   detail,
-  flow,
   index,
+  total,
 }: {
   icon: React.ReactElement
-  step: string
   tag: string
   label: string
   detail: string
-  flow: string
   index: number
+  total: number
 }) {
   return (
-    <div className={`relative rounded-[20px] border p-4 shadow-sm ${
+    <div className={`relative flex min-h-44 flex-col rounded-[20px] border p-4 shadow-sm ${
       index === 1
         ? 'border-brand-orange/30 bg-brand-orange-light'
-        : index === 4
+        : index === total - 2
           ? 'border-green-200 bg-green-50'
           : 'border-brand-text/5 bg-white'
     }`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
-        <span className="text-xs font-black text-brand-orange">{step}</span>
-      </div>
-      <div className="mt-3 text-[10px] font-black text-brand-muted">{tag}</div>
-      <h3 className="mt-1 text-base font-black">{label}</h3>
-      <p className="mt-2 text-[13px] leading-5 text-brand-muted">{detail}</p>
-      <div className="mt-3 border-t border-brand-text/10 pt-2 text-[11px] font-bold text-brand-text">{flow}</div>
-      {index < 4 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
+      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
+      <div className="mt-4 text-[10px] font-black text-brand-orange">{tag}</div>
+      <h3 className="mt-1 text-lg font-black">{label}</h3>
+      <p className="mt-auto pt-3 text-xs font-semibold leading-5 text-brand-muted">{detail}</p>
+      {index < total - 1 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
     </div>
   )
 }
