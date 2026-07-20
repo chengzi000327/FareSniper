@@ -104,12 +104,12 @@ const SLIDES: SlideDefinition[] = [
     label: '技术架构',
     duration: '02:10',
     notes: [
-      'A 层先恢复 Redis 中的会话要素和 PostgreSQL 中的长期记忆，并由服务端注入 user_id，让每次请求拥有可信上下文。',
-      'B 层用意图注册表和向量 FastPath 召回候选，再用确定性代码抽取并校验机场、日期、预算和行李；信息完整走搜索工具，歧义才交给 ReAct。',
-      'C 层把查询统一为 FlightQuery，通过 FlightProvider 接口并发调用飞猪、携程快照和 Google 航班；每个来源独立超时、熔断并保留状态。',
-      'D 层把原始结果归一为 FlightOffer，执行新鲜度、资格、完整成本和确定性排序，再冻结为 ResponseFacts，保证卡片和文案同源。',
-      'E 层通过 SSE 交付搜索过程和结果；后台每 15 分钟检查价格提醒、每小时刷新携程快照，点击和盯价信号再写回记忆。',
-      '关键边界是模型只理解歧义和选择工具；平台控制身份、执行和最终事实。底部 Harness 贯穿五层，统一负责鉴权、状态、契约、超时熔断和 Trace。',
+      '这五层不是为了堆技术名词，而是把一次请求里不同职责讲清楚。请求从左到右依次经过，每层只解决一个具体问题。',
+      '第一层先确认用户身份，取回当前会话和长期偏好，例如常用机场、时间、行李和预算。',
+      '第二层把用户的一句话整理成可查询条件。缺少真正无法查询的信息才追问，表达有歧义时才让模型判断。',
+      '第三层分别查询飞猪、携程缓存和 Google 航班。每个来源有自己的查询模块和超时控制，单个来源失败不影响其他来源。',
+      '第四层等可用结果收齐后，统一税费、行李、平台和更新时间，遍历全部候选，再按完整成本与用户偏好筛选排序。',
+      '第五层让回答和价格卡读取同一份结果；用户关注后，后台继续检查价格并发送提醒。模型只解释推荐，不能自己改价格和排序。',
     ],
   },
   {
@@ -678,66 +678,51 @@ function DemoSlide() {
 }
 
 function ArchitectureSlide() {
-  const layers = [
+  const steps = [
     {
-      code: 'A',
-      title: '交互与上下文层',
-      subtitle: '输入、身份与状态恢复',
+      number: '1',
+      layer: '用户与偏好',
+      title: '先知道是谁在问、他在意什么',
+      detail: '确认登录身份，取回当前会话与长期偏好：常用机场、时间、行李、预算。',
+      tech: 'FastAPI · Redis · PostgreSQL',
       tone: 'blue' as const,
       icon: <ServerCog />,
-      items: [
-        { tag: '作用', label: '建立可信上下文', detail: '绑定用户、会话与长期记忆' },
-        { tag: '使用', label: '请求先恢复状态', detail: '鉴权 → 要素 → 偏好', handoff: true },
-        { tag: '实现', label: 'FastAPI + Redis + PostgreSQL', detail: '服务端注入 user_id' },
-      ],
     },
     {
-      code: 'B',
-      title: '意图与编排层',
-      subtitle: '确定性优先，模型处理歧义',
+      number: '2',
+      layer: '理解需求',
+      title: '把一句话整理成查询条件',
+      detail: '识别出发地、目的地、日期等信息；确实缺信息才追问，有歧义时再让模型判断。',
+      tech: '规则解析 · 意图识别 · LangGraph',
       tone: 'orange' as const,
       icon: <BrainCircuit />,
-      items: [
-        { tag: '作用', label: '收敛可执行任务', detail: '自然语言 → 结构化要素' },
-        { tag: '使用', label: '召回、抽取、校验', detail: '缺要素追问，完整才执行', handoff: true },
-        { tag: '实现', label: '意图注册表 + 向量 FastPath', detail: '确定性解析 + LangGraph/ReAct' },
-      ],
     },
     {
-      code: 'C',
-      title: '数据执行层',
-      subtitle: '统一接口，并发隔离',
+      number: '3',
+      layer: '查询航班',
+      title: '分别去多个来源查真实航班',
+      detail: '飞猪、携程缓存和 Google 航班各有独立查询模块；同时发起查询，单个来源失败不影响其他来源。',
+      tech: '飞猪查询 · 携程快照 · SerpAPI',
       tone: 'purple' as const,
       icon: <Network />,
-      items: [
-        { tag: '作用', label: '屏蔽平台差异', detail: '慢来源不拖垮整次搜索' },
-        { tag: '使用', label: '统一查询，并发选源', detail: '谁先返回，谁先交付', handoff: true },
-        { tag: '实现', label: 'FlightProvider 适配器', detail: '飞猪/携程/SerpAPI + 超时熔断' },
-      ],
     },
     {
-      code: 'D',
-      title: '事实与决策层',
-      subtitle: '标准化、资格与排序',
+      number: '4',
+      layer: '比较与推荐',
+      title: '收齐可用结果，再统一比较',
+      detail: '统一税费、行李、平台和更新时间，保留缺失项，再按完整成本与个人偏好筛选和排序。',
+      tech: 'FlightOffer · 完整成本计算 · 排序规则',
       tone: 'amber' as const,
       icon: <ShieldCheck />,
-      items: [
-        { tag: '作用', label: '建立可信比较口径', detail: '模型不能补价格或改结果' },
-        { tag: '使用', label: '归一、校验、计算、排序', detail: '时效 · 资格 · 完整成本', handoff: true },
-        { tag: '实现', label: 'FlightOffer → ResponseFacts', detail: 'Pydantic 契约 + 输出冻结' },
-      ],
     },
     {
-      code: 'E',
-      title: '交付与反馈层',
-      subtitle: '同源输出，持续监控',
+      number: '5',
+      layer: '回答与持续盯价',
+      title: '给出结果，关注后继续盯价',
+      detail: '回答与价格卡使用同一份结果；关注后持续检查目标价，命中时提醒并更新用户偏好。',
+      tech: 'SSE · Worker · Web Push',
       tone: 'green' as const,
       icon: <Radio />,
-      items: [
-        { tag: '作用', label: '一次搜索变持续决策', detail: '结果同源，后续持续盯价' },
-        { tag: '使用', label: '流式交付、触价提醒', detail: '回答 · 卡片 · 通知', handoff: true },
-        { tag: '实现', label: 'SSE + Worker + Web Push', detail: '15 分钟检查 · 携程每小时刷新' },
-      ],
     },
   ]
   return (
@@ -745,22 +730,19 @@ function ArchitectureSlide() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="text-xs font-black text-brand-orange sm:text-sm">06 · 技术架构</div>
-          <h2 className="mt-2 max-w-5xl font-serif text-3xl font-black leading-tight sm:text-4xl">FareSniper Agent：从自然语言到可信决策</h2>
+          <h2 className="mt-2 max-w-5xl font-serif text-3xl font-black leading-tight sm:text-4xl">用户说一句话之后，系统实际做了什么</h2>
         </div>
         <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">当前版本 · 已上线</span>
       </div>
-      <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">
-        每层从上到下回答：有什么用、请求怎么经过、仓库如何实现。模型规划，平台可信执行。
-      </p>
-      <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-5">
-        {layers.map((layer, index) => (
-          <ArchitectureLayer key={layer.code} {...layer} index={index} total={layers.length} />
+      <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">五层对应五个真实问题，请求从左到右经过：认识用户 → 听懂需求 → 查询航班 → 比较推荐 → 回答并持续盯价</p>
+      <div className="mt-4 grid items-stretch gap-3 lg:grid-cols-5">
+        {steps.map((step, index) => (
+          <RequestStep key={step.number} {...step} index={index} />
         ))}
       </div>
-      <div className="mt-2 grid gap-3 lg:grid-cols-[0.82fr_1.35fr_1fr]">
-        <HarnessRail label="模型职责" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
-        <HarnessRail label="跨层 Harness 工程护栏" value="鉴权 · 状态 · 数据契约 · 超时熔断 · 事实约束 · 幂等" tone="harness" />
-        <HarnessRail label="证据与评测" value="LangSmith 全链路追踪 · 数据源状态 · 契约测试" tone="failure" />
+      <div className="mt-3 grid gap-3 border-t border-brand-text/10 pt-3 lg:grid-cols-2">
+        <HarnessRail label="模型负责" value="理解歧义 · 选择工具 · 解释推荐" tone="model" />
+        <HarnessRail label="系统负责" value="身份与偏好 · 查询与超时 · 价格计算 · 排序与提醒" tone="harness" />
       </div>
     </div>
   )
@@ -1031,69 +1013,50 @@ function Metric({ value, label }: { value: string; label: string }) {
 
 type ArchitectureLayerTone = 'blue' | 'orange' | 'purple' | 'amber' | 'green'
 
-type ArchitectureLayerItem = {
-  tag: string
-  label: string
-  detail: string
-  handoff?: boolean
-}
-
-function ArchitectureLayer({
-  code,
+function RequestStep({
+  number,
+  layer,
   title,
-  subtitle,
+  detail,
+  tech,
   tone,
   icon,
-  items,
   index,
-  total,
 }: {
-  code: string
+  number: string
+  layer: string
   title: string
-  subtitle: string
+  detail: string
+  tech: string
   tone: ArchitectureLayerTone
   icon: React.ReactElement
-  items: ArchitectureLayerItem[]
   index: number
-  total: number
 }) {
-  const toneClasses: Record<ArchitectureLayerTone, { shell: string; icon: string; tag: string }> = {
-    blue: { shell: 'border-sky-300 bg-sky-50/70', icon: 'bg-sky-600', tag: 'text-sky-700' },
-    orange: { shell: 'border-orange-300 bg-orange-50/70', icon: 'bg-orange-500', tag: 'text-orange-700' },
-    purple: { shell: 'border-violet-300 bg-violet-50/70', icon: 'bg-violet-600', tag: 'text-violet-700' },
-    amber: { shell: 'border-amber-300 bg-amber-50/70', icon: 'bg-amber-500', tag: 'text-amber-700' },
-    green: { shell: 'border-emerald-300 bg-emerald-50/70', icon: 'bg-emerald-600', tag: 'text-emerald-700' },
+  const toneClasses: Record<ArchitectureLayerTone, { border: string; icon: string; number: string }> = {
+    blue: { border: 'border-sky-200', icon: 'bg-sky-600', number: 'text-sky-700' },
+    orange: { border: 'border-orange-200', icon: 'bg-orange-500', number: 'text-orange-700' },
+    purple: { border: 'border-violet-200', icon: 'bg-violet-600', number: 'text-violet-700' },
+    amber: { border: 'border-amber-200', icon: 'bg-amber-500', number: 'text-amber-700' },
+    green: { border: 'border-emerald-200', icon: 'bg-emerald-600', number: 'text-emerald-700' },
   }
   const classes = toneClasses[tone]
   return (
-    <div className={`relative flex min-h-[330px] flex-col rounded-lg border-2 border-dashed p-3 ${classes.shell}`}>
-      <div className="flex items-start gap-2">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-white [&>svg]:h-3.5 [&>svg]:w-3.5 ${classes.icon}`}>{icon}</span>
-        <div className="min-w-0">
-          <h3 className="text-xs font-black"><span className={classes.tag}>{code}.</span> {title}</h3>
-          <p className="mt-0.5 text-[8px] font-semibold text-brand-muted">{subtitle}</p>
+    <div className={`relative flex min-h-[270px] flex-col rounded-xl border bg-white p-4 shadow-sm ${classes.border}`}>
+      <div className="flex items-center gap-2">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-lg text-white [&>svg]:h-4 [&>svg]:w-4 ${classes.icon}`}>{icon}</span>
+        <div>
+          <span className={`text-[9px] font-black ${classes.number}`}>第 {number} 层</span>
+          <div className="text-xs font-black text-brand-text">{layer}</div>
         </div>
       </div>
-      <div className="mt-3 flex flex-1 flex-col justify-between">
-        {items.map((item, itemIndex) => (
-          <div key={item.label}>
-            <div className={`relative min-h-[60px] rounded-md bg-white px-2.5 py-2 shadow-sm ${item.handoff ? 'border border-brand-text/25 ring-1 ring-brand-text/5' : 'border border-brand-text/10'}`}>
-              <div className="flex items-baseline gap-1.5">
-                <span className={`shrink-0 text-[8px] font-black ${classes.tag}`}>[{item.tag}]</span>
-                <span className="min-w-0 text-[11px] font-black leading-4 text-brand-text">{item.label}</span>
-              </div>
-              <div className="mt-1 text-[9px] font-semibold leading-[13px] text-brand-muted">{item.detail}</div>
-              {item.handoff && index < total - 1 ? (
-                <div aria-hidden="true" data-testid={`architecture-handoff-${code}`} className="absolute left-full top-1/2 z-30 hidden w-9 -translate-y-1/2 items-center lg:flex">
-                  <span className="h-[2px] flex-1 bg-brand-text/65" />
-                  <ArrowRight className="-ml-1 h-4 w-4 shrink-0 text-brand-text" strokeWidth={2.5} />
-                </div>
-              ) : null}
-            </div>
-            {itemIndex < items.length - 1 ? <ArrowRight className="mx-auto my-1 h-3.5 w-3.5 rotate-90 text-brand-text/50" strokeWidth={2.25} /> : null}
-          </div>
-        ))}
+      <div className="mt-5 min-w-0 flex-1">
+        <h3 className="text-base font-black leading-6 text-brand-text">{title}</h3>
+        <p className="mt-3 text-[11px] font-semibold leading-[18px] text-brand-muted">{detail}</p>
+        <p className="mt-4 border-t border-brand-text/10 pt-3 text-[9px] font-bold leading-4 text-brand-text/55">仓库实现：{tech}</p>
       </div>
+      {index < 4 ? (
+        <ArrowRight aria-hidden="true" data-testid={`architecture-handoff-${number}`} className="absolute -bottom-3 left-1/2 z-20 h-5 w-5 -translate-x-1/2 rotate-90 rounded-full bg-brand-bg text-brand-orange lg:-right-4 lg:bottom-auto lg:left-auto lg:top-1/2 lg:translate-x-0 lg:-translate-y-1/2 lg:rotate-0" />
+      ) : null}
     </div>
   )
 }
