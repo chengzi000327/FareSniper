@@ -103,17 +103,29 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'architecture',
     label: '技术架构',
-    duration: '02:00',
+    duration: '01:10',
     notes: [
-      '系统按职责拆成五层：交互与上下文、意图与编排、数据执行、事实与决策、交付与反馈。图中的横向箭头就是一次请求的主调用链，不允许模型跨层直连数据源。',
-      '意图注册表、确定性要素抽取和必填校验先处理可规则化部分，ReAct 只处理歧义；统一数据源接口负责多源并发，FlightOffer 与 ResponseFacts 构成两道事实边界。',
-      '同步结果、异步提醒和记忆反馈共享同一事实口径；跨层 Harness 工程护栏统一承担鉴权、状态、数据契约、超时熔断、事实约束与全链路追踪。',
+      '这张图先看一次请求的主链路：恢复上下文、收敛意图、多平台取数、生成可信事实、同源交付结果。',
+      '关键分工是模型只处理歧义并选择类型化工具；平台掌握身份、数据源、校验、排序和最终事实，模型不能直接访问 Provider，也不能改写报价。',
+      '底部 Harness 不是单独一步，而是贯穿五层的鉴权、状态、契约、韧性和可观测能力。下一页逐层说明作用、用法和代码实现。',
+    ],
+  },
+  {
+    id: 'architecture-details',
+    label: '分层实现',
+    duration: '01:20',
+    notes: [
+      'A 层先恢复 Redis 中的会话要素和 PostgreSQL 中的长期记忆，并由服务端注入 user_id，让每次请求拥有可信上下文。',
+      'B 层用意图注册表和向量 FastPath 召回候选，再用确定性代码抽取并校验机场、日期、预算和行李；信息完整走搜索工具，歧义才交给 ReAct。',
+      'C 层把查询统一为 FlightQuery，通过 FlightProvider 接口并发调用飞猪、携程快照和 Google 航班；每个来源独立超时、熔断并保留状态。',
+      'D 层把原始结果归一为 FlightOffer，执行新鲜度、资格、完整成本和确定性排序，再冻结为 ResponseFacts，保证卡片和文案同源。',
+      'E 层通过 SSE 交付搜索过程和结果；后台每 15 分钟检查价格提醒、每小时刷新携程快照，点击和盯价信号再写回记忆。',
     ],
   },
   {
     id: 'monitoring',
     label: '工程演进',
-    duration: '01:30',
+    duration: '01:00',
     notes: [
       '上方链路区分当前与下一步：PriceAlert、15 分钟 Worker、数据刷新和 Web Push 已有；PurchaseWindowEvaluator、事务 Outbox 与多渠道 Adapter 是下一阶段。',
       '工程补强按风险排序：先保证事件不丢不重，再让调度可扩展，然后补齐数据新鲜度与可回放，最后建设 SLO、灰度和快速回滚。',
@@ -370,6 +382,8 @@ function SlideContent({ id }: { id: string }) {
       return <DemoSlide />
     case 'architecture':
       return <ArchitectureSlide />
+    case 'architecture-details':
+      return <ArchitectureDetailsSlide />
     case 'monitoring':
       return <MonitoringSlide />
     case 'decisions':
@@ -704,7 +718,7 @@ function ArchitectureSlide() {
     {
       code: 'C',
       title: '数据执行层',
-      subtitle: '统一 Contract，并发隔离',
+      subtitle: '统一接口，并发隔离',
       tone: 'purple' as const,
       icon: <Network />,
       items: [
@@ -748,7 +762,7 @@ function ArchitectureSlide() {
         <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">当前版本 · 已上线</span>
       </div>
       <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">
-        五层通过类型化接口逐框流转；模型只能处理歧义，不能绕过工具路由，也不能改写 FlightOffer 与 ResponseFacts。
+        模型负责理解歧义与选择工具；平台负责鉴权、执行、事实归一与确定性决策。
       </p>
       <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-5">
         {layers.map((layer, index) => (
@@ -759,6 +773,84 @@ function ArchitectureSlide() {
         <HarnessRail label="模型职责" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
         <HarnessRail label="跨层 Harness 工程护栏" value="鉴权 · 状态 · 数据契约 · 超时熔断 · 事实约束 · 幂等" tone="harness" />
         <HarnessRail label="证据与评测" value="LangSmith 全链路追踪 · 数据源状态 · 契约测试" tone="failure" />
+      </div>
+    </div>
+  )
+}
+
+function ArchitectureDetailsSlide() {
+  const responsibilities = [
+    {
+      code: 'A',
+      title: '交互与上下文层',
+      tone: 'blue' as const,
+      purpose: '让请求属于正确的用户、会话和历史',
+      usage: '进入 Agent 前恢复会话要素、近期对话与长期偏好',
+      implementation: 'FastAPI 鉴权与依赖注入；Redis 保存 SlotBundle；PostgreSQL 保存记忆',
+    },
+    {
+      code: 'B',
+      title: '意图与编排层',
+      tone: 'orange' as const,
+      purpose: '把自然语言收敛成可执行、可校验的任务',
+      usage: '召回意图 → 抽取要素 → 校验必填项 → 选择类型化工具',
+      implementation: '意图注册表 + 向量 FastPath + 确定性解析 + LangGraph/ReAct 兜歧义',
+    },
+    {
+      code: 'C',
+      title: '数据执行层',
+      tone: 'purple' as const,
+      purpose: '屏蔽平台差异，让慢来源不拖垮整次搜索',
+      usage: '统一查询后按能力选源，并发拉取，谁先返回先交付',
+      implementation: 'FlightProvider 接口；飞猪/携程快照/Google 航班适配器；超时与熔断',
+    },
+    {
+      code: 'D',
+      title: '事实与决策层',
+      tone: 'amber' as const,
+      purpose: '让比较口径可信，避免模型补价格或改结果',
+      usage: '归一报价 → 校验时效与资格 → 计算完整成本 → 确定性排序',
+      implementation: 'Pydantic FlightOffer 契约 + 归一去重 + ResponseFacts 输出冻结',
+    },
+    {
+      code: 'E',
+      title: '交付与反馈层',
+      tone: 'green' as const,
+      purpose: '让一次搜索变成持续监控和长期个性化',
+      usage: '流式展示同源结果；触价后通知；行为信号回写记忆',
+      implementation: 'SSE 事件流 + 15 分钟提醒任务 + 携程每小时刷新 + Web Push',
+    },
+  ]
+
+  return (
+    <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
+      <div>
+        <div className="text-xs font-black text-brand-orange sm:text-sm">07 · 分层职责与实现</div>
+        <h2 className="mt-2 font-serif text-3xl font-black leading-tight sm:text-4xl">每一层，都回答三个工程问题</h2>
+        <p className="mt-1 text-xs leading-5 text-brand-muted">解决什么问题、请求中如何使用、仓库里如何实现。</p>
+      </div>
+
+      <div className="mt-4 overflow-hidden rounded-lg border border-brand-text/10 bg-white shadow-sm">
+        <div className="hidden grid-cols-[0.9fr_1.12fr_1.35fr_1.68fr] border-b border-brand-text/10 bg-brand-text px-4 py-2.5 text-[11px] font-black text-white lg:grid">
+          <div>层级</div>
+          <div>有什么用</div>
+          <div>怎么使用</div>
+          <div>如何实现</div>
+        </div>
+        {responsibilities.map((item) => (
+          <ArchitectureResponsibilityRow key={item.code} {...item} />
+        ))}
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-lg border border-brand-orange/20 bg-brand-orange-light px-4 py-3 text-[13px] leading-5">
+          <span className="font-black text-brand-orange">Agent 边界：</span>
+          理解歧义、补全计划、选择类型化工具，不直接持有数据源权限。
+        </div>
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] leading-5">
+          <span className="font-black text-emerald-700">平台边界：</span>
+          注入身份、校验契约、执行取数、归一事实、确定性排序并留下 Trace。
+        </div>
       </div>
     </div>
   )
@@ -828,7 +920,7 @@ function MonitoringSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SlideHeading eyebrow="07 · ENGINEERING ROADMAP" title="从能运行，到可靠、可扩展、可回滚" />
+        <SlideHeading eyebrow="08 · 工程演进" title="从能运行，到可靠、可扩展、可回滚" />
         <div className="flex gap-2 text-[10px] font-black">
           <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">LIVE · 已上线</span>
           <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">NEXT · 演进</span>
@@ -907,7 +999,7 @@ function DecisionsSlide() {
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="08 · EVALUATION HARNESS" title="Bad Case 不是事故记录，而是回归资产" />
+      <SlideHeading eyebrow="09 · 评测护栏" title="Bad Case 不是事故记录，而是回归资产" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
         线上 Trace 负责发现问题，离线数据集负责稳定复现，自动化门禁负责阻止同类错误再次上线。
       </p>
@@ -957,7 +1049,7 @@ function ClosingSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="max-w-5xl">
-        <div className="text-sm font-black text-brand-orange">09 · WHAT NEXT</div>
+        <div className="text-sm font-black text-brand-orange">10 · 下一步</div>
         <h2 className="mt-4 font-serif text-5xl font-black leading-tight sm:text-6xl">
           不做另一个卖票平台，<br />做一个代表用户决策的 Agent。
         </h2>
@@ -1034,6 +1126,43 @@ type ArchitectureLayerItem = {
   label: string
   detail: string
   handoff?: boolean
+}
+
+function ArchitectureResponsibilityRow({
+  code,
+  title,
+  tone,
+  purpose,
+  usage,
+  implementation,
+}: {
+  code: string
+  title: string
+  tone: ArchitectureLayerTone
+  purpose: string
+  usage: string
+  implementation: string
+}) {
+  const toneClasses: Record<ArchitectureLayerTone, { badge: string; row: string }> = {
+    blue: { badge: 'bg-sky-600', row: 'bg-sky-50/55' },
+    orange: { badge: 'bg-orange-500', row: 'bg-orange-50/55' },
+    purple: { badge: 'bg-violet-600', row: 'bg-violet-50/55' },
+    amber: { badge: 'bg-amber-500', row: 'bg-amber-50/55' },
+    green: { badge: 'bg-emerald-600', row: 'bg-emerald-50/55' },
+  }
+  const classes = toneClasses[tone]
+
+  return (
+    <div className={`grid gap-2 border-b border-brand-text/10 px-4 py-3 last:border-b-0 lg:grid-cols-[0.9fr_1.12fr_1.35fr_1.68fr] lg:items-center ${classes.row}`}>
+      <div className="flex items-center gap-2">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-black text-white ${classes.badge}`}>{code}</span>
+        <h3 className="text-[13px] font-black leading-4">{title}</h3>
+      </div>
+      <div className="text-xs font-semibold leading-[18px] text-brand-text">{purpose}</div>
+      <div className="text-xs leading-[18px] text-brand-muted">{usage}</div>
+      <div className="text-xs leading-[18px] text-brand-muted">{implementation}</div>
+    </div>
+  )
 }
 
 function ArchitectureLayer({
