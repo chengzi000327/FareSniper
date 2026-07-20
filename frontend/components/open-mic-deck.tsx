@@ -124,12 +124,12 @@ const SLIDES: SlideDefinition[] = [
   },
   {
     id: 'monitoring',
-    label: '演进路线',
+    label: '二期迭代',
     duration: '01:20',
     notes: [
-      '有了评测护栏，再看当前实现与下一步演进。当前闭环已经能完成三件事：用户创建价格提醒，后台每 15 分钟检查缓存报价，达到目标价后通过 Web Push 通知。携程快照每小时刷新。',
-      '下一步不是增加更多定时任务，而是回答四个问题：什么时候提高检查频率，什么时候真的值得提醒，如何保证通知不丢不重，以及如何安全发布规则变化。',
-      '购买窗口由时间、行李、完整成本、目标价和历史低位共同决定；规则负责触发，模型只把原因解释给用户。这也是 FareSniper 从盯价工具走向出行决策 Agent 的路径。',
+      '有了评测护栏，再看二期迭代。当前闭环已经能创建提醒、每 15 分钟检查报价，并在命中目标价后通过 Web Push 通知。',
+      '二期一方面完善购买窗口判断与可靠通知；另一方面把查询、比较、记忆和提醒沉淀成可复用的 Agent 能力，并考虑开源。',
+      '用户可以把这套能力接入自己的 Hermes，由 Cron 定时运行，再通过飞书、微信等渠道接收提醒。FareSniper 因此不只是一套网页产品，也可以成为个人 Agent 的出行能力模块。',
     ],
   },
   {
@@ -825,20 +825,20 @@ function MonitoringSlide() {
       icon: <Radio />,
     },
     {
-      label: '动态检查频率',
-      detail: '越临期或越接近目标价，查得越勤',
-      status: 'next' as const,
-      icon: <RefreshCw />,
-    },
-    {
       label: '判断购买窗口',
       detail: '价格 · 时间 · 行李 · 历史低位',
       status: 'next' as const,
       icon: <Radar />,
     },
     {
-      label: '可靠多渠道通知',
-      detail: '先落库再投递 · 飞书 · 微信',
+      label: '开放 Agent 能力',
+      detail: '查询 · 比较 · 记忆 · 提醒可复用',
+      status: 'next' as const,
+      icon: <Network />,
+    },
+    {
+      label: '接入个人工作流',
+      detail: 'Hermes · Cron · 飞书 · 微信',
       status: 'next' as const,
       icon: <Radio />,
     },
@@ -860,22 +860,22 @@ function MonitoringSlide() {
       target: '事件先落库、幂等去重、失败自动重试',
     },
     {
-      title: '怎么安全上线',
-      current: 'LangSmith Trace + 自动化测试',
-      target: '来源健康度、分阶段放量和一键回滚',
+      title: '能力怎么复用',
+      current: '当前能力主要封装在 FareSniper 产品内',
+      target: '沉淀或开源为 Skill / API，接入用户自己的 Hermes',
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SlideHeading eyebrow="08 · 演进路线" title="当前已经做到什么，下一步还要补什么" />
+        <SlideHeading eyebrow="08 · 二期迭代" title="从产品闭环，走向可复用的 Agent 能力" />
         <div className="flex gap-2 text-[10px] font-black">
           <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">绿色 · 已上线</span>
-          <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">橙色 · 下一步</span>
+          <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">橙色 · 二期</span>
         </div>
       </div>
       <p className="mt-2 max-w-5xl text-sm leading-6 text-brand-muted">
-        当前已经能“盯目标价”；下一步要升级成“判断何时值得买，并保证消息送得到”。
+        当前已经能“盯目标价”；二期既要判断何时值得买，也要让这套能力进入用户自己的 Agent 工作流。
       </p>
       <div className="mt-4 grid gap-2 lg:grid-cols-6">
         {monitorChain.map((node, index) => (
@@ -893,7 +893,7 @@ function MonitoringSlide() {
           <div className="mt-1 text-sm font-bold leading-5">约束满足 ∧ 报价有效 ∧（总价达到目标 或 进入历史低位）</div>
         </div>
         <div className="flex items-center justify-center rounded-lg border border-brand-orange/20 bg-brand-orange-light px-4 py-3 text-center text-xs font-black text-brand-text">
-          规则负责触发；模型只解释“为什么现在值得买”
+          可沉淀或开源为 Skill / API，由 Hermes + Cron 调用，并投递到飞书、微信
         </div>
       </div>
     </div>
