@@ -113,16 +113,6 @@ const SLIDES: SlideDefinition[] = [
     ],
   },
   {
-    id: 'monitoring',
-    label: '监控闭环',
-    duration: '01:20',
-    notes: [
-      '当前闭环已经能完成三件事：用户创建价格提醒，后台每 15 分钟检查缓存报价，达到目标价后通过 Web Push 通知。携程快照每小时刷新。',
-      '下一步不是增加更多定时任务，而是回答四个问题：什么时候提高检查频率，什么时候真的值得提醒，如何保证通知不丢不重，以及如何安全发布规则变化。',
-      '购买窗口由时间、行李、完整成本、目标价和历史低位共同决定；规则负责触发，模型只把原因解释给用户。',
-    ],
-  },
-  {
     id: 'decisions',
     label: '评测闭环',
     duration: '01:40',
@@ -130,6 +120,16 @@ const SLIDES: SlideDefinition[] = [
       '离线有 50 条种子样本，覆盖正常、相对日期、多轮追问、边界异常与对抗；评测意图、追问、信号、建议和格式。',
       '线上 LangSmith Trace 发现问题后，按 P0–P3 定级，再固化为最小复现样本和单元、契约或 E2E 回归测试。',
       '典型 Bad Case 包括旧日期串线、慢 Provider 拖垮请求、不合资格或异币种报价误胜，以及 AI 文案与卡片价格不一致。',
+    ],
+  },
+  {
+    id: 'monitoring',
+    label: '演进路线',
+    duration: '01:20',
+    notes: [
+      '有了评测护栏，再看当前实现与下一步演进。当前闭环已经能完成三件事：用户创建价格提醒，后台每 15 分钟检查缓存报价，达到目标价后通过 Web Push 通知。携程快照每小时刷新。',
+      '下一步不是增加更多定时任务，而是回答四个问题：什么时候提高检查频率，什么时候真的值得提醒，如何保证通知不丢不重，以及如何安全发布规则变化。',
+      '购买窗口由时间、行李、完整成本、目标价和历史低位共同决定；规则负责触发，模型只把原因解释给用户。这也是 FareSniper 从盯价工具走向出行决策 Agent 的路径。',
     ],
   },
   {
@@ -868,7 +868,7 @@ function MonitoringSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SlideHeading eyebrow="07 · 监控闭环" title="当前做到哪，下一步为什么这样改" />
+        <SlideHeading eyebrow="08 · 演进路线" title="当前已经做到什么，下一步还要补什么" />
         <div className="flex gap-2 text-[10px] font-black">
           <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">绿色 · 已上线</span>
           <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">橙色 · 下一步</span>
@@ -947,7 +947,7 @@ function DecisionsSlide() {
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="08 · 评测护栏" title="Bad Case 不是事故记录，而是回归资产" />
+      <SlideHeading eyebrow="07 · 评测护栏" title="Bad Case 不是事故记录，而是回归资产" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
         线上 Trace 负责发现问题，离线数据集负责稳定复现，自动化门禁负责阻止同类错误再次上线。
       </p>
