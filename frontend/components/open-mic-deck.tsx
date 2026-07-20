@@ -5,9 +5,11 @@ import Image from 'next/image'
 import { AnimatePresence, motion } from 'motion/react'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import {
+  Activity,
   ArrowLeft,
   ArrowRight,
   BadgeCheck,
+  BellRing,
   BrainCircuit,
   Check,
   Clock3,
@@ -15,6 +17,7 @@ import {
   Database,
   ExternalLink,
   Gauge,
+  GitBranch,
   GraduationCap,
   Luggage,
   Maximize2,
@@ -23,10 +26,14 @@ import {
   NotebookText,
   Plane,
   Radar,
+  Radio,
   RefreshCw,
   Route,
   SearchCheck,
+  ServerCog,
+  ShieldCheck,
   Sparkles,
+  Workflow,
   X,
 } from 'lucide-react'
 
@@ -99,17 +106,27 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'architecture',
     label: '技术架构',
-    duration: '02:30',
+    duration: '02:00',
     notes: [
-      '一条请求只走六步：组装 Context → 意图与槽位 → Agent 规划 → 多源并发 → 事实裁决 → SSE 输出与提醒。',
-      '意图链路是 Registry 召回候选、确定性抽槽和必填校验，ReAct 只处理歧义并选择 Typed Tool。',
-      '模型负责理解、规划和解释；Harness 负责状态、权限、超时、报价资格、同源输出与 Trace。',
+      '同步链路分为 Control Plane 与 Data / Truth Plane。前者负责状态、意图与工具规划，后者负责并发取数、标准化、完整成本与事实冻结。',
+      '意图先走 Registry、确定性抽槽与必填校验，ReAct 只处理歧义；Provider 通过统一 Contract 并发执行，慢来源由超时、熔断和 partial result 隔离。',
+      'FlightOffer 是数据事实边界，ResponseFacts 是输出事实边界；AI 文案、SSE 和价格卡片必须引用同一份冻结事实。',
+    ],
+  },
+  {
+    id: 'monitoring',
+    label: '主动监控',
+    duration: '01:30',
+    notes: [
+      '搜索结束后，PriceAlert 保存航线、日期、目标价与用户约束；Worker 定期刷新数据，并复用同一套 Provider Contract 与 FlightOffer。',
+      '当前已经上线 15 分钟阈值检查与 Web Push；下一步升级为 PurchaseWindowEvaluator、事务 Outbox 和多渠道 Adapter。',
+      '购买窗口由确定性规则触发，模型只解释原因。状态机、幂等键、冷却时间和投递日志保证同一波动不会重复骚扰用户。',
     ],
   },
   {
     id: 'decisions',
     label: '评测闭环',
-    duration: '02:00',
+    duration: '01:40',
     notes: [
       '离线有 50 条种子样本，覆盖正常、相对日期、多轮追问、边界异常与对抗；评测意图、追问、信号、建议和格式。',
       '线上 LangSmith Trace 发现问题后，按 P0–P3 定级，再固化为最小复现样本和单元、契约或 E2E 回归测试。',
@@ -119,7 +136,7 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'closing',
     label: '结尾',
-    duration: '01:10',
+    duration: '00:50',
     notes: [
       '当前边界是部分平台不会返回完整税费和行李字段，因此产品必须诚实展示数据状态。',
       '长期目标不是成为另一个卖票平台，而是成为代表用户做出行决策的 Agent。',
@@ -356,6 +373,8 @@ function SlideContent({ id }: { id: string }) {
       return <DemoSlide />
     case 'architecture':
       return <ArchitectureSlide />
+    case 'monitoring':
+      return <MonitoringSlide />
     case 'decisions':
       return <DecisionsSlide />
     default:
@@ -660,63 +679,182 @@ function DemoSlide() {
 }
 
 function ArchitectureSlide() {
-  const nodes = [
+  const controlPlane = [
     {
-      tag: 'INPUT',
-      label: 'Context',
-      detail: 'API + Redis 会话 + PG 记忆',
+      tag: 'CLIENT',
+      label: 'Next.js / PWA',
+      detail: '自然语言 · JWT · SSE',
+      icon: <Plane />,
+    },
+    {
+      tag: 'ENTRY',
+      label: 'FastAPI',
+      detail: 'Auth · request scope',
+      icon: <ServerCog />,
+    },
+    {
+      tag: 'CONTEXT',
+      label: 'Bootstrap',
+      detail: 'Redis 会话 + PG 记忆',
       icon: <Database />,
     },
     {
       tag: 'UNDERSTAND',
-      label: 'Intent',
-      detail: 'Registry 召回 → 抽槽 → 必填校验',
+      label: 'Intent Harness',
+      detail: 'Registry → slots → required',
       icon: <SearchCheck />,
     },
     {
-      tag: 'PLAN',
-      label: 'Agent',
-      detail: 'ReAct 决策 → Typed Tool Router',
-      icon: <BrainCircuit />,
+      tag: 'ORCHESTRATE',
+      label: 'LangGraph',
+      detail: 'ReAct → Typed Tools → fallback',
+      icon: <Workflow />,
+    },
+  ]
+  const truthPlane = [
+    {
+      tag: 'FAN-OUT',
+      label: 'Aggregator',
+      detail: 'as_completed · partial SSE',
+      icon: <GitBranch />,
     },
     {
-      tag: 'FETCH',
-      label: 'Providers',
-      detail: '飞猪实时｜携程快照｜国际源',
+      tag: 'DATA SOURCE',
+      label: 'Provider Contract',
+      detail: 'FlyAI｜Ctrip｜SerpAPI',
       icon: <Network />,
     },
     {
-      tag: 'DECIDE',
-      label: 'Truth',
-      detail: 'FlightOffer → 完整成本 → winner',
+      tag: 'CANONICAL',
+      label: 'FlightOffer',
+      detail: 'normalize · null-preserving',
+      icon: <Database />,
+    },
+    {
+      tag: 'DECISION',
+      label: 'Truth Engine',
+      detail: 'eligibility · full cost · rank',
       icon: <BadgeCheck />,
     },
     {
-      tag: 'DELIVER',
-      label: 'Output',
-      detail: 'ResponseFacts → SSE / 卡片 / 提醒',
-      icon: <Sparkles />,
+      tag: 'FREEZE',
+      label: 'ResponseFacts',
+      detail: 'AI · card · alert 同源',
+      icon: <ShieldCheck />,
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="06 · TECHNICAL CHAIN" title="从一句需求，到一条可验证的购买建议" />
-      <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
-        每个节点只有一个职责；任何模型或数据源失败，都不能越过事实边界。
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <SlideHeading eyebrow="06 · ONLINE DECISION PLANE" title="一次请求，如何成为可验证的购买建议" />
+        <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">CURRENT · 已上线</span>
+      </div>
+      <p className="mt-2 max-w-5xl text-sm leading-6 text-brand-muted">
+        同步请求拆成控制面与事实面；模型处理不确定性，确定性系统守住状态、权限与价格事实。
       </p>
-      <div className="mt-6 grid items-stretch gap-3 lg:grid-cols-6">
-        {nodes.map((node, index) => (
-          <ArchitectureNode key={node.label} {...node} index={index} total={nodes.length} />
+      <div className="mt-4 space-y-3">
+        <ArchitectureBand label="CONTROL PLANE" nodes={controlPlane} tone="control" />
+        <div className="flex items-center justify-center gap-2 text-[11px] font-black text-brand-orange">
+          <ArrowRight className="h-4 w-4 rotate-90" />
+          Typed Tool: search_flights(query)
+        </div>
+        <ArchitectureBand label="DATA / TRUTH" nodes={truthPlane} tone="truth" />
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-[0.82fr_1.35fr_1fr]">
+        <HarnessRail label="MODEL OWNS" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
+        <HarnessRail label="HARNESS OWNS" value="State · Auth · Timeout · Eligibility · Grounding" tone="harness" />
+        <HarnessRail label="RESILIENCE" value="8s fallback · 10s timeout · 熔断 · partial result" tone="failure" />
+      </div>
+      <div className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-brand-muted">
+        <Radio className="h-4 w-4 text-brand-orange" />
+        LangSmith spans: intent → tool → provider → normalize → rank → stream
+      </div>
+    </div>
+  )
+}
+
+function MonitoringSlide() {
+  const monitorNodes = [
+    {
+      tag: '01 · DEFINE',
+      label: 'PriceAlert',
+      detail: 'route · date · target · constraints',
+      status: 'live' as const,
+      icon: <BellRing />,
+    },
+    {
+      tag: '02 · SCHEDULE',
+      label: 'Worker',
+      detail: '15m check · Ctrip 1h refresh',
+      status: 'live' as const,
+      icon: <Clock3 />,
+    },
+    {
+      tag: '03 · REFRESH',
+      label: 'Demand + Providers',
+      detail: '复用 Contract 与 FlightOffer',
+      status: 'live' as const,
+      icon: <RefreshCw />,
+    },
+    {
+      tag: '04 · EVALUATE',
+      label: 'Purchase Window',
+      detail: 'constraints ∧ eligible ∧ low price',
+      status: 'next' as const,
+      icon: <Radar />,
+    },
+    {
+      tag: '05 · DELIVER',
+      label: 'Outbox',
+      detail: 'idempotency · cooldown · retry',
+      status: 'next' as const,
+      icon: <Activity />,
+    },
+  ]
+  return (
+    <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <SlideHeading eyebrow="07 · ASYNC MONITORING PLANE" title="搜索结束后，Agent 仍在工作" />
+        <div className="flex gap-2 text-[10px] font-black">
+          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">LIVE · 已上线</span>
+          <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">NEXT · 演进</span>
+        </div>
+      </div>
+      <p className="mt-2 max-w-5xl text-sm leading-6 text-brand-muted">
+        在线搜索与异步监控共享同一 Provider Contract、FlightOffer 和 Truth Engine，避免两套价格口径。
+      </p>
+      <div className="mt-5 grid gap-3 lg:grid-cols-5">
+        {monitorNodes.map((node, index) => (
+          <MonitorNode key={node.label} {...node} index={index} total={monitorNodes.length} />
         ))}
       </div>
-      <div className="mt-5 grid gap-3 lg:grid-cols-[0.82fr_1.38fr_1fr]">
-        <HarnessRail label="MODEL" value="歧义理解 · 工具规划 · 结果解释" tone="model" />
-        <HarnessRail label="HARNESS" value="状态 · 权限 · 超时 · 报价资格 · Grounding" tone="harness" />
-        <HarnessRail label="OBSERVE" value="LangSmith Trace → Bad Case → Gate" tone="failure" />
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.45fr_0.9fr]">
+        <div className="rounded-[20px] bg-brand-text px-5 py-4 text-white shadow-card">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[10px] font-black text-brand-orange-light">DETERMINISTIC TRIGGER</span>
+            <span className="text-[10px] font-bold text-white/60">LLM 只解释，不触发</span>
+          </div>
+          <div className="mt-2 font-mono text-sm font-bold leading-6 text-white">
+            constraints_ok ∧ offer_eligible ∧ (total ≤ target ∨ percentile ≤ P20)
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold text-white/70">
+            {['WATCHING', 'CANDIDATE', 'WORTH_BUYING', 'NOTIFIED'].map((state, index) => (
+              <React.Fragment key={state}>
+                <span className={state === 'WORTH_BUYING' ? 'text-brand-orange-light' : ''}>{state}</span>
+                {index < 3 ? <ArrowRight className="h-3.5 w-3.5" /> : null}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <ChannelNode label="Web Push" detail="VAPID" status="live" />
+          <ChannelNode label="飞书" detail="Bot API" status="next" />
+          <ChannelNode label="微信" detail="订阅消息" status="next" />
+        </div>
       </div>
-      <div className="mt-3 flex items-center justify-center gap-2 text-sm font-bold text-brand-muted">
-        <RefreshCw className="h-4 w-4 text-brand-orange" />
-        点击 / 盯价 / 购买信号 → 可解释记忆 → 下一次排序
+      <div className="mt-3 flex items-center justify-center gap-2 text-xs font-bold text-brand-muted">
+        <ShieldCheck className="h-4 w-4 text-brand-orange" />
+        PurchaseWindowOpened(alert_id, offer_id, reason_codes, freshness) → delivery log
       </div>
     </div>
   )
@@ -769,7 +907,7 @@ function DecisionsSlide() {
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="07 · EVALUATION HARNESS" title="Bad Case 不是事故记录，而是回归资产" />
+      <SlideHeading eyebrow="08 · EVALUATION HARNESS" title="Bad Case 不是事故记录，而是回归资产" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
         线上 Trace 负责发现问题，离线数据集负责稳定复现，自动化门禁负责阻止同类错误再次上线。
       </p>
@@ -819,7 +957,7 @@ function ClosingSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="max-w-5xl">
-        <div className="text-sm font-black text-brand-orange">08 · WHAT NEXT</div>
+        <div className="text-sm font-black text-brand-orange">09 · WHAT NEXT</div>
         <h2 className="mt-4 font-serif text-5xl font-black leading-tight sm:text-6xl">
           不做另一个卖票平台，<br />做一个代表用户决策的 Agent。
         </h2>
@@ -889,34 +1027,110 @@ function Metric({ value, label }: { value: string; label: string }) {
   )
 }
 
-function ArchitectureNode({
+type ArchitectureNodeData = {
+  icon: React.ReactElement
+  tag: string
+  label: string
+  detail: string
+}
+
+function ArchitectureBand({
+  label,
+  nodes,
+  tone,
+}: {
+  label: string
+  nodes: ArchitectureNodeData[]
+  tone: 'control' | 'truth'
+}) {
+  return (
+    <div className="grid gap-3 lg:grid-cols-[7.5rem_minmax(0,1fr)] lg:items-stretch">
+      <div className={`flex items-center rounded-[18px] px-4 py-3 text-[10px] font-black ${
+        tone === 'truth'
+          ? 'bg-green-50 text-green-700'
+          : 'bg-brand-orange-light text-brand-orange'
+      }`}>
+        {label}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-5">
+        {nodes.map((node, index) => (
+          <ArchitectureChainNode key={node.label} {...node} index={index} total={nodes.length} tone={tone} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ArchitectureChainNode({
   icon,
   tag,
   label,
   detail,
   index,
   total,
-}: {
-  icon: React.ReactElement
-  tag: string
-  label: string
-  detail: string
+  tone,
+}: ArchitectureNodeData & {
+  index: number
+  total: number
+  tone: 'control' | 'truth'
+}) {
+  return (
+    <div className={`relative min-h-24 rounded-[18px] border bg-white px-3 py-3 shadow-sm ${
+      tone === 'truth' && index >= total - 2 ? 'border-green-200' : 'border-brand-text/5'
+    }`}>
+      <div className="flex items-center gap-2">
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-xl text-white [&>svg]:h-4 [&>svg]:w-4 ${
+          tone === 'truth' && index >= total - 2 ? 'bg-green-600' : 'bg-brand-text'
+        }`}>{icon}</span>
+        <span className="text-[9px] font-black text-brand-orange">{tag}</span>
+      </div>
+      <h3 className="mt-2 text-sm font-black">{label}</h3>
+      <p className="mt-1 text-[10px] font-semibold leading-4 text-brand-muted">{detail}</p>
+      {index < total - 1 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange sm:block" /> : null}
+    </div>
+  )
+}
+
+function MonitorNode({
+  icon,
+  tag,
+  label,
+  detail,
+  status,
+  index,
+  total,
+}: ArchitectureNodeData & {
+  status: 'live' | 'next'
   index: number
   total: number
 }) {
   return (
-    <div className={`relative flex min-h-44 flex-col rounded-[20px] border p-4 shadow-sm ${
-      index === 1
-        ? 'border-brand-orange/30 bg-brand-orange-light'
-        : index === total - 2
-          ? 'border-green-200 bg-green-50'
-          : 'border-brand-text/5 bg-white'
+    <div className={`relative min-h-36 rounded-[20px] border p-4 shadow-sm ${
+      status === 'live' ? 'border-green-200 bg-white' : 'border-brand-orange/20 bg-brand-orange-light'
     }`}>
-      <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-brand-text text-white [&>svg]:h-5 [&>svg]:w-5">{icon}</div>
-      <div className="mt-4 text-[10px] font-black text-brand-orange">{tag}</div>
-      <h3 className="mt-1 text-lg font-black">{label}</h3>
-      <p className="mt-auto pt-3 text-xs font-semibold leading-5 text-brand-muted">{detail}</p>
+      <div className="flex items-center justify-between gap-2">
+        <span className={`flex h-9 w-9 items-center justify-center rounded-2xl text-white [&>svg]:h-5 [&>svg]:w-5 ${status === 'live' ? 'bg-green-600' : 'bg-brand-text'}`}>{icon}</span>
+        <span className={`rounded-full px-2 py-1 text-[9px] font-black ${status === 'live' ? 'bg-green-50 text-green-700' : 'bg-white text-brand-orange'}`}>
+          {status === 'live' ? 'LIVE' : 'NEXT'}
+        </span>
+      </div>
+      <div className="mt-4 text-[9px] font-black text-brand-orange">{tag}</div>
+      <h3 className="mt-1 text-base font-black">{label}</h3>
+      <p className="mt-2 text-[11px] font-semibold leading-5 text-brand-muted">{detail}</p>
       {index < total - 1 ? <ArrowRight className="absolute -right-2.5 top-1/2 z-10 hidden h-5 w-5 -translate-y-1/2 rounded-full bg-brand-bg text-brand-orange lg:block" /> : null}
+    </div>
+  )
+}
+
+function ChannelNode({ label, detail, status }: { label: string; detail: string; status: 'live' | 'next' }) {
+  return (
+    <div className={`flex min-h-28 flex-col items-center justify-center rounded-[18px] border px-2 py-3 text-center shadow-sm ${
+      status === 'live' ? 'border-green-200 bg-green-50' : 'border-brand-orange/20 bg-white'
+    }`}>
+      <Radio className={`h-5 w-5 ${status === 'live' ? 'text-green-600' : 'text-brand-orange'}`} />
+      <div className="mt-2 text-sm font-black">{label}</div>
+      <div className="mt-1 text-[10px] font-semibold text-brand-muted">{detail}</div>
+      <div className={`mt-2 text-[9px] font-black ${status === 'live' ? 'text-green-700' : 'text-brand-orange'}`}>{status === 'live' ? 'LIVE' : 'NEXT'}</div>
     </div>
   )
 }
