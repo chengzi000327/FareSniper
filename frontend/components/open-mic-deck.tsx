@@ -1103,7 +1103,7 @@ function RequestStep({
   }
   const classes = toneClasses[tone]
   return (
-    <div className={`relative flex min-h-[510px] flex-col rounded-xl border bg-white p-3 shadow-sm 2xl:min-h-[555px] 2xl:p-4 ${classes.border}`}>
+    <div className={`relative flex min-h-[455px] flex-col rounded-xl border bg-white p-3 shadow-sm 2xl:min-h-[485px] 2xl:p-4 ${classes.border}`}>
       <div className="flex items-center gap-2">
         <span className={`flex h-9 w-9 items-center justify-center rounded-lg text-white [&>svg]:h-4 [&>svg]:w-4 ${classes.icon}`}>{icon}</span>
         <div>
@@ -1115,34 +1115,34 @@ function RequestStep({
         <h3 className="text-sm font-black leading-5 text-brand-text 2xl:text-base 2xl:leading-6">{title}</h3>
         <p className="mt-2 text-[9px] font-semibold leading-[14px] text-brand-muted 2xl:text-[11px] 2xl:leading-[18px]">{detail}</p>
       </div>
-      <div className="mt-3 flex flex-1 flex-col border-t border-brand-text/10 pt-3">
-        <div className={`mb-2 text-[9px] font-black ${classes.number}`}>仓库实现 · 本层流程</div>
-        <div className="flex flex-1 flex-col gap-1">
+      <div className="mt-2 flex flex-1 flex-col border-t border-brand-text/10 pt-2">
+        <div className={`mb-1 text-[9px] font-black ${classes.number}`}>仓库实现 · 本层流程</div>
+        <div className="flex flex-1 flex-col gap-0.5">
           {flow.map((item, flowIndex) => (
             <React.Fragment key={'split' in item ? `split-${flowIndex}` : item.label}>
               {'split' in item ? (
                 <div>
                   <div className={`grid gap-1 ${item.split.length === 3 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                     {item.split.map((branch) => (
-                      <div key={branch.label} className={`rounded-md border px-1.5 py-1 text-center ${classes.border} bg-brand-bg/50`}>
+                      <div key={branch.label} className={`rounded-md border px-1.5 py-0.5 text-center ${classes.border} bg-brand-bg/50`}>
                         <div className="text-[9px] font-black leading-3">{branch.label}</div>
                         <div className="mt-0.5 text-[7px] font-semibold leading-[10px] text-brand-muted 2xl:text-[8px] 2xl:leading-3">{branch.detail}</div>
                       </div>
                     ))}
                   </div>
-                  {item.note ? <div className="mt-1 text-center text-[7px] font-semibold leading-[10px] text-brand-muted">{item.note}</div> : null}
+                  {item.note ? <div className="mt-0.5 text-center text-[7px] font-semibold leading-[10px] text-brand-muted">{item.note}</div> : null}
                 </div>
               ) : (
-                <div className={`rounded-md border px-2 py-1 text-center ${flowIndex === flow.length - 1 ? `${classes.border} bg-brand-bg/60` : 'border-brand-text/10 bg-white'}`}>
+                <div className={`rounded-md border px-2 py-0.5 text-center ${flowIndex === flow.length - 1 ? `${classes.border} bg-brand-bg/60` : 'border-brand-text/10 bg-white'}`}>
                   <div className="text-[9px] font-black leading-3 2xl:text-[10px]">{item.label}</div>
                   <div className="mt-0.5 text-[7px] font-semibold leading-[10px] text-brand-muted 2xl:text-[8px] 2xl:leading-3">{item.detail}</div>
                 </div>
               )}
-              {flowIndex < flow.length - 1 ? <ArrowRight className="mx-auto h-2.5 w-2.5 rotate-90 text-brand-text/45" strokeWidth={2} /> : null}
+              {flowIndex < flow.length - 1 ? <ArrowRight className="mx-auto h-2 w-2 rotate-90 text-brand-text/45" strokeWidth={2} /> : null}
             </React.Fragment>
           ))}
         </div>
-        <p className="mt-2 border-t border-brand-text/10 pt-2 text-[7px] font-bold leading-[11px] text-brand-text/55 2xl:text-[8px]">实际模块：{tech}</p>
+        <p className="mt-1 border-t border-brand-text/10 pt-1.5 text-[7px] font-bold leading-[11px] text-brand-text/55 2xl:text-[8px]">实际模块：{tech}</p>
       </div>
       {index < 4 ? (
         <ArrowRight aria-hidden="true" data-testid={`architecture-handoff-${number}`} className="absolute -bottom-3 left-1/2 z-20 h-5 w-5 -translate-x-1/2 rotate-90 rounded-full bg-brand-bg text-brand-orange lg:-right-4 lg:bottom-auto lg:left-auto lg:top-1/2 lg:translate-x-0 lg:-translate-y-1/2 lg:rotate-0" />
