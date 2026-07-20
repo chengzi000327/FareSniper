@@ -5,7 +5,6 @@ import Image from 'next/image'
 import { AnimatePresence, motion } from 'motion/react'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   BellRing,
@@ -103,33 +102,24 @@ const SLIDES: SlideDefinition[] = [
   {
     id: 'architecture',
     label: '技术架构',
-    duration: '01:10',
-    notes: [
-      '这张图先看一次请求的主链路：恢复上下文、收敛意图、多平台取数、生成可信事实、同源交付结果。',
-      '关键分工是模型只处理歧义并选择类型化工具；平台掌握身份、数据源、校验、排序和最终事实，模型不能直接访问 Provider，也不能改写报价。',
-      '底部 Harness 不是单独一步，而是贯穿五层的鉴权、状态、契约、韧性和可观测能力。下一页逐层说明作用、用法和代码实现。',
-    ],
-  },
-  {
-    id: 'architecture-details',
-    label: '分层实现',
-    duration: '01:20',
+    duration: '02:10',
     notes: [
       'A 层先恢复 Redis 中的会话要素和 PostgreSQL 中的长期记忆，并由服务端注入 user_id，让每次请求拥有可信上下文。',
       'B 层用意图注册表和向量 FastPath 召回候选，再用确定性代码抽取并校验机场、日期、预算和行李；信息完整走搜索工具，歧义才交给 ReAct。',
       'C 层把查询统一为 FlightQuery，通过 FlightProvider 接口并发调用飞猪、携程快照和 Google 航班；每个来源独立超时、熔断并保留状态。',
       'D 层把原始结果归一为 FlightOffer，执行新鲜度、资格、完整成本和确定性排序，再冻结为 ResponseFacts，保证卡片和文案同源。',
       'E 层通过 SSE 交付搜索过程和结果；后台每 15 分钟检查价格提醒、每小时刷新携程快照，点击和盯价信号再写回记忆。',
+      '关键边界是模型只理解歧义和选择工具；平台控制身份、执行和最终事实。底部 Harness 贯穿五层，统一负责鉴权、状态、契约、超时熔断和 Trace。',
     ],
   },
   {
     id: 'monitoring',
-    label: '工程演进',
-    duration: '01:00',
+    label: '监控闭环',
+    duration: '01:20',
     notes: [
-      '上方链路区分当前与下一步：PriceAlert、15 分钟 Worker、数据刷新和 Web Push 已有；PurchaseWindowEvaluator、事务 Outbox 与多渠道 Adapter 是下一阶段。',
-      '工程补强按风险排序：先保证事件不丢不重，再让调度可扩展，然后补齐数据新鲜度与可回放，最后建设 SLO、灰度和快速回滚。',
-      '购买窗口仍由确定性规则触发，模型只解释 reason codes；这样扩容、换模型或增加通知渠道都不改变业务正确性。',
+      '当前闭环已经能完成三件事：用户创建价格提醒，后台每 15 分钟检查缓存报价，达到目标价后通过 Web Push 通知。携程快照每小时刷新。',
+      '下一步不是增加更多定时任务，而是回答四个问题：什么时候提高检查频率，什么时候真的值得提醒，如何保证通知不丢不重，以及如何安全发布规则变化。',
+      '购买窗口由时间、行李、完整成本、目标价和历史低位共同决定；规则负责触发，模型只把原因解释给用户。',
     ],
   },
   {
@@ -382,8 +372,6 @@ function SlideContent({ id }: { id: string }) {
       return <DemoSlide />
     case 'architecture':
       return <ArchitectureSlide />
-    case 'architecture-details':
-      return <ArchitectureDetailsSlide />
     case 'monitoring':
       return <MonitoringSlide />
     case 'decisions':
@@ -698,9 +686,9 @@ function ArchitectureSlide() {
       tone: 'blue' as const,
       icon: <ServerCog />,
       items: [
-        { tag: '入口', label: '用户输入与身份', detail: '自然语言 · JWT · 流式连接' },
-        { tag: '请求', label: 'FastAPI 请求上下文', detail: '鉴权 · 用户注入 · 限流', handoff: true },
-        { tag: '状态', label: '会话与长期记忆', detail: 'Redis 会话 · PostgreSQL 偏好' },
+        { tag: '作用', label: '建立可信上下文', detail: '绑定用户、会话与长期记忆' },
+        { tag: '使用', label: '请求先恢复状态', detail: '鉴权 → 要素 → 偏好', handoff: true },
+        { tag: '实现', label: 'FastAPI + Redis + PostgreSQL', detail: '服务端注入 user_id' },
       ],
     },
     {
@@ -710,9 +698,9 @@ function ArchitectureSlide() {
       tone: 'orange' as const,
       icon: <BrainCircuit />,
       items: [
-        { tag: '召回', label: '意图注册表', detail: '关键词 · 示例 · 向量提示' },
-        { tag: '解析', label: '意图识别与要素校验', detail: '机场 · 日期 · 预算 · 行李', handoff: true },
-        { tag: '编排', label: 'LangGraph 任务编排', detail: '确定性优先 · ReAct 处理歧义' },
+        { tag: '作用', label: '收敛可执行任务', detail: '自然语言 → 结构化要素' },
+        { tag: '使用', label: '召回、抽取、校验', detail: '缺要素追问，完整才执行', handoff: true },
+        { tag: '实现', label: '意图注册表 + 向量 FastPath', detail: '确定性解析 + LangGraph/ReAct' },
       ],
     },
     {
@@ -722,9 +710,9 @@ function ArchitectureSlide() {
       tone: 'purple' as const,
       icon: <Network />,
       items: [
-        { tag: '接口', label: '统一数据源接口', detail: '能力声明 · 搜索 · 结构化返回' },
-        { tag: '并发', label: '多平台并发搜索', detail: '飞猪 · 携程 · Google 航班', handoff: true },
-        { tag: '隔离', label: '来源隔离与降级', detail: '10 秒超时 · 熔断 · 部分结果' },
+        { tag: '作用', label: '屏蔽平台差异', detail: '慢来源不拖垮整次搜索' },
+        { tag: '使用', label: '统一查询，并发选源', detail: '谁先返回，谁先交付', handoff: true },
+        { tag: '实现', label: 'FlightProvider 适配器', detail: '飞猪/携程/SerpAPI + 超时熔断' },
       ],
     },
     {
@@ -734,9 +722,9 @@ function ArchitectureSlide() {
       tone: 'amber' as const,
       icon: <ShieldCheck />,
       items: [
-        { tag: '事实', label: '统一航班事实 FlightOffer', detail: '来源 · 时效 · 缺失值保真' },
-        { tag: '决策', label: '可信决策引擎', detail: '资格过滤 · 完整成本 · 排序', handoff: true },
-        { tag: '输出', label: '结果事实 ResponseFacts', detail: '最优解 · 原因码 · 输出冻结' },
+        { tag: '作用', label: '建立可信比较口径', detail: '模型不能补价格或改结果' },
+        { tag: '使用', label: '归一、校验、计算、排序', detail: '时效 · 资格 · 完整成本', handoff: true },
+        { tag: '实现', label: 'FlightOffer → ResponseFacts', detail: 'Pydantic 契约 + 输出冻结' },
       ],
     },
     {
@@ -746,9 +734,9 @@ function ArchitectureSlide() {
       tone: 'green' as const,
       icon: <Radio />,
       items: [
-        { tag: '读取', label: '唯一结果事实', detail: '统一读取 ResponseFacts' },
-        { tag: '交付', label: '回答、价格卡与预订', detail: '流式回答 · 同源价格 · 平台跳转', handoff: true },
-        { tag: '反馈', label: '监控通知与记忆', detail: '盯价 · 点击 · 购买 → 下次排序' },
+        { tag: '作用', label: '一次搜索变持续决策', detail: '结果同源，后续持续盯价' },
+        { tag: '使用', label: '流式交付、触价提醒', detail: '回答 · 卡片 · 通知', handoff: true },
+        { tag: '实现', label: 'SSE + Worker + Web Push', detail: '15 分钟检查 · 携程每小时刷新' },
       ],
     },
   ]
@@ -762,7 +750,7 @@ function ArchitectureSlide() {
         <span className="self-start rounded-full border border-green-200 bg-green-50 px-3 py-1 text-[10px] font-black text-green-700 sm:self-auto">当前版本 · 已上线</span>
       </div>
       <p className="mt-1 max-w-5xl text-xs leading-5 text-brand-muted">
-        模型负责理解歧义与选择工具；平台负责鉴权、执行、事实归一与确定性决策。
+        每层从上到下回答：有什么用、请求怎么经过、仓库如何实现。模型规划，平台可信执行。
       </p>
       <div className="mt-3 grid items-stretch gap-3 lg:grid-cols-5">
         {layers.map((layer, index) => (
@@ -778,156 +766,78 @@ function ArchitectureSlide() {
   )
 }
 
-function ArchitectureDetailsSlide() {
-  const responsibilities = [
-    {
-      code: 'A',
-      title: '交互与上下文层',
-      tone: 'blue' as const,
-      purpose: '让请求属于正确的用户、会话和历史',
-      usage: '进入 Agent 前恢复会话要素、近期对话与长期偏好',
-      implementation: 'FastAPI 鉴权与依赖注入；Redis 保存 SlotBundle；PostgreSQL 保存记忆',
-    },
-    {
-      code: 'B',
-      title: '意图与编排层',
-      tone: 'orange' as const,
-      purpose: '把自然语言收敛成可执行、可校验的任务',
-      usage: '召回意图 → 抽取要素 → 校验必填项 → 选择类型化工具',
-      implementation: '意图注册表 + 向量 FastPath + 确定性解析 + LangGraph/ReAct 兜歧义',
-    },
-    {
-      code: 'C',
-      title: '数据执行层',
-      tone: 'purple' as const,
-      purpose: '屏蔽平台差异，让慢来源不拖垮整次搜索',
-      usage: '统一查询后按能力选源，并发拉取，谁先返回先交付',
-      implementation: 'FlightProvider 接口；飞猪/携程快照/Google 航班适配器；超时与熔断',
-    },
-    {
-      code: 'D',
-      title: '事实与决策层',
-      tone: 'amber' as const,
-      purpose: '让比较口径可信，避免模型补价格或改结果',
-      usage: '归一报价 → 校验时效与资格 → 计算完整成本 → 确定性排序',
-      implementation: 'Pydantic FlightOffer 契约 + 归一去重 + ResponseFacts 输出冻结',
-    },
-    {
-      code: 'E',
-      title: '交付与反馈层',
-      tone: 'green' as const,
-      purpose: '让一次搜索变成持续监控和长期个性化',
-      usage: '流式展示同源结果；触价后通知；行为信号回写记忆',
-      implementation: 'SSE 事件流 + 15 分钟提醒任务 + 携程每小时刷新 + Web Push',
-    },
-  ]
-
-  return (
-    <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <div>
-        <div className="text-xs font-black text-brand-orange sm:text-sm">07 · 分层职责与实现</div>
-        <h2 className="mt-2 font-serif text-3xl font-black leading-tight sm:text-4xl">每一层，都回答三个工程问题</h2>
-        <p className="mt-1 text-xs leading-5 text-brand-muted">解决什么问题、请求中如何使用、仓库里如何实现。</p>
-      </div>
-
-      <div className="mt-4 overflow-hidden rounded-lg border border-brand-text/10 bg-white shadow-sm">
-        <div className="hidden grid-cols-[0.9fr_1.12fr_1.35fr_1.68fr] border-b border-brand-text/10 bg-brand-text px-4 py-2.5 text-[11px] font-black text-white lg:grid">
-          <div>层级</div>
-          <div>有什么用</div>
-          <div>怎么使用</div>
-          <div>如何实现</div>
-        </div>
-        {responsibilities.map((item) => (
-          <ArchitectureResponsibilityRow key={item.code} {...item} />
-        ))}
-      </div>
-
-      <div className="mt-3 grid gap-3 lg:grid-cols-2">
-        <div className="rounded-lg border border-brand-orange/20 bg-brand-orange-light px-4 py-3 text-[13px] leading-5">
-          <span className="font-black text-brand-orange">Agent 边界：</span>
-          理解歧义、补全计划、选择类型化工具，不直接持有数据源权限。
-        </div>
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] leading-5">
-          <span className="font-black text-emerald-700">平台边界：</span>
-          注入身份、校验契约、执行取数、归一事实、确定性排序并留下 Trace。
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function MonitoringSlide() {
   const monitorChain = [
     {
-      label: 'PriceAlert',
-      detail: 'route · date · target',
+      label: '创建价格提醒',
+      detail: '航线 · 日期 · 目标价',
       status: 'live' as const,
       icon: <BellRing />,
     },
     {
-      label: 'Scheduler',
-      detail: '15m check · 1h refresh',
+      label: '每 15 分钟检查',
+      detail: '读取缓存中的最新报价',
       status: 'live' as const,
       icon: <Clock3 />,
     },
     {
-      label: 'Data Refresh',
-      detail: 'Demand + Providers',
+      label: '命中后通知',
+      detail: 'Web Push · 标记已触发',
       status: 'live' as const,
+      icon: <Radio />,
+    },
+    {
+      label: '动态检查频率',
+      detail: '越临期或越接近目标价，查得越勤',
+      status: 'next' as const,
       icon: <RefreshCw />,
     },
     {
-      label: 'Window Evaluator',
-      detail: 'constraints · percentile',
+      label: '判断购买窗口',
+      detail: '价格 · 时间 · 行李 · 历史低位',
       status: 'next' as const,
       icon: <Radar />,
     },
     {
-      label: 'Tx Outbox',
-      detail: 'idempotency · retry · DLQ',
-      status: 'next' as const,
-      icon: <Activity />,
-    },
-    {
-      label: 'Multi-channel',
-      detail: 'WebPush · 飞书 · 微信',
+      label: '可靠多渠道通知',
+      detail: '先落库再投递 · 飞书 · 微信',
       status: 'next' as const,
       icon: <Radio />,
     },
   ]
   const capabilities = [
     {
-      title: '调度与扩展',
-      current: '单 Worker · 固定 15m',
-      target: 'adaptive cadence · priority queue · distributed lock',
+      title: '什么时候查',
+      current: '所有提醒固定每 15 分钟检查',
+      target: '临近出发或接近目标价时自动加快',
     },
     {
-      title: '事件可靠性',
-      current: '触发后直接 Push',
-      target: 'transactional outbox · idempotency · retry / DLQ',
+      title: '什么时候提醒',
+      current: '只判断总价是否低于目标价',
+      target: '同时满足时间、行李、完整成本和历史低位',
     },
     {
-      title: '数据质量',
-      current: 'status · freshness · null 保真',
-      target: 'source SLO · schema version · provenance · replay',
+      title: '怎么避免漏通知',
+      current: '触发后直接发送 Web Push',
+      target: '事件先落库、幂等去重、失败自动重试',
     },
     {
-      title: '可观测与发布',
-      current: 'LangSmith · tests',
-      target: 'metrics SLO · feature flag · canary · rollback',
+      title: '怎么安全上线',
+      current: 'LangSmith Trace + 自动化测试',
+      target: '来源健康度、分阶段放量和一键回滚',
     },
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <SlideHeading eyebrow="08 · 工程演进" title="从能运行，到可靠、可扩展、可回滚" />
+        <SlideHeading eyebrow="07 · 监控闭环" title="当前做到哪，下一步为什么这样改" />
         <div className="flex gap-2 text-[10px] font-black">
-          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">LIVE · 已上线</span>
-          <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">NEXT · 演进</span>
+          <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-green-700">绿色 · 已上线</span>
+          <span className="rounded-full border border-brand-orange/20 bg-brand-orange-light px-3 py-1 text-brand-orange">橙色 · 下一步</span>
         </div>
       </div>
       <p className="mt-2 max-w-5xl text-sm leading-6 text-brand-muted">
-        先补正确性与可靠性，再扩吞吐与渠道；所有新增能力继续复用 FlightOffer、Truth Engine 与 Trace。
+        当前已经能“盯目标价”；下一步要升级成“判断何时值得买，并保证消息送得到”。
       </p>
       <div className="mt-4 grid gap-2 lg:grid-cols-6">
         {monitorChain.map((node, index) => (
@@ -941,11 +851,11 @@ function MonitoringSlide() {
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-[1.35fr_0.65fr]">
         <div className="rounded-lg bg-brand-text px-4 py-3 text-white shadow-card">
-          <div className="text-[9px] font-black text-brand-orange-light">DETERMINISTIC PURCHASE WINDOW</div>
-          <div className="mt-1 font-mono text-xs font-bold leading-5">constraints_ok ∧ offer_eligible ∧ (total ≤ target ∨ percentile ≤ P20)</div>
+          <div className="text-[9px] font-black text-brand-orange-light">购买窗口的确定性条件</div>
+          <div className="mt-1 text-sm font-bold leading-5">约束满足 ∧ 报价有效 ∧（总价达到目标 或 进入历史低位）</div>
         </div>
         <div className="flex items-center justify-center rounded-lg border border-brand-orange/20 bg-brand-orange-light px-4 py-3 text-center text-xs font-black text-brand-text">
-          LLM 只解释 reason_codes，不负责触发
+          规则负责触发；模型只解释“为什么现在值得买”
         </div>
       </div>
     </div>
@@ -999,7 +909,7 @@ function DecisionsSlide() {
   ]
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
-      <SlideHeading eyebrow="09 · 评测护栏" title="Bad Case 不是事故记录，而是回归资产" />
+      <SlideHeading eyebrow="08 · 评测护栏" title="Bad Case 不是事故记录，而是回归资产" />
       <p className="mt-3 max-w-5xl text-base leading-7 text-brand-muted">
         线上 Trace 负责发现问题，离线数据集负责稳定复现，自动化门禁负责阻止同类错误再次上线。
       </p>
@@ -1049,7 +959,7 @@ function ClosingSlide() {
   return (
     <div className="mx-auto flex min-h-full max-w-7xl flex-col justify-center">
       <div className="max-w-5xl">
-        <div className="text-sm font-black text-brand-orange">10 · 下一步</div>
+        <div className="text-sm font-black text-brand-orange">09 · 下一步</div>
         <h2 className="mt-4 font-serif text-5xl font-black leading-tight sm:text-6xl">
           不做另一个卖票平台，<br />做一个代表用户决策的 Agent。
         </h2>
@@ -1126,43 +1036,6 @@ type ArchitectureLayerItem = {
   label: string
   detail: string
   handoff?: boolean
-}
-
-function ArchitectureResponsibilityRow({
-  code,
-  title,
-  tone,
-  purpose,
-  usage,
-  implementation,
-}: {
-  code: string
-  title: string
-  tone: ArchitectureLayerTone
-  purpose: string
-  usage: string
-  implementation: string
-}) {
-  const toneClasses: Record<ArchitectureLayerTone, { badge: string; row: string }> = {
-    blue: { badge: 'bg-sky-600', row: 'bg-sky-50/55' },
-    orange: { badge: 'bg-orange-500', row: 'bg-orange-50/55' },
-    purple: { badge: 'bg-violet-600', row: 'bg-violet-50/55' },
-    amber: { badge: 'bg-amber-500', row: 'bg-amber-50/55' },
-    green: { badge: 'bg-emerald-600', row: 'bg-emerald-50/55' },
-  }
-  const classes = toneClasses[tone]
-
-  return (
-    <div className={`grid gap-2 border-b border-brand-text/10 px-4 py-3 last:border-b-0 lg:grid-cols-[0.9fr_1.12fr_1.35fr_1.68fr] lg:items-center ${classes.row}`}>
-      <div className="flex items-center gap-2">
-        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-black text-white ${classes.badge}`}>{code}</span>
-        <h3 className="text-[13px] font-black leading-4">{title}</h3>
-      </div>
-      <div className="text-xs font-semibold leading-[18px] text-brand-text">{purpose}</div>
-      <div className="text-xs leading-[18px] text-brand-muted">{usage}</div>
-      <div className="text-xs leading-[18px] text-brand-muted">{implementation}</div>
-    </div>
-  )
 }
 
 function ArchitectureLayer({
@@ -1246,7 +1119,7 @@ function EngineeringChainNode({
     }`}>
       <div className="flex items-center justify-between gap-2">
         <span className={`flex h-7 w-7 items-center justify-center rounded-md text-white [&>svg]:h-4 [&>svg]:w-4 ${status === 'live' ? 'bg-emerald-600' : 'bg-brand-text'}`}>{icon}</span>
-        <span className={`text-[8px] font-black ${status === 'live' ? 'text-emerald-700' : 'text-brand-orange'}`}>{status === 'live' ? 'LIVE' : 'NEXT'}</span>
+        <span className={`text-[8px] font-black ${status === 'live' ? 'text-emerald-700' : 'text-brand-orange'}`}>{status === 'live' ? '已上线' : '下一步'}</span>
       </div>
       <h3 className="mt-2 text-sm font-black">{label}</h3>
       <p className="mt-1 text-[10px] font-semibold leading-4 text-brand-muted">{detail}</p>
@@ -1270,11 +1143,11 @@ function EvolutionCapability({
     <div className="rounded-lg border border-brand-text/10 bg-white px-4 py-3 shadow-sm">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-black">{title}</h3>
-        <span className="text-[9px] font-black text-brand-orange">P{priority}</span>
+        <span className="text-[9px] font-black text-brand-orange">问题 {priority}</span>
       </div>
-      <div className="mt-2 rounded-md bg-brand-bg px-3 py-2 text-[10px] font-semibold leading-4 text-brand-muted">NOW · {current}</div>
+      <div className="mt-2 rounded-md bg-brand-bg px-3 py-2 text-[10px] font-semibold leading-4 text-brand-muted">当前 · {current}</div>
       <ArrowRight className="mx-auto my-1 h-3.5 w-3.5 rotate-90 text-brand-orange" />
-      <div className="rounded-md bg-brand-orange-light px-3 py-2 text-[10px] font-bold leading-4 text-brand-text">TARGET · {target}</div>
+      <div className="rounded-md bg-brand-orange-light px-3 py-2 text-[10px] font-bold leading-4 text-brand-text">下一步 · {target}</div>
     </div>
   )
 }
