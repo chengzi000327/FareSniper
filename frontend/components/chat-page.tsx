@@ -78,13 +78,23 @@ function applyProviderStatus(
 
 // 助手气泡用 Markdown 渲染：支持 GFM 表格/标题/加粗/列表，rehypeSanitize 防 XSS。
 // prose 限定在气泡内，避免 LLM 输出的 ### / |表格| 直接暴露成纯文本。
-function MarkdownMessage({ content }: { content: string }) {
+function MarkdownMessage({ content, compact = false }: { content: string; compact?: boolean }) {
+  const hasTable = /^\s*\|.+\|\s*$/m.test(content)
   return (
-    <div className="prose prose-sm max-w-none break-words prose-headings:my-2 prose-p:my-1.5 prose-table:my-2 prose-th:px-2 prose-td:px-2 prose-li:my-0.5 prose-pre:my-2">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
-        {content}
-      </ReactMarkdown>
-    </div>
+    <>
+      {compact && hasTable ? (
+        <div className="mb-2 flex items-center gap-2 text-[10px] font-bold text-brand-orange">
+          <span className="h-px flex-1 bg-brand-orange/20" />
+          航班列表可左右滑动
+          <span className="h-px flex-1 bg-brand-orange/20" />
+        </div>
+      ) : null}
+      <div className={`prose prose-sm max-w-none break-words prose-headings:my-2 prose-p:my-1.5 prose-table:my-2 prose-th:px-2 prose-td:px-2 prose-li:my-0.5 prose-pre:my-2 ${compact && hasTable ? 'overflow-x-auto overscroll-x-contain [&_table]:min-w-[34rem] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap' : ''}`}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    </>
   )
 }
 
@@ -455,7 +465,7 @@ export function ChatPage({
                     <span>{message.content}</span>
                   </div>
                 ) : message.role === 'assistant' ? (
-                  <MarkdownMessage content={message.content} />
+                  <MarkdownMessage content={message.content} compact={compact} />
                 ) : (
                   message.content
                 )}

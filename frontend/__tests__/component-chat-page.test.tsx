@@ -188,6 +188,20 @@ test("uses the deal currency in fallback assistant copy", async () => {
   expect(screen.queryByText("为您找到 1 个航班，最低价 ¥80")).not.toBeInTheDocument();
 });
 
+test("marks result tables as horizontally scrollable in compact chat", async () => {
+  render(<ChatPage compact />);
+  await send("上海去三亚");
+
+  await act(async () => {
+    calls[0].onEvent(complete(1, response(
+      "| 航班 | 平台 | 出发 | 到达 | 平台展示价 |\n| --- | --- | --- | --- | --- |\n| 9C8779 | 飞猪 | 07:25 | 10:55 | ¥797 |"
+    )));
+  });
+
+  expect(await screen.findByText("航班列表可左右滑动")).toBeInTheDocument();
+  expect(screen.getByRole("table")).toBeInTheDocument();
+});
+
 test("aborts and settles the old assistant while ignoring its late events", async () => {
   render(<ChatPage />);
   await send("旧搜索");
