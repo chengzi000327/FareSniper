@@ -4,19 +4,24 @@ import React from 'react'
 import {
   Bell,
   BookHeart,
+  Check,
   ChevronRight,
+  Clock3,
   Compass,
   Heart,
   MapPin,
   MessageCircle,
+  PencilLine,
   Plane,
+  Plus,
   Search,
   Send,
   Sparkles,
+  Trash2,
   UserRound,
+  X,
 } from 'lucide-react'
 import { ChatPage } from '@/components/chat-page'
-import { MemoryPage } from '@/components/memory-page'
 import { formatCurrency } from '@/lib/currency'
 import { memoryApi, recApi } from '@/lib/api'
 import type { MemoryItemDto, QueryHistoryItemDto, RecCardDto } from '@/lib/api'
@@ -28,7 +33,15 @@ type MobileMemory = {
   query_history: QueryHistoryItemDto[]
 }
 
+type TravelIdea = {
+  id: string
+  text: string
+  created_at: string
+}
+
 type CompanionKind = 'cat' | 'corgi' | 'penguin' | 'plain'
+type CompanionPose = 'idle' | 'journal'
+type MobileMemorySection = 'preferences' | 'ideas' | 'queries' | 'journal'
 
 const COMPANION_ASSETS: Record<Exclude<CompanionKind, 'plain'>, string> = {
   cat: '/companions/cloud-cat-actions.png',
@@ -44,6 +57,37 @@ const COMPANION_DEFAULTS: Record<CompanionKind, string> = {
 }
 
 const INTERNAL_MEMORY_FIELDS = new Set(['companion_profile', 'travel_ideas'])
+const ARRAY_MEMORY_FIELDS = new Set(['frequent_cities', 'preferred_airlines', 'constraints', 'travel_scenes'])
+const PREFERENCE_OPTIONS = [
+  { field: 'budget', label: '心理价位' },
+  { field: 'frequent_cities', label: '常去城市' },
+  { field: 'preferred_airlines', label: '偏好航司' },
+  { field: 'constraints', label: '出行习惯' },
+  { field: 'travel_scenes', label: '出行场景' },
+] as const
+const MEMORY_VALUE_CODES: Record<string, string> = {
+  只看直飞: 'direct_only',
+  避开红眼航班: 'avoid_redeye',
+  偏好上午出发: 'prefer_morning',
+  偏好靠窗座位: 'prefer_window',
+  不要中转: 'avoid_stopover',
+  需要托运行李: 'checked_baggage',
+  只带随身行李: 'carry_on_only',
+  商务出行: 'business',
+  休闲旅行: 'leisure',
+  探亲回家: 'family_visit',
+  回家: 'return_home',
+  家庭出行: 'with_family',
+  亲子出行: 'with_children',
+  独自出行: 'solo',
+}
+const MEMORY_CODE_LABELS = Object.fromEntries(
+  Object.entries(MEMORY_VALUE_CODES).map(([label, code]) => [code, label]),
+)
+const POSE_POSITION: Record<CompanionPose, [number, number]> = {
+  idle: [0, 0],
+  journal: [2, 1],
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -67,7 +111,56 @@ function explicitIdeaCount(memories: MemoryItemDto[]) {
   return Array.isArray(value) ? value.length : 0
 }
 
-function MobileCompanion({ kind }: { kind: CompanionKind }) {
+function travelIdeas(memories: MemoryItemDto[]): TravelIdea[] {
+  const value = memories.find((memory) => memory.field === 'travel_ideas')?.value
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    const record = asRecord(item)
+    return typeof record?.id === 'string' && typeof record.text === 'string' && typeof record.created_at === 'string'
+      ? [{ id: record.id, text: record.text, created_at: record.created_at }]
+      : []
+  })
+}
+
+function shortDate(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10)
+  return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(date)
+}
+
+function queryText(item: QueryHistoryItemDto) {
+  const query = asRecord(item.query)
+  return typeof query?.text === 'string' && query.text.trim() ? query.text.trim() : '一次机票查询'
+}
+
+function preferenceDraft(memory: MemoryItemDto) {
+  if (typeof memory.value === 'number') return String(memory.value)
+  if (Array.isArray(memory.value)) {
+    return memory.value.map((item) => {
+      const text = String(item)
+      return MEMORY_CODE_LABELS[text] ?? (/^[a-z][a-z0-9_]*$/.test(text) ? '其他偏好' : text)
+    }).join('、')
+  }
+  return typeof memory.value === 'string' ? memory.value : memory.value_display
+}
+
+function parsePreferenceDraft(field: string, draft: string): number | string[] | string {
+  const value = draft.trim()
+  if (field === 'budget') {
+    const budget = Number(value.replace(/[^\d.]/g, ''))
+    if (!Number.isFinite(budget) || budget <= 0) throw new Error('请输入正确的心理价位')
+    return Math.round(budget)
+  }
+  if (ARRAY_MEMORY_FIELDS.has(field)) {
+    const values = value.split(/[、,，\n]/).map((item) => item.trim()).filter(Boolean)
+    if (!values.length) throw new Error('请至少保留一项偏好')
+    return [...new Set(values.map((item) => MEMORY_VALUE_CODES[item] ?? item))]
+  }
+  if (!value) throw new Error('偏好内容不能为空')
+  return value
+}
+
+function MobileCompanion({ kind, pose = 'idle' }: { kind: CompanionKind; pose?: CompanionPose }) {
   if (kind === 'plain') {
     return (
       <div className="grid aspect-square w-full place-items-center rounded-[32px] bg-brand-text text-white">
@@ -75,10 +168,16 @@ function MobileCompanion({ kind }: { kind: CompanionKind }) {
       </div>
     )
   }
+  const [column, row] = POSE_POSITION[pose]
   return (
     <div className="relative aspect-square w-full overflow-hidden rounded-[32px] bg-[#fffaf1]">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={COMPANION_ASSETS[kind]} alt="查价旅伴" className="pointer-events-none absolute left-0 top-0 h-[200%] w-[300%] max-w-none select-none" />
+      <img
+        src={COMPANION_ASSETS[kind]}
+        alt={pose === 'journal' ? '旅伴正在写手帐' : '查价旅伴'}
+        className="pointer-events-none absolute left-0 top-0 h-[200%] w-[300%] max-w-none select-none"
+        style={{ transform: `translate(${-column * 33.333333}%, ${-row * 50}%)` }}
+      />
     </div>
   )
 }
@@ -97,14 +196,15 @@ function recommendationPrice(card: RecCardDto) {
 }
 
 export function MobileAppPage() {
-  const [activeTab, setActiveTab] = React.useState<MobileTab>('explore')
+  const [activeTab, setActiveTab] = React.useState<MobileTab>('chat')
   const [chatQuery, setChatQuery] = React.useState<string | null>(null)
   const [memory, setMemory] = React.useState<MobileMemory>({ memories: [], query_history: [] })
   const [recommendations, setRecommendations] = React.useState<RecCardDto[]>([])
   const [loading, setLoading] = React.useState(true)
 
-  React.useEffect(() => {
+  const loadData = React.useCallback(() => {
     let active = true
+    setLoading(true)
     Promise.allSettled([
       memoryApi.get(),
       recApi.list({ limit: 4, offset: 0 }),
@@ -124,6 +224,8 @@ export function MobileAppPage() {
     return () => { active = false }
   }, [])
 
+  React.useEffect(() => loadData(), [loadData])
+
   const startChat = (query: string) => {
     const value = query.trim()
     if (!value) return
@@ -133,8 +235,9 @@ export function MobileAppPage() {
 
   return (
     <div className="min-h-[100dvh] bg-[#eadfd4] sm:grid sm:place-items-center sm:p-4">
-      <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-brand-bg sm:h-[min(52rem,calc(100dvh-2rem))] sm:max-w-[430px] sm:rounded-[38px] sm:border-[7px] sm:border-brand-text sm:shadow-[0_30px_90px_rgba(67,44,27,0.28)]">
-        <div className="min-h-0 flex-1 overflow-hidden">
+      <main className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-brand-bg sm:h-[min(874px,calc(100dvh-2rem))] sm:w-[402px] sm:max-w-[calc(100vw-2rem)] sm:rounded-[52px] sm:border-[7px] sm:border-brand-text sm:shadow-[0_30px_90px_rgba(67,44,27,0.28)]">
+        <div className="pointer-events-none absolute left-1/2 top-2 z-50 hidden h-7 w-[7.6rem] -translate-x-1/2 rounded-full bg-black sm:block" aria-hidden="true" />
+        <div className="min-h-0 flex-1 overflow-hidden sm:pt-6">
           {activeTab === 'explore' ? (
             <MobileExploreHome
               loading={loading}
@@ -144,9 +247,9 @@ export function MobileAppPage() {
               onOpenMemory={() => setActiveTab('memory')}
             />
           ) : activeTab === 'chat' ? (
-            <ChatPage initialQuery={chatQuery} onInitialQueryConsumed={() => setChatQuery(null)} />
+            <ChatPage compact initialQuery={chatQuery} onInitialQueryConsumed={() => setChatQuery(null)} />
           ) : activeTab === 'memory' ? (
-            <MemoryPage />
+            <MobileMemoryPage memory={memory} loading={loading} onRefresh={loadData} />
           ) : (
             <MobileProfile memory={memory} onOpenMemory={() => setActiveTab('memory')} onOpenChat={() => setActiveTab('chat')} />
           )}
@@ -282,6 +385,252 @@ function MobileExploreHome({
   )
 }
 
+function MobileMemoryPage({
+  memory,
+  loading,
+  onRefresh,
+}: {
+  memory: MobileMemory
+  loading: boolean
+  onRefresh: () => void
+}) {
+  const [section, setSection] = React.useState<MobileMemorySection>('preferences')
+  const [editingField, setEditingField] = React.useState<string | null>(null)
+  const [confirmingField, setConfirmingField] = React.useState<string | null>(null)
+  const [draft, setDraft] = React.useState('')
+  const [savingField, setSavingField] = React.useState<string | null>(null)
+  const [addingPreference, setAddingPreference] = React.useState(false)
+  const [newField, setNewField] = React.useState('budget')
+  const [newValue, setNewValue] = React.useState('')
+  const [ideaText, setIdeaText] = React.useState('')
+  const [error, setError] = React.useState('')
+  const companion = companionFromMemory(memory.memories)
+  const preferences = memory.memories.filter((item) => !INTERNAL_MEMORY_FIELDS.has(item.field))
+  const ideas = travelIdeas(memory.memories)
+
+  const beginEdit = (item: MemoryItemDto) => {
+    setError('')
+    setConfirmingField(null)
+    setEditingField(item.field)
+    setDraft(preferenceDraft(item))
+  }
+
+  const savePreference = async (field: string, valueDraft: string) => {
+    setError('')
+    let value: number | string[] | string
+    try {
+      value = parsePreferenceDraft(field, valueDraft)
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : '偏好格式不正确')
+      return
+    }
+    setSavingField(field)
+    try {
+      await memoryApi.patch({ field, value })
+      setEditingField(null)
+      setAddingPreference(false)
+      setNewValue('')
+      onRefresh()
+    } catch {
+      setError('暂时没有保存成功，请稍后再试。')
+    } finally {
+      setSavingField(null)
+    }
+  }
+
+  const forgetPreference = async (field: string) => {
+    setSavingField(field)
+    setError('')
+    try {
+      await memoryApi.del(field)
+      setConfirmingField(null)
+      onRefresh()
+    } catch {
+      setError('暂时无法忘记这项偏好。')
+    } finally {
+      setSavingField(null)
+    }
+  }
+
+  const saveIdeas = async (nextIdeas: TravelIdea[]) => {
+    setSavingField('travel_ideas')
+    setError('')
+    try {
+      await memoryApi.patch({ field: 'travel_ideas', value: nextIdeas })
+      setIdeaText('')
+      onRefresh()
+    } catch {
+      setError('这个关注暂时没有保存成功。')
+    } finally {
+      setSavingField(null)
+    }
+  }
+
+  const memorySections: Array<{ id: MobileMemorySection; label: string; count: number }> = [
+    { id: 'preferences', label: '偏好', count: preferences.length },
+    { id: 'ideas', label: '关注', count: ideas.length },
+    { id: 'queries', label: '查询', count: memory.query_history.length },
+    { id: 'journal', label: '手帐', count: 0 },
+  ]
+
+  return (
+    <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-8 pt-[max(1.1rem,env(safe-area-inset-top))]">
+      <header className="flex items-start justify-between px-1">
+        <div>
+          <div className="text-[10px] font-black tracking-[0.2em] text-brand-orange">只记真实发生的事</div>
+          <h1 className="mt-1 font-serif text-[2rem] font-black leading-tight text-brand-text">我的记忆</h1>
+        </div>
+        <button type="button" aria-label="刷新手机端记忆" onClick={onRefresh} className="grid h-10 w-10 place-items-center rounded-2xl border border-brand-text/8 bg-white text-brand-text shadow-sm">
+          <Clock3 className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+        </button>
+      </header>
+
+      <section className="mt-4 grid grid-cols-[4.4rem_minmax(0,1fr)] items-center gap-4 rounded-[25px] bg-brand-text p-4 text-white">
+        <MobileCompanion kind={companion.kind} />
+        <div className="min-w-0">
+          <div className="text-[11px] font-bold text-white/60">{companion.name} 的记忆盒</div>
+          <div className="mt-1 text-lg font-black">你说过的，可以修改</div>
+          <p className="mt-1 text-[11px] leading-5 text-white/65">搜索记录和明确关注分开放，手帐只写真正成行。</p>
+        </div>
+      </section>
+
+      <nav aria-label="手机端记忆分类" className="mt-4 grid grid-cols-4 gap-1 rounded-[20px] bg-white p-1.5 shadow-sm">
+        {memorySections.map((item) => (
+          <button key={item.id} type="button" aria-pressed={section === item.id} onClick={() => setSection(item.id)} className={`rounded-[15px] px-1 py-2.5 text-xs font-black transition ${section === item.id ? 'bg-brand-text text-white' : 'text-brand-muted'}`}>
+            <span className="block">{item.label}</span>
+            <span className={`mt-0.5 block text-[10px] ${section === item.id ? 'text-white/55' : 'text-brand-orange'}`}>{item.count}</span>
+          </button>
+        ))}
+      </nav>
+
+      {error ? <div className="mt-3 rounded-2xl bg-[#fff0dc] px-4 py-3 text-xs font-bold text-brand-text">{error}</div> : null}
+
+      <div className="mt-5">
+        {section === 'preferences' ? (
+          <section>
+            <div className="flex items-center justify-between px-1">
+              <div>
+                <h2 className="text-lg font-black text-brand-text">机票偏好</h2>
+                <p className="mt-1 text-[11px] text-brand-muted">下次查价和排序会使用这些内容</p>
+              </div>
+              <button type="button" onClick={() => setAddingPreference((current) => !current)} className="inline-flex items-center gap-1 rounded-xl bg-brand-orange-light px-3 py-2 text-xs font-black text-brand-orange">
+                {addingPreference ? <X className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                {addingPreference ? '收起' : '添加'}
+              </button>
+            </div>
+
+            {addingPreference ? (
+              <div className="mt-3 space-y-3 rounded-[22px] border border-brand-orange/15 bg-white p-4">
+                <select value={newField} onChange={(event) => { setNewField(event.target.value); setNewValue('') }} aria-label="手机端偏好类型" className="h-11 w-full rounded-xl border border-brand-text/10 bg-brand-bg px-3 text-sm font-bold text-brand-text">
+                  {PREFERENCE_OPTIONS.map((option) => <option key={option.field} value={option.field}>{option.label}</option>)}
+                </select>
+                <input value={newValue} onChange={(event) => setNewValue(event.target.value)} aria-label="手机端偏好内容" type={newField === 'budget' ? 'number' : 'text'} placeholder={newField === 'budget' ? '例如：800' : '多项内容用顿号分开'} className="h-11 w-full rounded-xl border border-brand-text/10 bg-brand-bg px-3 text-sm font-semibold" />
+                <button type="button" disabled={!newValue.trim() || savingField === newField} onClick={() => void savePreference(newField, newValue)} className="h-11 w-full rounded-xl bg-brand-text text-sm font-black text-white disabled:opacity-40">保存偏好</button>
+              </div>
+            ) : null}
+
+            <div className="mt-3 space-y-3">
+              {preferences.length ? preferences.map((item) => (
+                <article key={item.field} className="rounded-[22px] border border-brand-text/7 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] font-bold text-brand-orange">{item.source === 'manual' ? '你亲自确认' : '根据真实行为学习'}</div>
+                      <h3 className="mt-1 text-base font-black text-brand-text">{item.label}</h3>
+                    </div>
+                    {editingField !== item.field && confirmingField !== item.field ? (
+                      <div className="flex gap-2">
+                        <button type="button" aria-label={`手机端编辑${item.label}`} onClick={() => beginEdit(item)} className="grid h-8 w-8 place-items-center rounded-xl bg-brand-bg text-brand-muted"><PencilLine className="h-3.5 w-3.5" /></button>
+                        <button type="button" aria-label={`手机端忘记${item.label}`} onClick={() => { setEditingField(null); setConfirmingField(item.field) }} className="grid h-8 w-8 place-items-center rounded-xl bg-brand-bg text-brand-muted"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {editingField === item.field ? (
+                    <div className="mt-3">
+                      <input aria-label={`手机端修改${item.label}`} value={draft} onChange={(event) => setDraft(event.target.value)} type={item.field === 'budget' ? 'number' : 'text'} className="h-11 w-full rounded-xl border border-brand-orange/30 bg-brand-bg px-3 text-sm font-semibold" />
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" onClick={() => void savePreference(item.field, draft)} disabled={savingField === item.field} className="inline-flex h-9 flex-1 items-center justify-center gap-1 rounded-xl bg-brand-text text-xs font-black text-white"><Check className="h-3.5 w-3.5" />保存</button>
+                        <button type="button" onClick={() => setEditingField(null)} className="h-9 flex-1 rounded-xl border border-brand-text/10 text-xs font-black text-brand-muted">取消</button>
+                      </div>
+                    </div>
+                  ) : confirmingField === item.field ? (
+                    <div className="mt-3 rounded-xl bg-red-50 p-3">
+                      <p className="text-xs leading-5 text-red-700">忘记后，这项内容不再参与推荐。</p>
+                      <div className="mt-2 flex gap-2">
+                        <button type="button" onClick={() => void forgetPreference(item.field)} className="h-9 flex-1 rounded-xl bg-red-600 text-xs font-black text-white">确认忘记</button>
+                        <button type="button" onClick={() => setConfirmingField(null)} className="h-9 flex-1 rounded-xl bg-white text-xs font-black text-red-700">取消</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm font-semibold leading-6 text-brand-muted">{item.value_display || '已记录'}</p>
+                  )}
+                </article>
+              )) : (
+                <MobileEmpty title="还没有机票偏好" detail="完成一次查询，或者亲自添加预算和出行习惯。" />
+              )}
+            </div>
+          </section>
+        ) : section === 'ideas' ? (
+          <section>
+            <h2 className="px-1 text-lg font-black text-brand-text">你明确说过的关注</h2>
+            <p className="mt-1 px-1 text-[11px] leading-5 text-brand-muted">只有你亲自保存的想法才会在这里，系统不会从查询里猜。</p>
+            <div className="mt-3 flex gap-2 rounded-[20px] bg-white p-3">
+              <input aria-label="手机端新增明确关注" value={ideaText} onChange={(event) => setIdeaText(event.target.value)} placeholder="例如：秋天想去青岛吹海风" className="min-w-0 flex-1 bg-transparent px-1 text-sm font-semibold" />
+              <button type="button" aria-label="保存明确关注" disabled={!ideaText.trim() || savingField === 'travel_ideas'} onClick={() => void saveIdeas([{ id: `${Date.now()}`, text: ideaText.trim(), created_at: new Date().toISOString() }, ...ideas])} className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-brand-orange text-white disabled:opacity-35"><Plus className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-3 space-y-3">
+              {ideas.length ? ideas.map((idea) => (
+                <article key={idea.id} className="rounded-[22px] bg-white p-4 shadow-sm">
+                  <div className="flex items-center justify-between text-[10px] font-bold text-brand-orange"><span>你亲自记录</span><span>{shortDate(idea.created_at)}</span></div>
+                  <p className="mt-3 text-sm font-black leading-6 text-brand-text">{idea.text}</p>
+                  <button type="button" onClick={() => void saveIdeas(ideas.filter((item) => item.id !== idea.id))} className="mt-3 inline-flex items-center gap-1 text-[11px] font-bold text-brand-muted"><Trash2 className="h-3.5 w-3.5" />忘掉这个关注</button>
+                </article>
+              )) : <MobileEmpty title="还没有明确关注" detail="在上面亲自记下一个想去的地方或出发理由。" />}
+            </div>
+          </section>
+        ) : section === 'queries' ? (
+          <section>
+            <h2 className="px-1 text-lg font-black text-brand-text">最近查询</h2>
+            <p className="mt-1 px-1 text-[11px] leading-5 text-brand-muted">这里只说明查过，不代表你明确想去。</p>
+            <div className="mt-3 space-y-3">
+              {memory.query_history.length ? memory.query_history.map((item) => (
+                <article key={item.id} className="flex gap-3 rounded-[22px] bg-white p-4 shadow-sm">
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand-orange-light text-brand-orange"><Search className="h-4 w-4" /></div>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold text-brand-orange">真实查询 · {shortDate(item.created_at)}</div>
+                    <p className="mt-1 text-sm font-black leading-6 text-brand-text">{queryText(item)}</p>
+                  </div>
+                </article>
+              )) : <MobileEmpty title="还没有查询记录" detail="从对话页发起真实机票查询后会出现在这里。" />}
+            </div>
+          </section>
+        ) : (
+          <section className="relative overflow-hidden rounded-[20px_28px_22px_30px] border-2 border-[#725b49]/20 bg-[#fffaf0] px-6 py-7 shadow-[6px_8px_0_rgba(92,68,46,0.08)]" style={{ backgroundImage: 'linear-gradient(rgba(121,174,191,0.12) 1px, transparent 1px)', backgroundSize: '100% 28px' }}>
+            <div className="absolute left-4 top-0 h-full border-l-2 border-dashed border-[#dc7d61]/25" />
+            <div className="absolute left-1/2 top-0 h-6 w-24 -translate-x-1/2 -translate-y-2 -rotate-2 bg-[#f4cf86]/70" />
+            <div className="relative pl-3">
+              <div className="text-[10px] font-black tracking-[0.15em] text-[#9a674b]">旅行手帐 · 留白页</div>
+              <h2 className="mt-3 rotate-[-1deg] font-serif text-2xl font-black text-[#493526]">这一页先留白</h2>
+              <p className="mt-3 text-xs font-semibold leading-6 text-[#725b49]">等你确认已经买票或录入真实行程，{companion.name} 才会开始写。</p>
+              <div className="mx-auto mt-4 w-32 rotate-2"><MobileCompanion kind={companion.kind} pose="journal" /></div>
+              <p className="mt-5 border-t border-dashed border-[#d47752]/35 pt-3 text-[11px] font-semibold leading-5 text-[#876d58]">查询、收藏和点击预订，都不会自动变成旅行经历。</p>
+            </div>
+          </section>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MobileEmpty({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rounded-[22px] border border-dashed border-brand-text/12 bg-white/55 px-5 py-8 text-center">
+      <div className="text-sm font-black text-brand-text">{title}</div>
+      <p className="mt-2 text-xs leading-5 text-brand-muted">{detail}</p>
+    </div>
+  )
+}
+
 function MobileProfile({
   memory,
   onOpenMemory,
@@ -331,13 +680,13 @@ function ProfileRow({ icon, title, detail, onClick }: { icon: React.ReactElement
 
 function MobileBottomNav({ activeTab, onChange }: { activeTab: MobileTab; onChange: (tab: MobileTab) => void }) {
   const items: Array<{ id: MobileTab; label: string; icon: React.ReactElement }> = [
-    { id: 'explore', label: '探索', icon: <Compass /> },
     { id: 'chat', label: '对话', icon: <MessageCircle /> },
+    { id: 'explore', label: '探索', icon: <Compass /> },
     { id: 'memory', label: '记忆', icon: <BookHeart /> },
     { id: 'profile', label: '我的', icon: <UserRound /> },
   ]
   return (
-    <nav aria-label="手机端主导航" className="z-30 grid shrink-0 grid-cols-4 border-t border-brand-text/8 bg-white/95 px-3 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl">
+    <nav aria-label="手机端主导航" className="relative z-30 grid shrink-0 grid-cols-4 border-t border-brand-text/8 bg-white/95 px-3 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl sm:pb-5">
       {items.map((item) => {
         const active = item.id === activeTab
         return (
@@ -347,7 +696,7 @@ function MobileBottomNav({ activeTab, onChange }: { activeTab: MobileTab; onChan
           </button>
         )
       })}
+      <span className="pointer-events-none absolute bottom-1 left-1/2 hidden h-1 w-28 -translate-x-1/2 rounded-full bg-black sm:block" aria-hidden="true" />
     </nav>
   )
 }
-

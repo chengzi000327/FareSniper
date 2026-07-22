@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { motion } from 'motion/react'
-import { History, Radar, Send } from 'lucide-react'
+import { History, Plane, Radar, Send } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -91,9 +91,11 @@ function MarkdownMessage({ content }: { content: string }) {
 export function ChatPage({
   initialQuery,
   onInitialQueryConsumed,
+  compact = false,
 }: {
   initialQuery?: string | null
   onInitialQueryConsumed?: () => void
+  compact?: boolean
 }) {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [inputValue, setInputValue] = React.useState('')
@@ -330,38 +332,44 @@ export function ChatPage({
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-5 pt-6 sm:px-8 lg:px-12 lg:pt-8">
-        <h1 className="text-3xl font-bold text-brand-text sm:text-4xl">对话空间</h1>
-        <button className="flex items-center gap-2 text-sm text-brand-muted transition hover:text-brand-text">
+      <div className={`flex items-center justify-between ${compact ? 'px-5 pt-[max(1.25rem,env(safe-area-inset-top))]' : 'px-5 pt-6 sm:px-8 lg:px-12 lg:pt-8'}`}>
+        <div>
+          {compact ? <div className="text-[10px] font-black tracking-[0.2em] text-brand-orange">特价机票发现</div> : null}
+          <h1 className={`font-bold text-brand-text ${compact ? 'mt-1 font-serif text-[2rem] leading-tight' : 'text-3xl sm:text-4xl'}`}>对话空间</h1>
+        </div>
+        <button className={`flex items-center gap-1.5 text-brand-muted transition hover:text-brand-text ${compact ? 'text-xs' : 'text-sm'}`}>
           <History className="h-4 w-4" />
           历史对话
         </button>
       </div>
 
       <div
-        className={`thin-scrollbar flex-1 overflow-y-auto px-5 py-8 sm:px-8 lg:px-[12vw] lg:py-12 ${
+        className={`thin-scrollbar flex-1 overflow-y-auto ${compact ? 'px-5 py-5' : 'px-5 py-8 sm:px-8 lg:px-[12vw] lg:py-12'} ${
           messages.length === 0 ? 'flex flex-col justify-center' : 'space-y-8'
         }`}
       >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center">
-            <motion.h2 className="mb-4 text-center font-serif text-5xl text-brand-text sm:text-6xl">想去哪？</motion.h2>
-            <p className="mb-10 max-w-[34rem] text-center text-base leading-8 text-brand-muted text-balance sm:text-lg">
+            <motion.div className={`grid place-items-center rounded-[26px] bg-brand-orange-light text-brand-orange ${compact ? 'mb-4 h-14 w-14' : 'mb-5 h-16 w-16'}`}>
+              <Plane className={compact ? 'h-6 w-6' : 'h-7 w-7'} />
+            </motion.div>
+            <motion.h2 className={`text-center font-serif text-brand-text ${compact ? 'mb-2 text-[2.35rem] leading-tight' : 'mb-4 text-5xl sm:text-6xl'}`}>想去哪？</motion.h2>
+            <p className={`max-w-[34rem] text-center text-brand-muted text-balance ${compact ? 'mb-6 text-sm leading-6' : 'mb-10 text-base leading-8 sm:text-lg'}`}>
               用自然语言告诉我你的出发地、目的地、时间和预算，我来帮你发现特价机票，监控价格。
             </p>
 
-            <div className="grid w-full max-w-4xl gap-4 md:grid-cols-2">
+            <div className={`grid w-full max-w-4xl ${compact ? 'gap-2.5' : 'gap-4 md:grid-cols-2'}`}>
               <RecommendationCard from="上海" to="三亚" price="399" date="五一假期" />
               <RecommendationCard from="北京" to="大理" price="568" date="下周末" />
-              <RecommendationCard from="成都" to="丽江" price="420" date="六月出行" />
-              <RecommendationCard from="广州" to="青岛" price="480" date="端午假期" />
+              {!compact ? <RecommendationCard from="成都" to="丽江" price="420" date="六月出行" /> : null}
+              {!compact ? <RecommendationCard from="广州" to="青岛" price="480" date="端午假期" /> : null}
             </div>
           </div>
         ) : (
           messages.map((message) => (
             <motion.div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div
-                className={`max-w-3xl rounded-[28px] p-5 text-sm sm:text-base ${
+                className={`max-w-3xl rounded-[28px] text-sm ${compact ? 'p-4' : 'p-5 sm:text-base'} ${
                   message.role === 'user' ? 'rounded-tr-none bg-brand-text text-white' : 'rounded-tl-none border border-brand-text/5 bg-white shadow-sm'
                 }`}
               >
@@ -387,7 +395,7 @@ export function ChatPage({
         )}
       </div>
 
-      <div className={`px-5 pb-6 pt-2 sm:px-8 lg:px-[12vw] ${messages.length === 0 ? 'lg:pb-12' : 'lg:pb-8'}`}>
+      <div className={`${compact ? 'px-4 pb-3 pt-2' : `px-5 pb-6 pt-2 sm:px-8 lg:px-[12vw] ${messages.length === 0 ? 'lg:pb-12' : 'lg:pb-8'}`}`}>
         <div className="flex items-center rounded-[28px] border border-brand-text/5 bg-white p-2 shadow-card">
           <input
             type="text"
@@ -395,7 +403,7 @@ export function ChatPage({
             onChange={(event) => setInputValue(event.target.value)}
             onKeyDown={(event) => event.key === 'Enter' && handleSend()}
             placeholder="比如：五一去三亚，预算 600..."
-            className="flex-1 bg-transparent px-4 py-3 text-sm sm:text-base"
+            className={`min-w-0 flex-1 bg-transparent px-4 py-3 text-sm ${compact ? '' : 'sm:text-base'}`}
           />
           <motion.button
             type="button"
@@ -409,13 +417,13 @@ export function ChatPage({
         </div>
 
         {messages.length === 0 ? (
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
-            {recommendedQuestions.map((tag) => (
+          <div className={`mt-3 flex items-center gap-2 overflow-x-auto pb-1 ${compact ? 'justify-start' : 'flex-wrap justify-center'}`}>
+            {recommendedQuestions.slice(0, compact ? 3 : recommendedQuestions.length).map((tag) => (
               <button
                 key={tag}
                 type="button"
                 onClick={() => setInputValue(tag)}
-                className="rounded-full border border-brand-text/5 px-4 py-2 text-xs text-brand-muted transition hover:bg-white hover:text-brand-orange sm:text-sm"
+                className={`shrink-0 rounded-full border border-brand-text/5 px-4 py-2 text-xs text-brand-muted transition hover:bg-white hover:text-brand-orange ${compact ? '' : 'sm:text-sm'}`}
               >
                 {tag}
               </button>
