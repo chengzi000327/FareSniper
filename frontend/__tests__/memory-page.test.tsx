@@ -87,23 +87,27 @@ test('the memory route reuses the shared journal component', () => {
   expect(MemoryPage).toBe(SharedMemoryPage)
 })
 
-test('turns only real ideas, queries and preferences into the companion journal', async () => {
+test('keeps fare preferences primary and separates recent attention from a confirmed trip', async () => {
   getMemory.mockResolvedValue(populatedMemory)
 
   render(<MemoryPage />)
   await waitFor(() => expect(getMemory).toHaveBeenCalledTimes(1))
 
-  expect(await screen.findByRole('heading', { name: '云朵' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '云朵 正在帮你记住查价条件' })).toBeInTheDocument()
+  expect(screen.getByText('FareSniper · 特价机票发现')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: '心理价位' })).toBeInTheDocument()
+  expect(screen.getByText('¥1,200')).toBeInTheDocument()
+  expect(screen.getByText('三亚、成都')).toBeInTheDocument()
+  expect(screen.getByText('只看直飞、避开红眼航班')).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: '最近关注 3' }))
   expect(screen.getByText('秋天想去青岛吹吹海风')).toBeInTheDocument()
   expect(screen.getByText('北京 → 三亚')).toBeInTheDocument()
   expect(screen.getByText('你查询了“7月25日北京到三亚的直飞机票”。')).toBeInTheDocument()
   expect(screen.getAllByText(/来自真实查询记录/)).toHaveLength(2)
 
-  fireEvent.click(screen.getByRole('button', { name: /它记住的/ }))
-  expect(screen.getByRole('heading', { name: '心理价位' })).toBeInTheDocument()
-  expect(screen.getByText('¥1,200')).toBeInTheDocument()
-  expect(screen.getByText('三亚、成都')).toBeInTheDocument()
-  expect(screen.getByText('只看直飞、避开红眼航班')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '旅行手帐 0' }))
+  expect(screen.getByText('旅行手帐会在确认成行后出现')).toBeInTheDocument()
 
   expect(screen.queryByText(/已经去了青岛/)).not.toBeInTheDocument()
   expect(screen.queryByText(/已经购买/)).not.toBeInTheDocument()
@@ -113,35 +117,37 @@ test('lets the user choose and name a companion without touching other memories'
   getMemory.mockResolvedValue({ memories: [], query_history: [] })
 
   render(<MemoryPage />)
-  expect(await screen.findByText('第一步 · 选择旅伴')).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '云朵 正在帮你记住查价条件' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '选择旅伴' }))
 
   fireEvent.click(screen.getByRole('button', { name: '选择登机柯基' }))
-  fireEvent.change(screen.getByLabelText('给旅伴起个名字'), { target: { value: '旺仔' } })
-  fireEvent.click(screen.getByRole('button', { name: '就选这位旅伴' }))
+  fireEvent.change(screen.getByLabelText('旅伴名字'), { target: { value: '旺仔' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存旅伴' }))
 
   await waitFor(() => expect(patchMemory).toHaveBeenCalledWith({
     field: 'companion_profile',
     value: { kind: 'corgi', name: '旺仔', proactivity: 'standard' },
   }))
-  expect(await screen.findByRole('heading', { name: '旺仔' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: '旺仔 正在帮你记住查价条件' })).toBeInTheDocument()
 })
 
 test('saves a dated travel idea and keeps it distinct from a confirmed trip', async () => {
   getMemory.mockResolvedValue(populatedMemory)
 
   render(<MemoryPage />)
-  await screen.findByRole('heading', { name: '云朵' })
+  await screen.findByRole('heading', { name: '云朵 正在帮你记住查价条件' })
 
   fireEvent.change(screen.getByLabelText('想去哪里，或者为什么想出发'), {
     target: { value: '春节想带爸妈回家' },
   })
-  fireEvent.click(screen.getByRole('button', { name: '放进想去的地方' }))
+  fireEvent.click(screen.getByRole('button', { name: '记入最近关注' }))
 
   await waitFor(() => expect(patchMemory).toHaveBeenCalledWith(expect.objectContaining({
     field: 'travel_ideas',
   })))
   expect(await screen.findByText('春节想带爸妈回家')).toBeInTheDocument()
-  expect(screen.getAllByText('还只是一个念头，旅伴不会把它当成已经确定的行程。')).toHaveLength(2)
+  expect(screen.getAllByText('这是你亲自记下的一个出行念头，还不代表已经确定行程。')).toHaveLength(2)
+  expect(screen.getAllByText(/不代表已经购票/)).toHaveLength(4)
 })
 
 test('shows neutral empty states instead of invented stories', async () => {
@@ -149,11 +155,11 @@ test('shows neutral empty states instead of invented stories', async () => {
 
   render(<MemoryPage />)
 
-  expect(await screen.findByText('手帐还没有写下第一页')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /想去清单/ }))
-  expect(screen.getByText('还没有想去的地方')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: /它记住的/ }))
-  expect(screen.getByText('旅伴还没有形成长期记忆')).toBeInTheDocument()
+  expect(await screen.findByText('还没有形成机票偏好')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '最近关注 0' }))
+  expect(screen.getByText('最近还没有关注的出行')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '旅行手帐 0' }))
+  expect(screen.getByText('旅行手帐会在确认成行后出现')).toBeInTheDocument()
 
   expect(screen.queryByText(/海岛与松弛感/)).not.toBeInTheDocument()
   expect(screen.queryByText(/五一、端午、暑假/)).not.toBeInTheDocument()
