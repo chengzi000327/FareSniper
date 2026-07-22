@@ -115,13 +115,44 @@ async def test_get_omits_unlearned_empty_preference_fields(
 
 
 @pytest.mark.asyncio
-async def test_patch_upserts(seeded_pg, client: AsyncClient, valid_jwt_for_u1):
+async def test_patch_preference_updates_agent_memory_and_keeps_manual_override(
+    seeded_pg, client: AsyncClient, valid_jwt_for_u1
+):
+    from backend.infrastructure.db.base import get_session
+    from backend.infrastructure.db.memory_repo import list_memories
+    from backend.memory.long_term import LongTermMemory
+
     r = await client.patch(
         "/api/memory",
         headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
-        json={"field": "budget_ceiling", "value": 600},
+        json={"field": "budget", "value": 600},
     )
     assert r.status_code == 200
+
+    rows = await list_memories("u1")
+    budget_override = next(row for row in rows if row.field == "budget")
+    assert budget_override.value == 600
+    assert budget_override.source == "user"
+
+    async with get_session() as db:
+        memory = LongTermMemory(db)
+        assert (await memory.get_preferences("u1"))["budget"] == 600
+        await memory.upsert_preferences("u1", {"budget": 900})
+        await db.commit()
+
+    async with get_session() as db:
+        # A later automatic update must not silently replace the correction.
+        assert (await LongTermMemory(db).get_preferences("u1"))["budget"] == 600
+
+    body = (
+        await client.get(
+            "/api/memory",
+            headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        )
+    ).json()
+    budget = next(item for item in body["memories"] if item["field"] == "budget")
+    assert budget["value"] == 600
+    assert budget["source"] == "manual"
 
 
 @pytest.mark.asyncio
@@ -133,6 +164,32 @@ async def test_delete_field(
         headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
     )
     assert r.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_delete_preference_forgets_agent_value_and_manual_override(
+    seeded_pg, client: AsyncClient, valid_jwt_for_u1
+):
+    from backend.infrastructure.db.base import get_session
+    from backend.infrastructure.db.memory_repo import list_memories
+    from backend.memory.long_term import LongTermMemory
+
+    await client.patch(
+        "/api/memory",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+        json={"field": "preferred_airlines", "value": ["中国国航"]},
+    )
+    response = await client.delete(
+        "/api/memory/preferred_airlines",
+        headers={"authorization": f"Bearer {valid_jwt_for_u1}"},
+    )
+
+    assert response.status_code == 204
+    assert all(row.field != "preferred_airlines" for row in await list_memories("u1"))
+    async with get_session() as db:
+        preferences = await LongTermMemory(db).get_preferences("u1")
+    assert preferences is not None
+    assert preferences["preferred_airlines"] == []
 
 
 @pytest.mark.asyncio

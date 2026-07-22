@@ -51,6 +51,7 @@ async function requestWithSession(path: string, init?: RequestInit): Promise<Res
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await requestWithSession(path, init);
+  if (r.status === 204) return undefined as T;
   return r.json();
 }
 
@@ -628,6 +629,7 @@ export const pushApi = {
 
 export interface MemoryItemDto {
   field: string;
+  value: unknown;
   label: string;
   value_display: string;
   source: "manual" | "auto" | string;

@@ -81,6 +81,7 @@ beforeEach(() => {
   patchMemory.mockReset()
   deleteMemory.mockReset()
   patchMemory.mockResolvedValue({ ok: true })
+  deleteMemory.mockResolvedValue(undefined)
 })
 
 test('the memory route reuses the shared journal component', () => {
@@ -148,6 +149,38 @@ test('saves a dated travel idea and keeps it distinct from a confirmed trip', as
   expect(await screen.findByText('春节想带爸妈回家')).toBeInTheDocument()
   expect(screen.getAllByText('这是你亲自记下的一个出行念头，还不代表已经确定行程。')).toHaveLength(2)
   expect(screen.getAllByText(/不代表已经购票/)).toHaveLength(4)
+})
+
+test('edits and forgets fare preferences through the backend memory API', async () => {
+  getMemory.mockResolvedValue(populatedMemory)
+
+  render(<MemoryPage />)
+  await screen.findByRole('heading', { name: '心理价位' })
+
+  fireEvent.click(screen.getByRole('button', { name: '编辑心理价位' }))
+  fireEvent.change(screen.getByLabelText('修改心理价位'), { target: { value: '850' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存修改' }))
+
+  await waitFor(() => expect(patchMemory).toHaveBeenCalledWith({ field: 'budget', value: 850 }))
+
+  fireEvent.click(screen.getByRole('button', { name: '忘记常去城市' }))
+  expect(screen.getByText('忘记后，这项偏好也不会再参与航班匹配和推荐。')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '确认忘记' }))
+
+  await waitFor(() => expect(deleteMemory).toHaveBeenCalledWith('frequent_cities'))
+})
+
+test('lets an empty memory create a fare preference manually', async () => {
+  getMemory.mockResolvedValue({ memories: [], query_history: [] })
+
+  render(<MemoryPage />)
+  await screen.findByText('还没有形成机票偏好')
+
+  fireEvent.click(screen.getByRole('button', { name: '添加偏好' }))
+  fireEvent.change(screen.getByLabelText('偏好内容'), { target: { value: '900' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存偏好' }))
+
+  await waitFor(() => expect(patchMemory).toHaveBeenCalledWith({ field: 'budget', value: 900 }))
 })
 
 test('shows neutral empty states instead of invented stories', async () => {

@@ -95,6 +95,25 @@ const POSE_POSITION: Record<CompanionPose, [number, number]> = {
 }
 
 const INTERNAL_MEMORY_FIELDS = new Set(['companion_profile', 'travel_ideas'])
+const ARRAY_MEMORY_FIELDS = new Set(['frequent_cities', 'preferred_airlines', 'constraints', 'travel_scenes'])
+const BUDGET_MEMORY_FIELDS = new Set(['budget', 'budget_ceiling', 'price_anchor'])
+const MEMORY_INPUT_LABELS: Record<string, string> = {
+  direct_only: '只看直飞',
+  avoid_redeye: '避开红眼航班',
+  prefer_morning: '偏好上午出发',
+  morning: '偏好上午出发',
+  prefer_window: '靠窗',
+}
+const MEMORY_INPUT_VALUES = Object.fromEntries(
+  Object.entries(MEMORY_INPUT_LABELS).map(([value, label]) => [label, value]),
+)
+const PREFERENCE_OPTIONS = [
+  { field: 'budget', label: '心理价位' },
+  { field: 'frequent_cities', label: '常去城市' },
+  { field: 'preferred_airlines', label: '偏好航司' },
+  { field: 'constraints', label: '出行习惯' },
+  { field: 'travel_scenes', label: '出行场景' },
+] as const
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -104,6 +123,38 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function memoryValue(memories: MemoryItemDto[], field: string): unknown {
   return memories.find((item) => item.field === field)?.value
+}
+
+function memoryDraftValue(memory: MemoryItemDto): string {
+  if (Array.isArray(memory.value)) {
+    return memory.value.map((item) => MEMORY_INPUT_LABELS[String(item)] ?? String(item)).join('、')
+  }
+  if (typeof memory.value === 'number' || typeof memory.value === 'string') {
+    return String(memory.value)
+  }
+  return memory.value_display || ''
+}
+
+function parseMemoryDraft(memory: MemoryItemDto, draft: string): string | number | string[] {
+  const value = draft.trim()
+  if (BUDGET_MEMORY_FIELDS.has(memory.field)) {
+    const budget = Number(value)
+    if (!Number.isFinite(budget) || budget <= 0 || budget >= 1_000_000) {
+      throw new Error('请输入有效的心理价位')
+    }
+    return Math.round(budget)
+  }
+  if (ARRAY_MEMORY_FIELDS.has(memory.field) || Array.isArray(memory.value)) {
+    const items = value
+      .split(/[、,，\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => MEMORY_INPUT_VALUES[item] ?? item)
+    if (!items.length) throw new Error('请至少保留一项内容')
+    return [...new Set(items)]
+  }
+  if (!value) throw new Error('记忆内容不能为空')
+  return value
 }
 
 function parseCompanion(value: unknown): CompanionProfile | null {
@@ -245,6 +296,13 @@ export function MemoryPage() {
   const [ideaText, setIdeaText] = React.useState('')
   const [savingIdea, setSavingIdea] = React.useState(false)
   const [saveError, setSaveError] = React.useState('')
+  const [editingMemoryField, setEditingMemoryField] = React.useState<string | null>(null)
+  const [memoryDraft, setMemoryDraft] = React.useState('')
+  const [savingMemoryField, setSavingMemoryField] = React.useState<string | null>(null)
+  const [confirmingForgetField, setConfirmingForgetField] = React.useState<string | null>(null)
+  const [addingPreference, setAddingPreference] = React.useState(false)
+  const [newPreferenceField, setNewPreferenceField] = React.useState('budget')
+  const [newPreferenceDraft, setNewPreferenceDraft] = React.useState('')
   const mountedRef = React.useRef(true)
 
   React.useEffect(() => {
@@ -357,6 +415,80 @@ export function MemoryPage() {
       replaceMemory('travel_ideas', nextIdeas, '出行想法')
     } catch {
       setSaveError('暂时无法忘掉这个想法，请稍后再试。')
+    }
+  }
+
+  const beginMemoryEdit = (memory: MemoryItemDto) => {
+    setSaveError('')
+    setConfirmingForgetField(null)
+    setEditingMemoryField(memory.field)
+    setMemoryDraft(memoryDraftValue(memory))
+  }
+
+  const saveMemoryEdit = async (memory: MemoryItemDto) => {
+    setSaveError('')
+    let value: string | number | string[]
+    try {
+      value = parseMemoryDraft(memory, memoryDraft)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '记忆内容格式不正确')
+      return
+    }
+    setSavingMemoryField(memory.field)
+    try {
+      await memoryApi.patch({ field: memory.field, value })
+      setEditingMemoryField(null)
+      await loadMemory()
+    } catch {
+      setSaveError('这条记忆暂时没有修改成功，请稍后再试。')
+    } finally {
+      setSavingMemoryField(null)
+    }
+  }
+
+  const forgetMemory = async (field: string) => {
+    setSaveError('')
+    setSavingMemoryField(field)
+    try {
+      await memoryApi.del(field)
+      setConfirmingForgetField(null)
+      setEditingMemoryField(null)
+      await loadMemory()
+    } catch {
+      setSaveError('这条记忆暂时无法删除，请稍后再试。')
+    } finally {
+      setSavingMemoryField(null)
+    }
+  }
+
+  const addPreference = async () => {
+    const option = PREFERENCE_OPTIONS.find((item) => item.field === newPreferenceField)
+    if (!option) return
+    const memory = {
+      field: option.field,
+      label: option.label,
+      value: option.field === 'budget' ? 0 : [],
+      value_display: '',
+      source: 'manual',
+    } satisfies MemoryItemDto
+    setSaveError('')
+    let value: string | number | string[]
+    try {
+      value = parseMemoryDraft(memory, newPreferenceDraft)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : '记忆内容格式不正确')
+      return
+    }
+    setSavingMemoryField(option.field)
+    try {
+      await memoryApi.patch({ field: option.field, value })
+      setAddingPreference(false)
+      setNewPreferenceDraft('')
+      await loadMemory()
+    } catch {
+      setSaveError('这条偏好暂时没有保存成功，请稍后再试。')
+    } finally {
+      setSavingMemoryField(null)
     }
   }
 
@@ -483,28 +615,86 @@ export function MemoryPage() {
           {loadState === 'error' ? (
             <EmptyState icon={<RefreshCw />} title="暂时无法读取记忆" detail="这次没有成功连接记忆服务，可以稍后重新读取。" action="重新读取" onAction={() => void loadMemory()} />
           ) : activeView === 'remembered' ? (
-            visibleMemories.length ? (
-              <div>
-                <div className="mb-5">
+            <div>
+              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
                   <h2 className="text-2xl font-black text-brand-text">它记住的机票偏好</h2>
                   <p className="mt-2 text-sm leading-7 text-brand-muted">这些信息会在下一次查询和航班排序时使用；每条记忆都保留来源。</p>
                 </div>
+                <button type="button" onClick={() => setAddingPreference((current) => !current)} className="h-10 w-fit rounded-xl border border-brand-text/12 bg-white px-4 text-sm font-bold text-brand-text transition hover:border-brand-orange hover:text-brand-orange">
+                  {addingPreference ? '收起' : '添加偏好'}
+                </button>
+              </div>
+
+              {addingPreference ? (
+                <section className="mb-5 grid gap-4 rounded-[22px] border border-brand-orange/15 bg-brand-orange-light p-4 sm:grid-cols-[12rem_minmax(0,1fr)_auto] sm:items-end">
+                  <label className="text-xs font-bold text-brand-text">
+                    偏好类型
+                    <select value={newPreferenceField} onChange={(event) => { setNewPreferenceField(event.target.value); setNewPreferenceDraft('') }} className="mt-2 h-11 w-full rounded-xl border border-brand-text/12 bg-white px-3 text-sm font-semibold outline-none focus:border-brand-orange">
+                      {PREFERENCE_OPTIONS.map((option) => <option key={option.field} value={option.field}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold text-brand-text">
+                    偏好内容
+                    <input type={newPreferenceField === 'budget' ? 'number' : 'text'} value={newPreferenceDraft} onChange={(event) => setNewPreferenceDraft(event.target.value)} placeholder={newPreferenceField === 'budget' ? '例如：800' : '多项内容请用逗号或顿号分开'} className="mt-2 h-11 w-full rounded-xl border border-brand-text/12 bg-white px-3 text-sm font-semibold outline-none focus:border-brand-orange" />
+                  </label>
+                  <button type="button" onClick={() => void addPreference()} disabled={!newPreferenceDraft.trim() || savingMemoryField === newPreferenceField} className="h-11 rounded-xl bg-brand-text px-4 text-sm font-bold text-white disabled:opacity-45">{savingMemoryField === newPreferenceField ? '保存中' : '保存偏好'}</button>
+                </section>
+              ) : null}
+
+              {visibleMemories.length ? (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {visibleMemories.map((memory) => (
                     <article key={memory.field} className="rounded-[24px] border border-brand-text/8 bg-white p-5 shadow-sm">
-                      <div className="flex items-center gap-2 text-xs font-bold text-brand-orange">
-                        {memory.source === 'manual' ? <PencilLine className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                        {memory.source === 'manual' ? '你亲自记录' : '根据真实行为学习'}
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-brand-orange">
+                          {memory.source === 'manual' ? <PencilLine className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+                          {memory.source === 'manual' ? '你亲自记录' : '根据真实行为学习'}
+                        </div>
+                        {editingMemoryField !== memory.field && confirmingForgetField !== memory.field ? (
+                          <div className="flex items-center gap-3 text-xs font-bold">
+                            <button type="button" aria-label={`编辑${memory.label || memory.field}`} onClick={() => beginMemoryEdit(memory)} className="text-brand-muted transition hover:text-brand-orange">编辑</button>
+                            <button type="button" aria-label={`忘记${memory.label || memory.field}`} onClick={() => { setEditingMemoryField(null); setConfirmingForgetField(memory.field) }} className="text-brand-muted transition hover:text-red-600">忘记</button>
+                          </div>
+                        ) : null}
                       </div>
                       <h3 className="mt-4 text-lg font-black text-brand-text">{memory.label || memory.field}</h3>
-                      <p className="mt-2 text-sm leading-7 text-brand-muted">{memory.value_display || '已记录'}</p>
+                      {editingMemoryField === memory.field ? (
+                        <div className="mt-3">
+                          <label className="sr-only" htmlFor={`memory-${memory.field}`}>修改{memory.label || memory.field}</label>
+                          <input
+                            id={`memory-${memory.field}`}
+                            type={BUDGET_MEMORY_FIELDS.has(memory.field) ? 'number' : 'text'}
+                            value={memoryDraft}
+                            onChange={(event) => setMemoryDraft(event.target.value)}
+                            className="h-11 w-full rounded-xl border border-brand-text/12 bg-brand-bg px-3 text-sm font-semibold text-brand-text outline-none focus:border-brand-orange"
+                          />
+                          {ARRAY_MEMORY_FIELDS.has(memory.field) || Array.isArray(memory.value) ? (
+                            <p className="mt-2 text-xs leading-5 text-brand-muted">多项内容请用逗号或顿号分开。</p>
+                          ) : null}
+                          <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => void saveMemoryEdit(memory)} disabled={savingMemoryField === memory.field} className="h-9 rounded-xl bg-brand-text px-3 text-xs font-bold text-white disabled:opacity-55">{savingMemoryField === memory.field ? '保存中' : '保存修改'}</button>
+                            <button type="button" onClick={() => setEditingMemoryField(null)} className="h-9 rounded-xl border border-brand-text/10 px-3 text-xs font-bold text-brand-muted">取消</button>
+                          </div>
+                        </div>
+                      ) : confirmingForgetField === memory.field ? (
+                        <div className="mt-3 rounded-xl bg-red-50 p-3">
+                          <p className="text-xs leading-5 text-red-700">忘记后，这项偏好也不会再参与航班匹配和推荐。</p>
+                          <div className="mt-3 flex gap-2">
+                            <button type="button" onClick={() => void forgetMemory(memory.field)} disabled={savingMemoryField === memory.field} className="h-9 rounded-xl bg-red-600 px-3 text-xs font-bold text-white disabled:opacity-55">{savingMemoryField === memory.field ? '正在忘记' : '确认忘记'}</button>
+                            <button type="button" onClick={() => setConfirmingForgetField(null)} className="h-9 rounded-xl border border-red-200 bg-white px-3 text-xs font-bold text-red-700">取消</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-sm leading-7 text-brand-muted">{memory.value_display || '已记录'}</p>
+                      )}
                     </article>
                   ))}
                 </div>
-              </div>
-            ) : (
-              <EmptyState icon={<Heart />} title="还没有形成机票偏好" detail="完成查询或亲自记录预算、航司、时间和行李要求后，FareSniper 才会在这里显示记忆。" />
-            )
+              ) : (
+                <EmptyState icon={<Heart />} title="还没有形成机票偏好" detail="完成查询或亲自记录预算、航司、时间和行李要求后，FareSniper 才会在这里显示记忆。" />
+              )}
+            </div>
           ) : activeView === 'ideas' ? (
             activityMonths.length ? (
               <div className="space-y-10">

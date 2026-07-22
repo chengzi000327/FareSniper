@@ -27,15 +27,32 @@ class LongTermMemory:
 
     async def get_preferences(self, user_id: str) -> dict[str, Any] | None:
         result = await self._s.get(UserPreference, user_id)
-        if result is None:
-            return None
-        return {
-            "budget": result.budget,
-            "frequent_cities": result.frequent_cities or [],
-            "preferred_airlines": result.preferred_airlines or [],
-            "constraints": result.constraints or [],
-            "travel_scenes": result.travel_scenes or [],
+        preferences = {
+            "budget": result.budget if result is not None else None,
+            "frequent_cities": result.frequent_cities or [] if result is not None else [],
+            "preferred_airlines": result.preferred_airlines or [] if result is not None else [],
+            "constraints": result.constraints or [] if result is not None else [],
+            "travel_scenes": result.travel_scenes or [] if result is not None else [],
         }
+
+        # User-confirmed values are stored as manual overrides. Merge them at
+        # read time so later automatic learning cannot silently replace an
+        # explicit correction made from the memory page.
+        from backend.infrastructure.db.memory_repo import MemoryRow
+
+        override_rows = (
+            await self._s.execute(
+                select(MemoryRow).where(
+                    MemoryRow.user_id == user_id,
+                    MemoryRow.field.in_(FIELD_LABELS),
+                    MemoryRow.source.in_(("user", "manual")),
+                )
+            )
+        ).scalars().all()
+        for row in override_rows:
+            preferences[row.field] = row.value
+
+        return preferences if result is not None or override_rows else None
 
     async def upsert_preferences(self, user_id: str, data: dict[str, Any]) -> None:
         mapped = self._map_pref_fields(data)
