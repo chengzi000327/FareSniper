@@ -247,7 +247,14 @@ export function MobileAppPage() {
               onOpenMemory={() => setActiveTab('memory')}
             />
           ) : activeTab === 'chat' ? (
-            <ChatPage compact initialQuery={chatQuery} onInitialQueryConsumed={() => setChatQuery(null)} />
+            <ChatPage
+              compact
+              assistantName={companionFromMemory(memory.memories).name}
+              recentQuery={memory.query_history[0] ? queryText(memory.query_history[0]) : null}
+              onOpenExplore={() => setActiveTab('explore')}
+              initialQuery={chatQuery}
+              onInitialQueryConsumed={() => setChatQuery(null)}
+            />
           ) : activeTab === 'memory' ? (
             <MobileMemoryPage memory={memory} loading={loading} onRefresh={loadData} />
           ) : (

@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { motion } from 'motion/react'
-import { History, Plane, Radar, Send } from 'lucide-react'
+import { BellRing, Compass, History, MessageCircle, Plane, Radar, Send, Sparkles } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
@@ -16,7 +16,7 @@ import type { ChatSearchResponse, DealCardDto, SearchStreamEvent } from '@/lib/a
 
 type Message =
   | { id: string; role: 'user'; content: string }
-  | { id: string; role: 'assistant'; content: string; isSpecial?: boolean; hasCard?: boolean; cardData?: DiscoveryCardContentProps }
+  | { id: string; role: 'assistant'; content: string; isSpecial?: boolean; hasCard?: boolean; cardData?: DiscoveryCardContentProps; retryQuery?: string }
 
 type ActiveSearch = {
   id: string
@@ -92,10 +92,16 @@ export function ChatPage({
   initialQuery,
   onInitialQueryConsumed,
   compact = false,
+  assistantName = '旅伴',
+  recentQuery,
+  onOpenExplore,
 }: {
   initialQuery?: string | null
   onInitialQueryConsumed?: () => void
   compact?: boolean
+  assistantName?: string
+  recentQuery?: string | null
+  onOpenExplore?: () => void
 }) {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [inputValue, setInputValue] = React.useState('')
@@ -219,10 +225,11 @@ export function ChatPage({
         const hasCard = !!message.cardData
         return {
           ...message,
-          content: hasCard ? '已收到部分结果，其余来源暂时超时。' : '搜索未完整结束，请重试。',
+          content: hasCard ? '已收到部分结果，其余来源暂时超时。' : '这次没有拿到完整结果，可以重新查询刚才的条件。',
           isSpecial: false,
           hasCard,
           cardData: hasCard && message.cardData ? finalizeCard(message.cardData) : undefined,
+          retryQuery: hasCard ? undefined : value,
         }
       })
     }
@@ -330,6 +337,34 @@ export function ChatPage({
     void startSearch(value)
   }
 
+  const compactStarters = [
+    {
+      title: '查一趟具体航班',
+      detail: '已经知道大概去哪、什么时候走',
+      prompt: recommendedQuestions[0] || '下周五上海去三亚，预算 800 元',
+      icon: <Plane className="h-4 w-4" />,
+    },
+    {
+      title: '还没想好，先逛探索',
+      detail: '从真实推荐里发现想去的地方',
+      prompt: null,
+      icon: <Compass className="h-4 w-4" />,
+    },
+    recentQuery
+      ? {
+          title: '继续上次的查询',
+          detail: recentQuery,
+          prompt: recentQuery,
+          icon: <History className="h-4 w-4" />,
+        }
+      : {
+          title: '关注一条航线价格',
+          detail: '有目标价后，交给我持续检查',
+          prompt: '我想关注上海到三亚的机票，低于 800 元时提醒我',
+          icon: <BellRing className="h-4 w-4" />,
+        },
+  ]
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className={`flex items-center justify-between ${compact ? 'px-5 pt-[max(1.25rem,env(safe-area-inset-top))]' : 'px-5 pt-6 sm:px-8 lg:px-12 lg:pt-8'}`}>
@@ -337,10 +372,17 @@ export function ChatPage({
           {compact ? <div className="text-[10px] font-black tracking-[0.2em] text-brand-orange">特价机票发现</div> : null}
           <h1 className={`font-bold text-brand-text ${compact ? 'mt-1 font-serif text-[2rem] leading-tight' : 'text-3xl sm:text-4xl'}`}>对话空间</h1>
         </div>
-        <button className={`flex items-center gap-1.5 text-brand-muted transition hover:text-brand-text ${compact ? 'text-xs' : 'text-sm'}`}>
-          <History className="h-4 w-4" />
-          历史对话
-        </button>
+        {compact ? (
+          <div className="flex items-center gap-1.5 rounded-full bg-white px-3 py-2 text-[11px] font-bold text-brand-muted shadow-sm">
+            <MessageCircle className="h-3.5 w-3.5" />
+            当前对话
+          </div>
+        ) : (
+          <button className="flex items-center gap-2 text-sm text-brand-muted transition hover:text-brand-text">
+            <History className="h-4 w-4" />
+            历史对话
+          </button>
+        )}
       </div>
 
       <div
@@ -349,22 +391,56 @@ export function ChatPage({
         }`}
       >
         {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center">
-            <motion.div className={`grid place-items-center rounded-[26px] bg-brand-orange-light text-brand-orange ${compact ? 'mb-4 h-14 w-14' : 'mb-5 h-16 w-16'}`}>
-              <Plane className={compact ? 'h-6 w-6' : 'h-7 w-7'} />
-            </motion.div>
-            <motion.h2 className={`text-center font-serif text-brand-text ${compact ? 'mb-2 text-[2.35rem] leading-tight' : 'mb-4 text-5xl sm:text-6xl'}`}>想去哪？</motion.h2>
-            <p className={`max-w-[34rem] text-center text-brand-muted text-balance ${compact ? 'mb-6 text-sm leading-6' : 'mb-10 text-base leading-8 sm:text-lg'}`}>
-              用自然语言告诉我你的出发地、目的地、时间和预算，我来帮你发现特价机票，监控价格。
-            </p>
+          compact ? (
+            <div className="flex min-h-full flex-col justify-center">
+              <div className="flex items-center gap-2 text-[11px] font-black text-brand-orange">
+                <span className="grid h-7 w-7 place-items-center rounded-xl bg-brand-orange-light"><Sparkles className="h-3.5 w-3.5" /></span>
+                {assistantName} 在这里
+              </div>
+              <motion.h2 className="mt-3 font-serif text-[2rem] font-black leading-tight text-brand-text">先说一个想法就好</motion.h2>
+              <p className="mt-2 text-[13px] leading-6 text-brand-muted">不必一次把条件说全。我会接着当前对话，只追问真正缺少的内容。</p>
 
-            <div className={`grid w-full max-w-4xl ${compact ? 'gap-2.5' : 'gap-4 md:grid-cols-2'}`}>
-              <RecommendationCard from="上海" to="三亚" price="399" date="五一假期" />
-              <RecommendationCard from="北京" to="大理" price="568" date="下周末" />
-              {!compact ? <RecommendationCard from="成都" to="丽江" price="420" date="六月出行" /> : null}
-              {!compact ? <RecommendationCard from="广州" to="青岛" price="480" date="端午假期" /> : null}
+              <div className="mt-5 space-y-2.5">
+                {compactStarters.map((starter) => (
+                  <button
+                    key={starter.title}
+                    type="button"
+                    onClick={() => starter.prompt ? setInputValue(starter.prompt) : onOpenExplore?.()}
+                    className="flex w-full items-center gap-3 rounded-[20px] border border-brand-text/7 bg-white px-4 py-3 text-left shadow-sm transition active:scale-[0.99]"
+                  >
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-brand-orange-light text-brand-orange">{starter.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black text-brand-text">{starter.title}</span>
+                      <span className="mt-0.5 block truncate text-[11px] text-brand-muted">{starter.detail}</span>
+                    </span>
+                    <span className="text-lg text-brand-muted/60">›</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 flex items-center gap-2 text-[10px] font-semibold leading-5 text-brand-muted">
+                <span className="h-px flex-1 bg-brand-text/8" />
+                查询后再比较真实报价
+                <span className="h-px flex-1 bg-brand-text/8" />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center">
+              <motion.div className="mb-5 grid h-16 w-16 place-items-center rounded-[26px] bg-brand-orange-light text-brand-orange">
+                <Plane className="h-7 w-7" />
+              </motion.div>
+              <motion.h2 className="mb-4 text-center font-serif text-5xl text-brand-text sm:text-6xl">想去哪？</motion.h2>
+              <p className="mb-10 max-w-[34rem] text-center text-base leading-8 text-brand-muted text-balance sm:text-lg">
+                用自然语言告诉我你的出发地、目的地、时间和预算，我来帮你发现特价机票，监控价格。
+              </p>
+              <div className="grid w-full max-w-4xl gap-4 md:grid-cols-2">
+                <RecommendationCard from="上海" to="三亚" price="399" date="五一假期" />
+                <RecommendationCard from="北京" to="大理" price="568" date="下周末" />
+                <RecommendationCard from="成都" to="丽江" price="420" date="六月出行" />
+                <RecommendationCard from="广州" to="青岛" price="480" date="端午假期" />
+              </div>
+            </div>
+          )
         ) : (
           messages.map((message) => (
             <motion.div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -383,11 +459,21 @@ export function ChatPage({
                 ) : (
                   message.content
                 )}
+                {message.role === 'assistant' && message.retryQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => void startSearch(message.retryQuery as string)}
+                    className="mt-3 inline-flex items-center gap-2 rounded-xl bg-brand-orange-light px-3 py-2 text-xs font-black text-brand-orange"
+                  >
+                    <Radar className="h-3.5 w-3.5" />
+                    重新查询
+                  </button>
+                ) : null}
               </div>
 
               {'hasCard' in message && message.hasCard && message.cardData ? (
                 <div className="mt-4 w-full max-w-2xl overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card">
-                  <DiscoveryCardContent {...message.cardData} />
+                  <DiscoveryCardContent {...message.cardData} compact={compact || message.cardData.compact} narrow={compact} />
                 </div>
               ) : null}
             </motion.div>
@@ -402,7 +488,7 @@ export function ChatPage({
             value={inputValue}
             onChange={(event) => setInputValue(event.target.value)}
             onKeyDown={(event) => event.key === 'Enter' && handleSend()}
-            placeholder="比如：五一去三亚，预算 600..."
+            placeholder={compact ? '说出发地、目的地和时间…' : '比如：五一去三亚，预算 600...'}
             className={`min-w-0 flex-1 bg-transparent px-4 py-3 text-sm ${compact ? '' : 'sm:text-base'}`}
           />
           <motion.button
@@ -416,7 +502,7 @@ export function ChatPage({
           </motion.button>
         </div>
 
-        {messages.length === 0 ? (
+        {messages.length === 0 && !compact ? (
           <div className={`mt-3 flex items-center gap-2 overflow-x-auto pb-1 ${compact ? 'justify-start' : 'flex-wrap justify-center'}`}>
             {recommendedQuestions.slice(0, compact ? 3 : recommendedQuestions.length).map((tag) => (
               <button

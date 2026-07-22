@@ -436,8 +436,15 @@ test("settles a clean EOF without complete instead of leaving a spinner", async 
     calls[0].resolve(null);
   });
 
-  expect(await screen.findByText("搜索未完整结束，请重试。")).toBeInTheDocument();
+  expect(await screen.findByText("这次没有拿到完整结果，可以重新查询刚才的条件。")).toBeInTheDocument();
   expect(screen.queryByText("正在为您深度扫描全网特价资源...")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "重新查询" }));
+  await waitFor(() => expect(calls).toHaveLength(2));
+  expect(searchApi.stream).toHaveBeenLastCalledWith(
+    { message: "EOF 搜索", session_id: null },
+    expect.any(Function),
+    expect.any(AbortSignal)
+  );
 });
 
 test("preserves canonical complete data when the stream rejects afterwards", async () => {

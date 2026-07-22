@@ -105,6 +105,7 @@ export type DiscoveryCardContentProps = {
   inventoryExpiresAt?: string | null
   prices: PriceItem[]
   compact?: boolean
+  narrow?: boolean
   onMonitorPrice?: () => void
   bookingUrl?: string | null
   onSearch?: () => void
@@ -134,6 +135,7 @@ export function DiscoveryCardContent({
   inventoryExpiresAt,
   prices,
   compact,
+  narrow = false,
   onMonitorPrice,
   bookingUrl,
   onSearch,
@@ -221,12 +223,12 @@ export function DiscoveryCardContent({
       depart_date: date,
     }).catch(() => undefined)
   }
-  const cardPadding = compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
+  const cardPadding = narrow ? 'p-3.5' : compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
   const sectionGap = compact ? 'mb-3.5' : 'mb-5'
 
   return (
     <div className={`flex h-full flex-col ${cardPadding}`}>
-      <div className={`flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between ${compact ? 'mb-2.5' : 'mb-5'}`}>
+      <div className={`flex flex-col gap-3 ${narrow ? '' : 'sm:flex-row sm:items-start sm:justify-between'} ${compact ? 'mb-2.5' : 'mb-5'}`}>
         <div className="flex items-center gap-3">
           <div
             className={`flex items-center justify-center rounded-2xl bg-brand-orange/10 ${compact ? 'h-10 w-10' : 'h-12 w-12'}`}
@@ -251,7 +253,7 @@ export function DiscoveryCardContent({
           </div>
         </div>
         {recommendScore ? (
-          <div className="flex flex-col items-start sm:items-end">
+          <div className={`flex flex-col items-start ${narrow ? '' : 'sm:items-end'}`}>
             <div className="mb-2 rounded-md bg-green-500 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20">
               发现指数
             </div>
@@ -263,19 +265,19 @@ export function DiscoveryCardContent({
       </div>
 
       <div
-        className={`relative ${sectionGap} grid grid-cols-2 items-center gap-3 overflow-hidden rounded-2xl border border-brand-text/5 bg-brand-bg/70 sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:gap-2 ${
-          compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'
+        className={`relative ${sectionGap} grid grid-cols-2 items-center gap-3 overflow-hidden rounded-2xl border border-brand-text/5 bg-brand-bg/70 ${narrow ? '' : 'sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:gap-2'} ${
+          narrow ? 'p-3' : compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'
         }`}
       >
         <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-transparent via-brand-orange/20 to-transparent" />
         <PriceBlock label="票价" value={money(displayedTicketPrice)} compact={compact} />
-        <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
+        <Plus className={`hidden h-4 w-4 text-brand-muted/40 ${narrow ? '' : 'sm:block'}`} />
         <PriceBlock
           label={taxSource === 'regulatory_estimate' ? '机建燃油（现行）' : '机建燃油'}
           value={money(tax)}
           compact={compact}
         />
-        <Plus className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
+        <Plus className={`hidden h-4 w-4 text-brand-muted/40 ${narrow ? '' : 'sm:block'}`} />
         <PriceBlock
           label="行李额"
           value={
@@ -294,8 +296,8 @@ export function DiscoveryCardContent({
           compact={compact}
           highlight={baggageFee !== null && baggageFee > 0}
         />
-        <Equal className="hidden h-4 w-4 text-brand-muted/40 sm:block" />
-        <div className="col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0">
+        <Equal className={`hidden h-4 w-4 text-brand-muted/40 ${narrow ? '' : 'sm:block'}`} />
+        <div className={`col-span-2 flex flex-col items-start border-t border-brand-text/5 pt-3 ${narrow ? '' : 'sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0'}`}>
           <span className="mb-1 text-[11px] font-bold text-brand-orange sm:text-xs">
             {demo
               ? '示例总价'
@@ -364,7 +366,7 @@ export function DiscoveryCardContent({
         </div>
       </div>
 
-      <div className={`${sectionGap} rounded-2xl border border-brand-text/5 bg-brand-bg/40 ${compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'}`}>
+      <div className={`${sectionGap} rounded-2xl border border-brand-text/5 bg-brand-bg/40 ${narrow ? 'p-3' : compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'}`}>
         <div className="mb-2.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={`h-2 w-2 rounded-full bg-brand-orange ${hasRealtimeWinner ? 'animate-pulse' : ''}`} />
@@ -382,7 +384,7 @@ export function DiscoveryCardContent({
             </span>
           ) : null}
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className={`grid gap-2 ${narrow ? '' : 'sm:grid-cols-2'}`}>
           {prices.map((price) => {
             const lowest = hasSelectedWinner && price === selectedWinner
             const freshnessMessage =
@@ -427,7 +429,7 @@ export function DiscoveryCardContent({
         </div>
       </div>
 
-      <div className="mt-auto flex flex-col gap-2 sm:flex-row">
+      <div className={`mt-auto flex flex-col gap-2 ${narrow ? '' : 'sm:flex-row'}`}>
         {onSearch ? (
           <button
             type="button"
