@@ -64,6 +64,8 @@ _FIELD_LABELS = {
     "constraints": "出行习惯",
     "travel_scenes": "出行场景",
     "seat_preference": "座位偏好",
+    "companion_profile": "旅伴档案",
+    "travel_ideas": "出行想法",
 }
 
 _VALUE_LABELS = {
