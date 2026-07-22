@@ -21,7 +21,7 @@ import { api, memoryApi } from '@/lib/api'
 import type { MemoryItemDto, QueryHistoryItemDto } from '@/lib/api'
 
 type LoadState = 'loading' | 'ready' | 'error'
-type MemoryView = 'journal' | 'ideas' | 'remembered'
+type MemoryView = 'journal' | 'ideas' | 'queries' | 'remembered'
 type CompanionKind = 'cat' | 'corgi' | 'penguin' | 'plain'
 type CompanionPose = 'idle' | 'idea' | 'deal' | 'departure' | 'reminder' | 'journal'
 
@@ -103,7 +103,18 @@ const MEMORY_INPUT_LABELS: Record<string, string> = {
   avoid_redeye: '避开红眼航班',
   prefer_morning: '偏好上午出发',
   morning: '偏好上午出发',
-  prefer_window: '靠窗',
+  prefer_window: '偏好靠窗座位',
+  avoid_stopover: '不要中转',
+  no_stopover: '不要中转',
+  checked_baggage: '需要托运行李',
+  carry_on_only: '只带随身行李',
+  business: '商务出行',
+  leisure: '休闲旅行',
+  family_visit: '探亲回家',
+  return_home: '回家',
+  with_family: '家庭出行',
+  with_children: '亲子出行',
+  solo: '独自出行',
 }
 const MEMORY_INPUT_VALUES = Object.fromEntries(
   Object.entries(MEMORY_INPUT_LABELS).map(([value, label]) => [label, value]),
@@ -128,7 +139,17 @@ function memoryValue(memories: MemoryItemDto[], field: string): unknown {
 
 function memoryDraftValue(memory: MemoryItemDto): string {
   if (Array.isArray(memory.value)) {
-    return memory.value.map((item) => MEMORY_INPUT_LABELS[String(item)] ?? String(item)).join('、')
+    return memory.value.map((item) => {
+      const text = String(item)
+      const knownLabel = MEMORY_INPUT_LABELS[text]
+      if (knownLabel) return knownLabel
+      if (/^[a-z][a-z0-9_]*$/.test(text)) {
+        if (memory.field === 'constraints') return '其他出行要求'
+        if (memory.field === 'travel_scenes') return '其他出行场景'
+        return '其他偏好'
+      }
+      return text
+    }).join('、')
   }
   if (typeof memory.value === 'number' || typeof memory.value === 'string') {
     return String(memory.value)
@@ -230,15 +251,18 @@ function monthKey(value: string): string {
   }).format(date)
 }
 
-function buildJournalEntries(ideas: TravelIdea[], history: QueryHistoryItemDto[]): JournalEntry[] {
-  const ideaEntries: JournalEntry[] = ideas.map((idea) => ({
+function buildIdeaEntries(ideas: TravelIdea[]): JournalEntry[] {
+  return ideas.map((idea) => ({
     id: `idea-${idea.id}`,
     date: idea.created_at,
     title: idea.text,
     detail: '这是你亲自记下的一个出行念头，还不代表已经确定行程。',
-    source: '想法',
-  }))
-  const queryEntries: JournalEntry[] = history.flatMap((item) => {
+    source: '想法' as const,
+  })).sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime())
+}
+
+function buildQueryEntries(history: QueryHistoryItemDto[]): JournalEntry[] {
+  return history.flatMap((item) => {
     const text = queryText(item)
     if (!text) return []
     const route = queryRoute(item)
@@ -249,8 +273,7 @@ function buildJournalEntries(ideas: TravelIdea[], history: QueryHistoryItemDto[]
       detail: route ? `你查询了“${text}”。` : `你发起了一次真实查询：“${text}”。`,
       source: '查询' as const,
     }]
-  })
-  return [...ideaEntries, ...queryEntries].sort(
+  }).sort(
     (left, right) => new Date(right.date).getTime() - new Date(left.date).getTime(),
   )
 }
@@ -337,10 +360,15 @@ export function MemoryPage() {
     () => payload.memories.filter((item) => !INTERNAL_MEMORY_FIELDS.has(item.field)),
     [payload.memories],
   )
-  const activityEntries = React.useMemo(
-    () => buildJournalEntries(ideas, payload.query_history),
-    [ideas, payload.query_history],
+  const ideaEntries = React.useMemo(
+    () => buildIdeaEntries(ideas),
+    [ideas],
   )
+  const queryEntries = React.useMemo(
+    () => buildQueryEntries(payload.query_history),
+    [payload.query_history],
+  )
+  const activityEntries = activeView === 'ideas' ? ideaEntries : queryEntries
   const activityMonths = React.useMemo(() => {
     const groups = new Map<string, JournalEntry[]>()
     activityEntries.forEach((entry) => {
@@ -608,7 +636,8 @@ export function MemoryPage() {
 
         <nav aria-label="记忆内容" className="mt-7 flex flex-wrap gap-2 border-b border-brand-text/10 pb-4">
           <MemoryTab active={activeView === 'remembered'} onClick={() => setActiveView('remembered')} icon={<Heart />} label="机票偏好" count={visibleMemories.length} />
-          <MemoryTab active={activeView === 'ideas'} onClick={() => setActiveView('ideas')} icon={<Lightbulb />} label="最近关注" count={activityEntries.length} />
+          <MemoryTab active={activeView === 'ideas'} onClick={() => setActiveView('ideas')} icon={<Lightbulb />} label="最近关注" count={ideaEntries.length} />
+          <MemoryTab active={activeView === 'queries'} onClick={() => setActiveView('queries')} icon={<Clock3 />} label="最近查询" count={queryEntries.length} />
           <MemoryTab active={activeView === 'journal'} onClick={() => setActiveView('journal')} icon={<BookOpen />} label="旅行手帐" count={0} />
         </nav>
 
@@ -696,9 +725,17 @@ export function MemoryPage() {
                 <EmptyState icon={<Heart />} title="还没有形成机票偏好" detail="完成查询或亲自记录预算、航司、时间和行李要求后，FareSniper 才会在这里显示记忆。" />
               )}
             </div>
-          ) : activeView === 'ideas' ? (
+          ) : activeView === 'ideas' || activeView === 'queries' ? (
             activityMonths.length ? (
               <div className="space-y-10">
+                <div>
+                  <h2 className="text-2xl font-black text-brand-text">{activeView === 'ideas' ? '你明确说过的关注' : '最近查询记录'}</h2>
+                  <p className="mt-2 text-sm leading-7 text-brand-muted">
+                    {activeView === 'ideas'
+                      ? '这里只保留你亲自输入并保存的出行想法，不会从搜索行为里猜。'
+                      : '这里是实际发起过的机票查询，只表示查过，不表示你想去或已经购票。'}
+                  </p>
+                </div>
                 {activityMonths.map(([month, entries]) => (
                   <section key={month}>
                     <div className="flex items-center gap-4">
@@ -730,7 +767,13 @@ export function MemoryPage() {
                 ))}
               </div>
             ) : (
-              <EmptyState icon={<Lightbulb />} title="最近还没有关注的出行" detail="真实查询和你亲自保存的出行想法会出现在这里，但不会被当成已经购票。" />
+              <EmptyState
+                icon={activeView === 'ideas' ? <Lightbulb /> : <Clock3 />}
+                title={activeView === 'ideas' ? '最近还没有明确关注的出行' : '最近还没有机票查询'}
+                detail={activeView === 'ideas'
+                  ? '只有你亲自输入并保存的出行想法才会出现在这里。'
+                  : '实际发起机票查询后，查询条件会出现在这里，但不会被当成出行意愿。'}
+              />
             )
           ) : (
             <HandDrawnJournalEmpty kind={selectedKind} companionName={selectedName} />

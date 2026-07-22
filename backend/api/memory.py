@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -79,6 +80,19 @@ _VALUE_LABELS = {
     "direct_only": "只看直飞",
     "avoid_redeye": "避开红眼航班",
     "prefer_morning": "偏好上午出发",
+    "morning": "偏好上午出发",
+    "prefer_window": "偏好靠窗座位",
+    "avoid_stopover": "不要中转",
+    "no_stopover": "不要中转",
+    "checked_baggage": "需要托运行李",
+    "carry_on_only": "只带随身行李",
+    "business": "商务出行",
+    "leisure": "休闲旅行",
+    "family_visit": "探亲回家",
+    "return_home": "回家",
+    "with_family": "家庭出行",
+    "with_children": "亲子出行",
+    "solo": "独自出行",
 }
 
 
@@ -94,12 +108,28 @@ def _display_value(field: str, value: Any) -> str:
     ):
         return f"¥{value:g}"
     if isinstance(value, list):
-        return "、".join(str(_VALUE_LABELS.get(str(item), item)) for item in value)
+        displayed = []
+        for item in value:
+            text = str(item)
+            label = _VALUE_LABELS.get(text)
+            if label is None and re.fullmatch(r"[a-z][a-z0-9_]*", text):
+                if field == "constraints":
+                    label = "其他出行要求"
+                elif field == "travel_scenes":
+                    label = "其他出行场景"
+                else:
+                    label = "其他偏好"
+            displayed.append(str(label if label is not None else item))
+        return "、".join(displayed)
     if isinstance(value, dict):
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     if isinstance(value, bool):
         return "是" if value else "否"
-    return str(_VALUE_LABELS.get(str(value), value))
+    text = str(value)
+    label = _VALUE_LABELS.get(text)
+    if label is None and re.fullmatch(r"[a-z][a-z0-9_]*", text):
+        label = "其他偏好"
+    return str(label if label is not None else value)
 
 
 def _memory_item(field: str, value: Any, source: str) -> MemoryItemOut:

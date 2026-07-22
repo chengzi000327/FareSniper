@@ -33,7 +33,7 @@ async def test_get_combines_learned_preferences_manual_memory_and_query_history(
                 "budget": 680,
                 "frequent_cities": ["三亚", "成都"],
                 "preferred_airlines": ["南方航空"],
-                "constraints": ["direct_only"],
+                "constraints": ["direct_only", "avoid_stopover"],
                 "travel_scenes": ["亲子游"],
             },
         )
@@ -71,7 +71,7 @@ async def test_get_combines_learned_preferences_manual_memory_and_query_history(
         "source": "auto",
     }
     assert by_field["frequent_cities"]["value_display"] == "三亚、成都"
-    assert by_field["constraints"]["value_display"] == "只看直飞"
+    assert by_field["constraints"]["value_display"] == "只看直飞、不要中转"
     assert by_field["seat_preference"] == {
         "field": "seat_preference",
         "value": "靠窗",

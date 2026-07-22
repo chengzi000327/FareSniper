@@ -101,8 +101,11 @@ test('keeps fare preferences primary and separates recent attention from a confi
   expect(screen.getByText('三亚、成都')).toBeInTheDocument()
   expect(screen.getByText('只看直飞、避开红眼航班')).toBeInTheDocument()
 
-  fireEvent.click(screen.getByRole('button', { name: '最近关注 3' }))
+  fireEvent.click(screen.getByRole('button', { name: '最近关注 1' }))
   expect(screen.getByText('秋天想去青岛吹吹海风')).toBeInTheDocument()
+  expect(screen.queryByText('北京 → 三亚')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: '最近查询 2' }))
   expect(screen.getByText('北京 → 三亚')).toBeInTheDocument()
   expect(screen.getByText('你查询了“7月25日北京到三亚的直飞机票”。')).toBeInTheDocument()
   expect(screen.getAllByText(/来自真实查询记录/)).toHaveLength(2)
@@ -150,7 +153,7 @@ test('saves a dated travel idea and keeps it distinct from a confirmed trip', as
   })))
   expect(await screen.findByText('春节想带爸妈回家')).toBeInTheDocument()
   expect(screen.getAllByText('这是你亲自记下的一个出行念头，还不代表已经确定行程。')).toHaveLength(2)
-  expect(screen.getAllByText(/不代表已经购票/)).toHaveLength(4)
+  expect(screen.getAllByText(/不代表已经购票/)).toHaveLength(2)
 })
 
 test('edits and forgets fare preferences through the backend memory API', async () => {
@@ -192,7 +195,9 @@ test('shows neutral empty states instead of invented stories', async () => {
 
   expect(await screen.findByText('还没有形成机票偏好')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '最近关注 0' }))
-  expect(screen.getByText('最近还没有关注的出行')).toBeInTheDocument()
+  expect(screen.getByText('最近还没有明确关注的出行')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '最近查询 0' }))
+  expect(screen.getByText('最近还没有机票查询')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '旅行手帐 0' }))
   expect(screen.getByText('这一页先留白')).toBeInTheDocument()
 

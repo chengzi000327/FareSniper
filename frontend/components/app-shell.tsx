@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import Link from 'next/link'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowRight, Radar, Sparkles } from 'lucide-react'
 import { MainLayout } from '@/components/main-layout'
@@ -56,15 +57,21 @@ export function AppShell() {
                 </p>
 
                 <div className="mt-10 flex flex-col items-start gap-4">
-                  <motion.button
-                    onClick={() => setView('app')}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="group inline-flex items-center gap-3 rounded-2xl bg-brand-text px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-brand-orange"
-                  >
-                    <Sparkles className="h-5 w-5" />
-                    开启特价发现之旅
-                  </motion.button>
+                  <div className="flex flex-wrap gap-3">
+                    <motion.button
+                      onClick={() => setView('app')}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="group inline-flex items-center gap-3 rounded-2xl bg-brand-text px-7 py-4 text-base font-semibold text-white shadow-card transition hover:bg-brand-orange"
+                    >
+                      <Sparkles className="h-5 w-5" />
+                      开启特价发现之旅
+                    </motion.button>
+                    <Link href="/mobile" className="inline-flex items-center gap-2 rounded-2xl border border-brand-text/12 bg-white px-5 py-4 text-sm font-bold text-brand-text transition hover:border-brand-orange hover:text-brand-orange">
+                      打开手机端
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
                   <p className="text-sm leading-7 text-brand-muted">
                     携程、飞猪与国际航司/销售平台实时比价
                   </p>
