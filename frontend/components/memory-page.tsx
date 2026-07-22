@@ -11,6 +11,7 @@ import {
   Heart,
   Lightbulb,
   PencilLine,
+  PlaneTakeoff,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -732,7 +733,7 @@ export function MemoryPage() {
               <EmptyState icon={<Lightbulb />} title="最近还没有关注的出行" detail="真实查询和你亲自保存的出行想法会出现在这里，但不会被当成已经购票。" />
             )
           ) : (
-            <EmptyState icon={<BookOpen />} title="旅行手帐会在确认成行后出现" detail="查询、收藏或点击预订都不等于已经购票。只有你确认已经买票或录入行程后，才会开始出发倒计时并形成真实手帐。" />
+            <HandDrawnJournalEmpty kind={selectedKind} companionName={selectedName} />
           )}
         </motion.div>
 
@@ -743,6 +744,70 @@ export function MemoryPage() {
         </footer>
       </div>
     </div>
+  )
+}
+
+function HandDrawnJournalEmpty({
+  kind,
+  companionName,
+}: {
+  kind: CompanionKind
+  companionName: string
+}) {
+  return (
+    <section
+      aria-label="尚未开始的旅行手帐"
+      className="relative mx-auto max-w-5xl overflow-hidden rounded-[12px_24px_16px_28px] border-2 border-[#5b4636]/25 bg-[#fffaf0] px-5 py-7 shadow-[8px_10px_0_rgba(92,68,46,0.08),0_18px_45px_rgba(92,68,46,0.12)] sm:px-10 sm:py-10"
+      style={{
+        backgroundImage: 'linear-gradient(rgba(121,174,191,0.12) 1px, transparent 1px), radial-gradient(circle at 18% 16%, rgba(244,168,93,0.13), transparent 28%), radial-gradient(circle at 82% 72%, rgba(110,176,145,0.1), transparent 24%)',
+        backgroundSize: '100% 30px, 100% 100%, 100% 100%',
+      }}
+    >
+      <div className="absolute left-3 top-0 h-full border-l-2 border-dashed border-[#dc7d61]/25 sm:left-6" />
+      <div className="absolute left-[7px] top-10 space-y-10 sm:left-[19px]" aria-hidden="true">
+        {[0, 1, 2, 3, 4].map((hole) => (
+          <span key={hole} className="block h-3 w-3 rounded-full border border-[#5b4636]/20 bg-brand-bg shadow-inner" />
+        ))}
+      </div>
+
+      <div className="absolute left-1/2 top-0 h-7 w-28 -translate-x-1/2 -translate-y-2 rotate-[-2deg] bg-[#f4cf86]/65 shadow-sm" aria-hidden="true" />
+      <PencilLine className="absolute right-7 top-7 h-6 w-6 rotate-12 text-[#d47752]/45" aria-hidden="true" />
+      <Sparkles className="absolute bottom-10 left-12 h-5 w-5 -rotate-12 text-[#d99a43]/50" aria-hidden="true" />
+
+      <div className="relative grid gap-8 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-center">
+        <div className="pl-5 sm:pl-3">
+          <div className="inline-flex rotate-[-1deg] items-center gap-2 rounded-[8px_12px_7px_10px] border border-dashed border-[#5b4636]/35 bg-white/55 px-3 py-1.5 text-xs font-bold tracking-[0.16em] text-[#7b5c45]">
+            <BookOpen className="h-4 w-4" />
+            旅行手帐 · 留白页
+          </div>
+          <h2 className="mt-5 rotate-[-0.5deg] font-serif text-3xl font-black tracking-wide text-[#493526] sm:text-4xl">这一页先留白</h2>
+          <p className="mt-4 max-w-2xl text-sm font-semibold leading-8 text-[#725b49] sm:text-base">
+            等你确认已经买票或录入真实行程，{companionName} 才会陪你开始出发倒计时，并把沿途发生的事整理成手帐。
+          </p>
+
+          <div className="mt-7 flex flex-wrap items-center gap-2 text-xs font-bold text-[#725b49] sm:text-sm">
+            <span className="rotate-[-1deg] rounded-[9px_12px_8px_11px] border border-[#dc8b67]/35 bg-[#fff3df]/85 px-3 py-2">确认成行</span>
+            <span className="text-[#d47752]">→</span>
+            <span className="rotate-[1deg] rounded-[12px_8px_11px_9px] border border-[#72a98d]/35 bg-[#eff8ef]/85 px-3 py-2">陪伴出发</span>
+            <span className="text-[#d47752]">→</span>
+            <span className="rotate-[-1deg] rounded-[8px_11px_9px_12px] border border-[#7aa5bd]/35 bg-[#eff7fa]/85 px-3 py-2">写成手帐</span>
+          </div>
+
+          <div className="mt-7 inline-flex rotate-[0.4deg] items-start gap-2 border-b-2 border-dashed border-[#d47752]/35 pb-2 text-xs font-semibold leading-6 text-[#876d58] sm:text-sm">
+            <PlaneTakeoff className="mt-0.5 h-4 w-4 shrink-0 text-[#d47752]" />
+            查询、收藏或点击预订不会自动写成旅行经历。
+          </div>
+        </div>
+
+        <div className="relative mx-auto w-40 rotate-[2deg] sm:w-44">
+          <div className="absolute inset-2 translate-x-2 translate-y-3 rounded-[35%_45%_38%_48%] border-2 border-dashed border-[#5b4636]/20 bg-white/70" />
+          <CompanionSprite kind={kind} pose="journal" className="relative aspect-square w-full rounded-[35%_45%_38%_48%] border-4 border-white shadow-lg" />
+          <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 -rotate-2 whitespace-nowrap rounded-full border border-[#5b4636]/15 bg-white px-3 py-1 text-xs font-black text-[#725b49] shadow-sm">
+            等你出发
+          </span>
+        </div>
+      </div>
+    </section>
   )
 }
 

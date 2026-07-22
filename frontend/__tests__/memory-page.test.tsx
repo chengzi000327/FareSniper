@@ -108,7 +108,9 @@ test('keeps fare preferences primary and separates recent attention from a confi
   expect(screen.getAllByText(/来自真实查询记录/)).toHaveLength(2)
 
   fireEvent.click(screen.getByRole('button', { name: '旅行手帐 0' }))
-  expect(screen.getByText('旅行手帐会在确认成行后出现')).toBeInTheDocument()
+  expect(screen.getByText('这一页先留白')).toBeInTheDocument()
+  expect(screen.getByText('查询、收藏或点击预订不会自动写成旅行经历。')).toBeInTheDocument()
+  expect(screen.getByAltText('云朵猫·journal')).toBeInTheDocument()
 
   expect(screen.queryByText(/已经去了青岛/)).not.toBeInTheDocument()
   expect(screen.queryByText(/已经购买/)).not.toBeInTheDocument()
@@ -192,7 +194,7 @@ test('shows neutral empty states instead of invented stories', async () => {
   fireEvent.click(screen.getByRole('button', { name: '最近关注 0' }))
   expect(screen.getByText('最近还没有关注的出行')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '旅行手帐 0' }))
-  expect(screen.getByText('旅行手帐会在确认成行后出现')).toBeInTheDocument()
+  expect(screen.getByText('这一页先留白')).toBeInTheDocument()
 
   expect(screen.queryByText(/海岛与松弛感/)).not.toBeInTheDocument()
   expect(screen.queryByText(/五一、端午、暑假/)).not.toBeInTheDocument()
