@@ -76,10 +76,10 @@ test("uses mobile type density without changing the original card sections", () 
   );
 
   expect(container.firstElementChild).toHaveClass("p-2.5");
-  expect(screen.getByRole("heading", { name: "北京" })).toHaveClass("text-[15px]");
-  expect(screen.getByText("¥500")).toHaveClass("text-[13px]");
-  expect(screen.getByText("平台展示价")).toHaveClass("text-[10px]");
-  expect(screen.getByText("平台未返回行李额度，请在预订页确认")).toHaveClass("text-[11px]");
+  expect(screen.getByRole("heading", { name: "北京" })).toHaveClass("text-sm");
+  expect(screen.getByText("¥500")).toHaveClass("text-xs");
+  expect(screen.getByText("平台展示价")).toHaveClass("text-[9px]");
+  expect(screen.getByText("平台未返回行李额度，请在预订页确认")).toHaveClass("text-[10px]");
   expect(screen.getByText("多端价格参考")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "监控价格" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "前往预订" })).toBeInTheDocument();

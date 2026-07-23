@@ -83,13 +83,13 @@ function MarkdownMessage({ content, compact = false }: { content: string; compac
   return (
     <>
       {compact && hasTable ? (
-        <div className="mb-2 flex items-center gap-2 text-[10px] font-bold text-brand-orange">
+        <div className="mb-1.5 flex items-center gap-2 text-[9px] font-bold text-brand-orange">
           <span className="h-px flex-1 bg-brand-orange/20" />
           航班列表可左右滑动
           <span className="h-px flex-1 bg-brand-orange/20" />
         </div>
       ) : null}
-      <div className={`prose prose-sm max-w-none break-words prose-headings:my-2 prose-p:my-1.5 prose-table:my-2 prose-th:px-2 prose-td:px-2 prose-li:my-0.5 prose-pre:my-2 ${compact && hasTable ? 'overflow-x-auto overscroll-x-contain [&_table]:min-w-[34rem] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap' : ''}`}>
+      <div className={`prose prose-sm max-w-none break-words ${compact ? '[&_h1]:text-sm [&_h2]:text-[13px] [&_h3]:text-xs [&_li]:text-[11px] [&_li]:leading-[1.55] [&_p]:text-[11px] [&_p]:leading-[1.6] [&_strong]:text-[11px] [&_table]:text-[10px] [&_td]:py-1 [&_th]:py-1' : ''} prose-headings:my-2 prose-p:my-1.5 prose-table:my-2 prose-th:px-2 prose-td:px-2 prose-li:my-0.5 prose-pre:my-2 ${compact && hasTable ? 'overflow-x-auto overscroll-x-contain [&_table]:min-w-[29rem] [&_th]:whitespace-nowrap [&_td]:whitespace-nowrap' : ''}`}>
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
           {content}
         </ReactMarkdown>
@@ -400,7 +400,7 @@ export function ChatPage({
 
       <div
         className={`thin-scrollbar flex-1 overflow-y-auto ${compact ? 'px-5 py-5' : 'px-5 py-8 sm:px-8 lg:px-[12vw] lg:py-12'} ${
-          messages.length === 0 ? 'flex flex-col justify-center' : 'space-y-8'
+          messages.length === 0 ? 'flex flex-col justify-center' : compact ? 'space-y-4' : 'space-y-8'
         }`}
       >
         {messages.length === 0 ? (
@@ -458,13 +458,13 @@ export function ChatPage({
           messages.map((message) => (
             <motion.div key={message.id} className={`flex flex-col ${message.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div
-                className={`max-w-3xl rounded-[28px] text-sm ${compact ? 'p-4' : 'p-5 sm:text-base'} ${
+                className={`max-w-3xl rounded-[28px] ${compact ? 'p-3 text-[12px] leading-5' : 'p-5 text-sm sm:text-base'} ${
                   message.role === 'user' ? 'rounded-tr-none bg-brand-text text-white' : 'rounded-tl-none border border-brand-text/5 bg-white shadow-sm'
                 }`}
               >
                 {'isSpecial' in message && message.isSpecial ? (
-                  <div className="flex items-center gap-2 font-bold text-brand-orange">
-                    <Radar className="h-4 w-4 animate-spin" />
+                  <div className={`flex items-center font-bold text-brand-orange ${compact ? 'gap-1.5 text-[11px]' : 'gap-2'}`}>
+                    <Radar className={`${compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} animate-spin`} />
                     <span>{message.content}</span>
                   </div>
                 ) : message.role === 'assistant' ? (
@@ -476,7 +476,7 @@ export function ChatPage({
                   <button
                     type="button"
                     onClick={() => void startSearch(message.retryQuery as string)}
-                    className="mt-3 inline-flex items-center gap-2 rounded-xl bg-brand-orange-light px-3 py-2 text-xs font-black text-brand-orange"
+                    className={`${compact ? 'mt-2 gap-1.5 px-2.5 py-1.5 text-[10px]' : 'mt-3 gap-2 px-3 py-2 text-xs'} inline-flex items-center rounded-xl bg-brand-orange-light font-black text-brand-orange`}
                   >
                     <Radar className="h-3.5 w-3.5" />
                     重新查询

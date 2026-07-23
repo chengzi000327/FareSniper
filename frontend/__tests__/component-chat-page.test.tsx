@@ -227,7 +227,7 @@ test("marks result tables as horizontally scrollable in compact chat", async () 
   });
 
   expect(await screen.findByText("航班列表可左右滑动")).toBeInTheDocument();
-  expect(screen.getByRole("table")).toBeInTheDocument();
+  expect(screen.getByRole("table").closest(".prose")).toHaveClass("[&_table]:text-[10px]");
 });
 
 test("aborts and settles the old assistant while ignoring its late events", async () => {

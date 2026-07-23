@@ -233,17 +233,17 @@ export function DiscoveryCardContent({
       <div className={`flex flex-col ${narrow ? 'gap-2' : 'gap-3'} ${narrow ? '' : 'sm:flex-row sm:items-start sm:justify-between'} ${narrow ? 'mb-2' : compact ? 'mb-2.5' : 'mb-5'}`}>
         <div className={`flex items-center ${narrow ? 'gap-2.5' : 'gap-3'}`}>
           <div
-            className={`flex items-center justify-center rounded-2xl bg-brand-orange/10 ${narrow ? 'h-9 w-9' : compact ? 'h-10 w-10' : 'h-12 w-12'}`}
+            className={`flex items-center justify-center rounded-2xl bg-brand-orange/10 ${narrow ? 'h-8 w-8' : compact ? 'h-10 w-10' : 'h-12 w-12'}`}
           >
-            <Plane className={`text-brand-orange ${narrow ? 'h-[18px] w-[18px]' : compact ? 'h-5 w-5' : 'h-6 w-6'}`} />
+            <Plane className={`text-brand-orange ${narrow ? 'h-4 w-4' : compact ? 'h-5 w-5' : 'h-6 w-6'}`} />
           </div>
           <div>
             <div className={`flex items-center ${narrow ? 'mb-0.5 gap-1.5' : 'mb-1 gap-2'}`}>
-              <h3 className={`font-black leading-none ${narrow ? 'text-[15px]' : compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{from}</h3>
+              <h3 className={`font-black leading-none ${narrow ? 'text-sm' : compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{from}</h3>
               <ArrowRight className={`${narrow ? 'h-3.5 w-3.5' : 'h-4 w-4'} text-brand-muted/60`} />
-              <h3 className={`font-black leading-none ${narrow ? 'text-[15px]' : compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{to}</h3>
+              <h3 className={`font-black leading-none ${narrow ? 'text-sm' : compact ? 'text-lg' : 'text-xl sm:text-2xl'}`}>{to}</h3>
             </div>
-            <p className={`font-medium text-brand-muted ${narrow ? 'text-[10px] leading-4' : compact ? 'text-xs' : 'text-sm'}`}>
+            <p className={`font-medium text-brand-muted ${narrow ? 'text-[9px] leading-4' : compact ? 'text-xs' : 'text-sm'}`}>
               {demo
                 ? '虚拟示例价 · 查询后更新'
                 : placeholder
@@ -256,10 +256,10 @@ export function DiscoveryCardContent({
         </div>
         {recommendScore ? (
           <div className={`flex flex-col items-start ${narrow ? '' : 'sm:items-end'}`}>
-            <div className={`${narrow ? 'mb-1 px-1.5 py-0.5 text-[9px]' : 'mb-2 px-2 py-1 text-[10px]'} rounded-md bg-green-500 font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20`}>
+            <div className={`${narrow ? 'mb-1 px-1.5 py-0.5 text-[8px]' : 'mb-2 px-2 py-1 text-[10px]'} rounded-md bg-green-500 font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20`}>
               发现指数
             </div>
-            <span className={`font-black leading-none tracking-tight text-green-500 ${narrow ? 'text-xl' : compact ? 'text-2xl' : 'text-3xl'}`}>
+            <span className={`font-black leading-none tracking-tight text-green-500 ${narrow ? 'text-lg' : compact ? 'text-2xl' : 'text-3xl'}`}>
               {recommendScore}
             </span>
           </div>
@@ -302,14 +302,14 @@ export function DiscoveryCardContent({
         />
         <Equal className={`hidden h-4 w-4 text-brand-muted/40 ${narrow ? '' : 'sm:block'}`} />
         <div className={`col-span-2 flex flex-col items-start border-t border-brand-text/5 ${narrow ? 'pt-2' : 'pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0'}`}>
-          <span className={`${narrow ? 'mb-0.5 text-[10px]' : 'mb-1 text-[11px] sm:text-xs'} font-bold text-brand-orange`}>
+          <span className={`${narrow ? 'mb-0.5 text-[9px]' : 'mb-1 text-[11px] sm:text-xs'} font-bold text-brand-orange`}>
             {demo
               ? '示例总价'
               : feeBreakdownComplete
                 ? '综合总价'
                 : '平台展示价'}
           </span>
-          <span className={`font-black leading-none text-brand-orange ${narrow ? 'text-xl' : compact ? 'text-2xl' : 'text-3xl'}`}>{money(computedTotal)}</span>
+          <span className={`font-black leading-none text-brand-orange ${narrow ? 'text-lg' : compact ? 'text-2xl' : 'text-3xl'}`}>{money(computedTotal)}</span>
         </div>
       </div>
 
@@ -318,7 +318,7 @@ export function DiscoveryCardContent({
           <div className={`flex shrink-0 items-center justify-center rounded-full ${narrow ? 'h-8 w-8' : 'h-9 w-9'} ${hasBaggage === true ? 'bg-green-50' : 'bg-brand-orange/5'}`}>
             <Briefcase className={`${narrow ? 'h-3.5 w-3.5' : 'h-4 w-4'} ${hasBaggage === true ? 'text-green-500' : 'text-brand-orange'}`} />
           </div>
-          <span className={`${narrow ? 'text-[11px] leading-[1.45]' : 'text-sm leading-6'} font-medium ${hasFreeBaggage ? 'text-green-600' : 'text-brand-orange'}`}>
+          <span className={`${narrow ? 'text-[10px] leading-[1.5]' : 'text-sm leading-6'} font-medium ${hasFreeBaggage ? 'text-green-600' : 'text-brand-orange'}`}>
             {hasBaggage === null
               ? baggageFee !== null && baggageFee > 0
                 ? '行李加购费 ' + money(baggageFee) + '，已计入总价，行李额以预订页为准'
@@ -339,7 +339,7 @@ export function DiscoveryCardContent({
 
         <div className={`flex items-start rounded-2xl ${narrow ? 'gap-2 px-3 py-2' : 'gap-3 px-4 py-2'} ${hasRealtimeWinner ? 'border border-green-100/60 bg-green-50/60' : 'border border-brand-text/5 bg-brand-bg/40'}`}>
           <ShieldCheck className={`${narrow ? 'h-3.5 w-3.5' : 'mt-0.5 h-4 w-4'} shrink-0 text-green-600`} />
-          <p className={`${narrow ? 'text-[11px] leading-[1.5]' : 'text-sm leading-6'} ${hasRealtimeWinner ? 'text-green-800' : 'text-brand-muted'}`}>
+          <p className={`${narrow ? 'text-[10px] leading-[1.55]' : 'text-sm leading-6'} ${hasRealtimeWinner ? 'text-green-800' : 'text-brand-muted'}`}>
             {demo ? (
               '此处为虚拟示例价格，不参与实时最低价判断；进入对话查询后会替换为真实来源结果。'
             ) : hasRealtimeWinner ? (
@@ -409,20 +409,20 @@ export function DiscoveryCardContent({
 
             return (
             <div key={price.id} className={`flex items-center justify-between ${demo || lowest ? 'opacity-100' : 'opacity-45'}`}>
-              <span className={`${narrow ? 'text-[11px]' : 'text-sm'} font-medium text-brand-text`}>{price.name}</span>
+              <span className={`${narrow ? 'text-[10px]' : 'text-sm'} font-medium text-brand-text`}>{price.name}</span>
               <div className="flex items-center gap-2">
-                {lowest && <span className="rounded bg-brand-orange px-1.5 py-0.5 text-[10px] font-bold text-white">最低</span>}
+                {lowest && <span className={`rounded bg-brand-orange px-1.5 py-0.5 font-bold text-white ${narrow ? 'text-[8px]' : 'text-[10px]'}`}>最低</span>}
                 {price.price === null && price.provider_status === 'success' && price.data_freshness === 'fresh' && price.price_status === 'view_live_price' && isExpiryCurrent(price.expires_at, expiryNow) && isHttpsUrl(price.url) ? (
                   <a
                     href={price.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className={`${narrow ? 'text-xs' : 'text-sm sm:text-base'} font-black text-brand-orange`}
+                    className={`${narrow ? 'text-[11px]' : 'text-sm sm:text-base'} font-black text-brand-orange`}
                   >
                     查看实时价
                   </a>
                 ) : (
-                  <span className={`${narrow ? 'text-xs' : 'text-sm sm:text-base'} font-black ${lowest ? 'text-brand-orange' : 'text-brand-text'}`}>
+                  <span className={`${narrow ? 'text-[11px]' : 'text-sm sm:text-base'} font-black ${lowest ? 'text-brand-orange' : 'text-brand-text'}`}>
                     {displayedValue}
                   </span>
                 )}
@@ -438,18 +438,18 @@ export function DiscoveryCardContent({
           <button
             type="button"
             onClick={onSearch}
-            className={`flex flex-1 items-center justify-center rounded-2xl bg-brand-orange font-bold text-white transition hover:bg-brand-text ${narrow ? 'gap-1.5 px-3 py-2 text-xs' : 'gap-2 px-4 py-2 text-sm'}`}
+            className={`flex flex-1 items-center justify-center rounded-2xl bg-brand-orange font-bold text-white transition hover:bg-brand-text ${narrow ? 'gap-1.5 px-3 py-2 text-[11px]' : 'gap-2 px-4 py-2 text-sm'}`}
           >
-            <Plane className="h-4 w-4" />
+            <Plane className={narrow ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
             在对话中查询
           </button>
         ) : null}
         <button
           type="button"
           onClick={onMonitorPrice}
-          className={`flex flex-1 items-center justify-center rounded-2xl border border-brand-text/10 bg-white font-bold text-brand-text transition hover:bg-brand-orange/5 ${narrow ? 'gap-1.5 px-3 py-2 text-xs' : 'gap-2 px-4 py-2 text-sm'}`}
+          className={`flex flex-1 items-center justify-center rounded-2xl border border-brand-text/10 bg-white font-bold text-brand-text transition hover:bg-brand-orange/5 ${narrow ? 'gap-1.5 px-3 py-2 text-[11px]' : 'gap-2 px-4 py-2 text-sm'}`}
         >
-          <Bell className="h-4 w-4" />
+          <Bell className={narrow ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
           监控价格
         </button>
         {safeBookingUrl ? (
@@ -458,19 +458,19 @@ export function DiscoveryCardContent({
             onClick={trackPurchaseJump}
             target="_blank"
             rel="noopener noreferrer"
-            className={`group flex flex-1 items-center justify-center rounded-2xl bg-brand-text font-bold text-white shadow-card transition hover:bg-brand-orange ${narrow ? 'gap-1.5 px-3 py-2 text-xs' : 'gap-2 px-4 py-2 text-sm'}`}
+            className={`group flex flex-1 items-center justify-center rounded-2xl bg-brand-text font-bold text-white shadow-card transition hover:bg-brand-orange ${narrow ? 'gap-1.5 px-3 py-2 text-[11px]' : 'gap-2 px-4 py-2 text-sm'}`}
           >
             前往预订
-            <ExternalLink className="h-4 w-4 transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            <ExternalLink className={`${narrow ? 'h-3.5 w-3.5' : 'h-4 w-4'} transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5`} />
           </a>
         ) : (
           <button
             type="button"
             disabled
-            className={`group flex flex-1 cursor-not-allowed items-center justify-center rounded-2xl bg-brand-text font-bold text-white opacity-50 shadow-card ${narrow ? 'gap-1.5 px-3 py-2 text-xs' : 'gap-2 px-4 py-2 text-sm'}`}
+            className={`group flex flex-1 cursor-not-allowed items-center justify-center rounded-2xl bg-brand-text font-bold text-white opacity-50 shadow-card ${narrow ? 'gap-1.5 px-3 py-2 text-[11px]' : 'gap-2 px-4 py-2 text-sm'}`}
           >
             前往预订
-            <ExternalLink className="h-4 w-4" />
+            <ExternalLink className={narrow ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
           </button>
         )}
       </div>
@@ -504,8 +504,8 @@ function PriceBlock({
 }) {
   return (
     <div className="flex flex-col items-center">
-      <span className={`${narrow ? 'mb-0.5 text-[10px] leading-4' : `mb-1 ${compact ? 'text-[11px]' : 'text-xs'}`} text-brand-muted`}>{label}</span>
-      <span className={`font-bold ${highlight ? 'text-brand-orange' : 'text-brand-text'} ${narrow ? 'text-[13px]' : compact ? 'text-sm' : 'text-base'}`}>{value}</span>
+      <span className={`${narrow ? 'mb-0.5 text-[9px] leading-4' : `mb-1 ${compact ? 'text-[11px]' : 'text-xs'}`} text-brand-muted`}>{label}</span>
+      <span className={`font-bold ${highlight ? 'text-brand-orange' : 'text-brand-text'} ${narrow ? 'text-xs' : compact ? 'text-sm' : 'text-base'}`}>{value}</span>
     </div>
   )
 }
