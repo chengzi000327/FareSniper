@@ -584,8 +584,17 @@ export const alertsApi = {
     depart_date: string;
     target_price: number;
   }) => http("/api/alerts", { method: "POST", body: JSON.stringify(body) }),
-  list: () => http<{ alerts: unknown[] }>("/api/alerts"),
+  list: () => http<{ alerts: AlertItemDto[] }>("/api/alerts"),
 };
+
+export interface AlertItemDto {
+  id: string;
+  origin: string;
+  destination: string;
+  depart_date: string;
+  target_price: number;
+  status: "active" | "triggered" | string;
+}
 
 export const authApi = {
   status: async () => {

@@ -4,9 +4,10 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import MobilePage from '@/app/mobile/page'
 import { MobileAppPage } from '@/components/mobile-app-page'
 
-const { getMemory, listRecommendations, patchMemory, authStatus, requestOtp, verifyOtp } = vi.hoisted(() => ({
+const { getMemory, listRecommendations, listAlerts, patchMemory, authStatus, requestOtp, verifyOtp } = vi.hoisted(() => ({
   getMemory: vi.fn(),
   listRecommendations: vi.fn(),
+  listAlerts: vi.fn(),
   patchMemory: vi.fn(),
   authStatus: vi.fn(),
   requestOtp: vi.fn(),
@@ -16,6 +17,7 @@ const { getMemory, listRecommendations, patchMemory, authStatus, requestOtp, ver
 vi.mock('@/lib/api', () => ({
   memoryApi: { get: getMemory, patch: patchMemory, del: vi.fn() },
   recApi: { list: listRecommendations },
+  alertsApi: { list: listAlerts },
   authApi: { status: authStatus, requestOtp, verify: verifyOtp },
   api: { getMemory },
   searchApi: { stream: vi.fn() },
@@ -24,6 +26,7 @@ vi.mock('@/lib/api', () => ({
 beforeEach(() => {
   getMemory.mockReset()
   listRecommendations.mockReset()
+  listAlerts.mockReset()
   patchMemory.mockReset()
   authStatus.mockReset()
   requestOtp.mockReset()
@@ -48,6 +51,9 @@ beforeEach(() => {
     cards: [{ id: 'route-1', title: '上海 → 三亚', query_hint: '下周上海去三亚', reason: '进入对话获取实时价格' }],
     has_more: false,
     next_offset: 1,
+  })
+  listAlerts.mockResolvedValue({
+    alerts: [{ id: 'a1', origin: 'BJS', destination: 'SHA', depart_date: '2026-08-01', target_price: 500, status: 'active' }],
   })
 })
 
@@ -130,6 +136,10 @@ test('shows the real guest account state when phone login is not configured', as
   expect(await screen.findByText('本机游客账号')).toBeInTheDocument()
   expect(screen.getByText('手机号登录将在短信服务配置后开放')).toBeInTheDocument()
   expect(screen.getByText('账号编号 · BILETEST')).toBeInTheDocument()
+  expect(screen.getByText('1 条提醒已保存到后端')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /价格提醒/ }))
+  expect(screen.getByRole('region', { name: '手机端价格提醒列表' })).toBeInTheDocument()
+  expect(screen.getByText('BJS → SHA')).toBeInTheDocument()
 })
 
 test('binds a guest account by phone when SMS login is available', async () => {

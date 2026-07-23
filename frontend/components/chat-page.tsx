@@ -8,7 +8,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeSanitize from 'rehype-sanitize'
 import { DiscoveryCardContent } from '@/components/discovery-card-content'
 import { RecommendationCard } from '@/components/shared-components'
-import { recApi, searchApi } from '@/lib/api'
+import { alertsApi, recApi, searchApi } from '@/lib/api'
 import { formatCurrency } from '@/lib/currency'
 import { dealToCardProps } from '@/lib/mappers'
 import type { DiscoveryCardContentProps } from '@/components/discovery-card-content'
@@ -105,6 +105,7 @@ export function ChatPage({
   assistantName = '旅伴',
   recentQuery,
   onOpenExplore,
+  onAlertCreated,
 }: {
   initialQuery?: string | null
   onInitialQueryConsumed?: () => void
@@ -112,11 +113,13 @@ export function ChatPage({
   assistantName?: string
   recentQuery?: string | null
   onOpenExplore?: () => void
+  onAlertCreated?: () => void
 }) {
   const [messages, setMessages] = React.useState<Message[]>([])
   const [inputValue, setInputValue] = React.useState('')
   const [sessionId, setSessionId] = React.useState<string | null>(null)
   const [recommendedQuestions, setRecommendedQuestions] = React.useState<string[]>([])
+  const [alertCard, setAlertCard] = React.useState<DiscoveryCardContentProps | null>(null)
   const activeSearchRef = React.useRef<ActiveSearch | null>(null)
   const sessionIdRef = React.useRef(sessionId)
   const pendingFollowUpRef = React.useRef<string | null>(null)
@@ -376,7 +379,7 @@ export function ChatPage({
   ]
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="relative flex h-full flex-col overflow-hidden">
       <div className={`flex items-center justify-between ${compact ? 'px-5 pt-[max(1.25rem,env(safe-area-inset-top))]' : 'px-5 pt-6 sm:px-8 lg:px-12 lg:pt-8'}`}>
         <div>
           {compact ? <div className="text-[9px] font-black tracking-[0.12em] text-brand-orange">你的机票发现与出行陪伴 Agent</div> : null}
@@ -483,7 +486,12 @@ export function ChatPage({
 
               {'hasCard' in message && message.hasCard && message.cardData ? (
                 <div className={`${compact ? 'mt-3' : 'mt-4'} w-full max-w-2xl overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card`}>
-                  <DiscoveryCardContent {...message.cardData} compact={compact || message.cardData.compact} narrow={compact} />
+                  <DiscoveryCardContent
+                    {...message.cardData}
+                    compact={compact || message.cardData.compact}
+                    narrow={compact}
+                    onMonitorPrice={() => setAlertCard(message.cardData ?? null)}
+                  />
                 </div>
               ) : null}
             </motion.div>
@@ -527,6 +535,98 @@ export function ChatPage({
           </div>
         ) : null}
       </div>
+
+      {alertCard ? (
+        <PriceAlertDialog
+          card={alertCard}
+          compact={compact}
+          onClose={() => setAlertCard(null)}
+          onCreated={onAlertCreated}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function PriceAlertDialog({
+  card,
+  compact,
+  onClose,
+  onCreated,
+}: {
+  card: DiscoveryCardContentProps
+  compact: boolean
+  onClose: () => void
+  onCreated?: () => void
+}) {
+  const currentPrice = card.totalPrice ?? card.basePrice ?? null
+  const [targetPrice, setTargetPrice] = React.useState(currentPrice ? String(Math.round(currentPrice)) : '')
+  const [state, setState] = React.useState<'idle' | 'saving' | 'success'>('idle')
+  const [error, setError] = React.useState('')
+
+  const createAlert = async () => {
+    const target = Number(targetPrice)
+    if (!card.date) {
+      setError('这条航班缺少出发日期，暂时不能创建提醒。')
+      return
+    }
+    if (card.currency !== 'CNY') {
+      setError('当前价格提醒先支持人民币报价。')
+      return
+    }
+    if (!Number.isInteger(target) || target <= 0) {
+      setError('请输入正确的目标价格。')
+      return
+    }
+
+    setState('saving')
+    setError('')
+    try {
+      await alertsApi.create({
+        origin: card.originCode ?? card.from,
+        destination: card.destinationCode ?? card.to,
+        depart_date: card.date,
+        target_price: target,
+      })
+      setState('success')
+      onCreated?.()
+    } catch {
+      setState('idle')
+      setError('提醒没有保存成功，请稍后再试。')
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-50 flex items-end justify-center bg-brand-text/30 p-3 backdrop-blur-sm sm:items-center sm:p-6" role="dialog" aria-modal="true" aria-label="创建价格提醒">
+      <section className={`w-full max-w-md rounded-[28px] bg-white shadow-card ${compact ? 'p-4' : 'p-6'}`}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="text-[10px] font-black tracking-[0.16em] text-brand-orange">接入后端价格监控</div>
+            <h2 className="mt-1 text-xl font-black text-brand-text">{card.from} → {card.to}</h2>
+            <p className="mt-1 text-xs text-brand-muted">{card.date ?? '日期待确认'} · 当前展示 {formatCurrency(currentPrice, card.currency)}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="关闭价格提醒" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-bg text-brand-muted">×</button>
+        </div>
+
+        {state === 'success' ? (
+          <div className="mt-5 rounded-2xl bg-emerald-50 px-4 py-5 text-center">
+            <div className="text-base font-black text-emerald-800">提醒已经保存到你的账号</div>
+            <p className="mt-1 text-xs leading-5 text-emerald-700">Mobile 与网页端都会读取到这条提醒。</p>
+            <button type="button" onClick={onClose} className="mt-4 h-10 w-full rounded-xl bg-brand-text text-xs font-black text-white">完成</button>
+          </div>
+        ) : (
+          <>
+            <label htmlFor="alert-target-price" className="mt-5 block text-xs font-black text-brand-text">目标价格（人民币）</label>
+            <div className="mt-2 flex h-12 items-center rounded-xl border border-brand-text/10 bg-brand-bg px-3">
+              <span className="text-sm font-black text-brand-muted">¥</span>
+              <input id="alert-target-price" value={targetPrice} onChange={(event) => setTargetPrice(event.target.value)} inputMode="numeric" className="min-w-0 flex-1 bg-transparent px-2 text-base font-black text-brand-text" />
+            </div>
+            <p className="mt-2 text-[11px] leading-5 text-brand-muted">后端会按这条航线和日期持续检查，达到目标价后触发提醒。</p>
+            {error ? <p className="mt-3 text-xs font-bold text-red-700">{error}</p> : null}
+            <button type="button" disabled={state === 'saving'} onClick={() => void createAlert()} className="mt-4 h-11 w-full rounded-xl bg-brand-orange text-sm font-black text-white disabled:opacity-45">{state === 'saving' ? '正在保存…' : '创建价格提醒'}</button>
+          </>
+        )}
+      </section>
     </div>
   )
 }

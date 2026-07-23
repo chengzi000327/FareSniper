@@ -85,6 +85,8 @@ function isExpiryCurrent(
 export type DiscoveryCardContentProps = {
   from: string
   to: string
+  originCode?: string
+  destinationCode?: string
   date?: string
   flightNo?: string
   airline?: string

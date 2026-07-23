@@ -27,8 +27,8 @@ import {
 } from 'lucide-react'
 import { ChatPage } from '@/components/chat-page'
 import { formatCurrency } from '@/lib/currency'
-import { authApi, memoryApi, recApi } from '@/lib/api'
-import type { MemoryItemDto, QueryHistoryItemDto, RecCardDto } from '@/lib/api'
+import { alertsApi, authApi, memoryApi, recApi } from '@/lib/api'
+import type { AlertItemDto, MemoryItemDto, QueryHistoryItemDto, RecCardDto } from '@/lib/api'
 
 type MobileTab = 'explore' | 'chat' | 'memory' | 'profile'
 
@@ -244,6 +244,7 @@ export function MobileAppPage() {
   const [chatQuery, setChatQuery] = React.useState<string | null>(null)
   const [memory, setMemory] = React.useState<MobileMemory>({ memories: [], query_history: [] })
   const [recommendations, setRecommendations] = React.useState<RecCardDto[]>([])
+  const [alerts, setAlerts] = React.useState<AlertItemDto[]>([])
   const [loading, setLoading] = React.useState(true)
   const [memoryState, setMemoryState] = React.useState<'loading' | 'ready' | 'error'>('loading')
   const [account, setAccount] = React.useState<MobileAccount>({ userId: null, phone: null, loggedIn: false })
@@ -256,7 +257,8 @@ export function MobileAppPage() {
     Promise.allSettled([
       memoryApi.get(),
       recApi.list({ limit: 4, offset: 0 }),
-    ]).then(([memoryResult, recommendationResult]) => {
+      alertsApi.list(),
+    ]).then(([memoryResult, recommendationResult, alertsResult]) => {
       if (!active) return
       if (memoryResult.status === 'fulfilled') {
         setMemory({
@@ -270,6 +272,9 @@ export function MobileAppPage() {
       }
       if (recommendationResult.status === 'fulfilled') {
         setRecommendations(recommendationResult.value.cards ?? [])
+      }
+      if (alertsResult.status === 'fulfilled') {
+        setAlerts(alertsResult.value.alerts ?? [])
       }
       setLoading(false)
     })
@@ -349,12 +354,14 @@ export function MobileAppPage() {
               onOpenExplore={() => setActiveTab('explore')}
               initialQuery={chatQuery}
               onInitialQueryConsumed={() => setChatQuery(null)}
+              onAlertCreated={loadData}
             />
           ) : activeTab === 'memory' ? (
             <MobileMemoryPage memory={memory} loading={loading} onRefresh={loadData} />
           ) : (
             <MobileProfile
               memory={memory}
+              alerts={alerts}
               account={account}
               phoneLoginAvailable={phoneLoginAvailable}
               onAccountChanged={accountChanged}
@@ -928,6 +935,7 @@ function MobileEmpty({ title, detail }: { title: string; detail: string }) {
 
 function MobileProfile({
   memory,
+  alerts,
   account,
   phoneLoginAvailable,
   onAccountChanged,
@@ -936,6 +944,7 @@ function MobileProfile({
   onOpenChat,
 }: {
   memory: MobileMemory
+  alerts: AlertItemDto[]
   account: MobileAccount
   phoneLoginAvailable: boolean
   onAccountChanged: () => void
@@ -945,6 +954,7 @@ function MobileProfile({
 }) {
   const companion = companionFromMemory(memory.memories)
   const [showLogin, setShowLogin] = React.useState(false)
+  const [showAlerts, setShowAlerts] = React.useState(false)
   return (
     <div className="thin-scrollbar h-full overflow-y-auto px-5 pb-8 pt-[max(1.25rem,env(safe-area-inset-top))]">
       <div className="text-[11px] font-black tracking-[0.2em] text-brand-orange">账号与旅伴</div>
@@ -989,8 +999,26 @@ function MobileProfile({
         <ProfileRow icon={<Heart />} title="管理机票偏好" detail="添加、修改或忘记预算和出行习惯" onClick={onOpenMemory} />
         <ProfileRow icon={<BookHeart />} title="查看旅行手帐" detail="确认成行后才会写入真实旅行" onClick={onOpenMemory} />
         <ProfileRow icon={<MessageCircle />} title="继续查票对话" detail="接着当前上下文补充时间和条件" onClick={onOpenChat} />
-        <ProfileRow icon={<Bell />} title="价格提醒" detail="只在真实目标价命中时提醒" />
+        <ProfileRow icon={<Bell />} title="价格提醒" detail={alerts.length ? `${alerts.length} 条提醒已保存到后端` : '还没有创建价格提醒'} onClick={() => setShowAlerts((value) => !value)} />
       </div>
+
+      {showAlerts ? (
+        <section className="mt-4 space-y-2 rounded-[24px] bg-white p-4 shadow-sm" aria-label="手机端价格提醒列表">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-black text-brand-text">后端价格提醒</h2>
+            <span className="text-[10px] font-bold text-brand-orange">与网页端同步</span>
+          </div>
+          {alerts.length ? alerts.map((alert) => (
+            <div key={alert.id} className="flex items-center justify-between gap-3 rounded-2xl bg-brand-bg px-3 py-3">
+              <div className="min-w-0">
+                <div className="text-xs font-black text-brand-text">{alert.origin} → {alert.destination}</div>
+                <div className="mt-1 text-[10px] text-brand-muted">{alert.depart_date} · {alert.status === 'triggered' ? '已触发' : '监控中'}</div>
+              </div>
+              <div className="shrink-0 text-sm font-black text-brand-orange">≤ ¥{alert.target_price}</div>
+            </div>
+          )) : <p className="rounded-2xl bg-brand-bg px-4 py-5 text-center text-xs leading-5 text-brand-muted">从航班卡点击“监控价格”后，提醒会出现在这里。</p>}
+        </section>
+      ) : null}
     </div>
   )
 }

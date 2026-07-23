@@ -5,6 +5,8 @@ import { ChatPage } from "@/components/chat-page";
 import { searchApi } from "@/lib/api";
 import type { ChatSearchResponse, DealCardDto, PriceItem, SearchStreamEvent } from "@/lib/api";
 
+const { createAlertMock } = vi.hoisted(() => ({ createAlertMock: vi.fn() }));
+
 vi.mock("@/lib/api", () => ({
   searchApi: {
     search: vi.fn(),
@@ -16,6 +18,7 @@ vi.mock("@/lib/api", () => ({
       cards: [{ query_hint: "北京去上海" }],
     }),
   },
+  alertsApi: { create: createAlertMock },
 }));
 
 type StreamCall = {
@@ -120,12 +123,37 @@ function submit(message: string) {
 beforeEach(() => {
   calls.length = 0;
   streamMock.mockReset();
+  createAlertMock.mockReset();
+  createAlertMock.mockResolvedValue({ id: "alert_test" });
   streamMock.mockImplementation(
     (_body, onEvent, signal) =>
       new Promise<ChatSearchResponse | null>((resolve, reject) => {
         calls.push({ onEvent, signal, resolve, reject });
       })
   );
+});
+
+test("creates a backend price alert from a flight card", async () => {
+  render(<ChatPage compact />);
+  await send("北京到上海");
+
+  await act(async () => {
+    calls[0].onEvent(complete(1, response("已找到航班")));
+    calls[0].resolve(response("已找到航班"));
+  });
+
+  fireEvent.click(await screen.findByRole("button", { name: "监控价格" }));
+  expect(screen.getByRole("dialog", { name: "创建价格提醒" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("目标价格（人民币）"), { target: { value: "500" } });
+  fireEvent.click(screen.getByRole("button", { name: "创建价格提醒" }));
+
+  await waitFor(() => expect(createAlertMock).toHaveBeenCalledWith({
+    origin: "BJS",
+    destination: "SHA",
+    depart_date: "2026-08-01",
+    target_price: 500,
+  }));
+  expect(await screen.findByText("提醒已经保存到你的账号")).toBeInTheDocument();
 });
 
 test("chat page updates its card when results arrive before the stream completes", async () => {

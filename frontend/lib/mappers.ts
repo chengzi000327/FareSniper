@@ -17,6 +17,8 @@ export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
   const card: NullableDiscoveryCardContentProps = {
     from: deal.origin_city,
     to: deal.destination_city,
+    originCode: deal.origin_code,
+    destinationCode: deal.destination_code,
     date: deal.depart_date,
     flightNo: deal.flight_no,
     airline: deal.airline,
