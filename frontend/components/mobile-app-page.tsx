@@ -9,6 +9,7 @@ import {
   ChevronRight,
   Clock3,
   Compass,
+  Gift,
   Heart,
   LockKeyhole,
   MapPin,
@@ -102,6 +103,20 @@ const MEMORY_CODE_LABELS = Object.fromEntries(
 const POSE_POSITION: Record<CompanionPose, [number, number]> = {
   idle: [0, 0],
   journal: [2, 1],
+}
+const MOBILE_DESTINATION_IMAGES: Record<string, string> = {
+  SHA: '/images/destinations/SHA.jpg',
+  SYX: '/images/destinations/SYX.jpg',
+  CTU: '/images/destinations/CTU.jpg',
+  CAN: '/images/destinations/CAN.jpg',
+  XMN: '/images/destinations/XMN.jpg',
+}
+const MOBILE_DESTINATION_CODES: Record<string, string> = {
+  上海: 'SHA',
+  三亚: 'SYX',
+  成都: 'CTU',
+  广州: 'CAN',
+  厦门: 'XMN',
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -239,6 +254,15 @@ function recommendationPrice(card: RecCardDto) {
   return formatCurrency(deal.total_price ?? deal.price, deal.currency)
 }
 
+function recommendationImage(card: RecCardDto) {
+  const destination = card.preview_deal?.destination_city
+    ?? recommendationTitle(card).split('→').at(-1)?.trim()
+    ?? ''
+  const code = card.preview_deal?.destination_code ?? MOBILE_DESTINATION_CODES[destination] ?? destination
+  return MOBILE_DESTINATION_IMAGES[code]
+    ?? `https://picsum.photos/seed/${encodeURIComponent(code || destination || 'trip')}/640/760`
+}
+
 export function MobileAppPage() {
   const [activeTab, setActiveTab] = React.useState<MobileTab>('chat')
   const [chatQuery, setChatQuery] = React.useState<string | null>(null)
@@ -256,7 +280,7 @@ export function MobileAppPage() {
     setLoading(true)
     Promise.allSettled([
       memoryApi.get(),
-      recApi.list({ limit: 4, offset: 0 }),
+      recApi.list({ limit: 6, offset: 0 }),
       alertsApi.list(),
     ]).then(([memoryResult, recommendationResult, alertsResult]) => {
       if (!active) return
@@ -577,6 +601,7 @@ function MobileExploreHome({
   onOpenMemory: () => void
 }) {
   const [query, setQuery] = React.useState('')
+  const [blindPick, setBlindPick] = React.useState<RecCardDto | null>(null)
   const companion = companionFromMemory(memory.memories)
   const preferenceCount = memory.memories.filter((item) => !INTERNAL_MEMORY_FIELDS.has(item.field)).length
   const ideaCount = explicitIdeaCount(memory.memories)
@@ -585,83 +610,104 @@ function MobileExploreHome({
     event.preventDefault()
     onSearch(query)
   }
+  const drawDestination = () => {
+    if (!recommendations.length) return
+    setBlindPick(recommendations[Math.floor(Math.random() * recommendations.length)])
+  }
 
   return (
-    <div className="thin-scrollbar h-full overflow-y-auto px-5 pb-8 pt-[max(1.25rem,env(safe-area-inset-top))]">
+    <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-8 pt-[max(1.1rem,env(safe-area-inset-top))]">
       <header className="flex items-center justify-between">
         <div>
           <div className="text-[9px] font-black tracking-[0.12em] text-brand-orange">你的机票发现与出行陪伴 Agent</div>
-          <h1 className="mt-1 font-serif text-3xl font-black text-brand-text">今天想去哪儿？</h1>
+          <h1 className="mt-1 font-serif text-[2rem] font-black leading-tight text-brand-text">探索灵感</h1>
         </div>
-        <button type="button" aria-label="查看提醒" className="grid h-11 w-11 place-items-center rounded-2xl border border-brand-text/8 bg-white text-brand-text shadow-sm">
-          <Bell className="h-5 w-5" />
+        <button type="button" aria-label="查看提醒" className="grid h-10 w-10 place-items-center rounded-2xl border border-brand-text/8 bg-white text-brand-text shadow-sm">
+          <Bell className="h-4 w-4" />
         </button>
       </header>
 
-      <section className="relative mt-5 overflow-hidden rounded-[30px] bg-brand-text p-5 text-white shadow-card">
-        <div className="absolute -right-8 -top-10 h-36 w-36 rounded-full bg-brand-orange/35 blur-2xl" />
-        <div className="relative grid grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-4">
-          <div>
-            <div className="text-xs font-bold text-white/65">你的查价旅伴</div>
-            <h2 className="mt-1 text-2xl font-black">{companion.name} 在陪你找低价</h2>
-            <p className="mt-2 text-xs leading-6 text-white/70">记住真实偏好，但不会把一次搜索当成长期意愿。</p>
+      <section className="relative mt-4 overflow-hidden rounded-[24px] bg-brand-text p-3.5 text-white shadow-card">
+        <div className="absolute -right-6 -top-8 h-24 w-24 rounded-full bg-brand-orange/35 blur-2xl" />
+        <div className="relative flex items-center gap-3">
+          <div className="w-14 shrink-0"><MobileCompanion kind={companion.kind} /></div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-bold text-white/55">和 {companion.name} 一起逛逛</div>
+            <h2 className="mt-0.5 text-base font-black">从真实推荐里发现下一程</h2>
+            <div className="mt-1.5 flex gap-3 text-[9px] font-bold text-white/60">
+              <span>{preferenceCount} 项偏好</span>
+              <span>{ideaCount} 个关注</span>
+              <span>{memory.query_history.length} 次查询</span>
+            </div>
           </div>
-          <MobileCompanion kind={companion.kind} />
-        </div>
-        <div className="relative mt-4 flex gap-2 text-[11px] font-bold text-white/75">
-          <span className="rounded-full bg-white/10 px-3 py-1.5">{preferenceCount} 项偏好</span>
-          <span className="rounded-full bg-white/10 px-3 py-1.5">{ideaCount} 个明确关注</span>
-          <span className="rounded-full bg-white/10 px-3 py-1.5">{memory.query_history.length} 次查询</span>
         </div>
       </section>
 
-      <form onSubmit={submit} className="mt-5 rounded-[28px] border border-brand-orange/15 bg-white p-4 shadow-[0_18px_50px_-32px_rgba(67,44,27,0.35)]">
-        <label htmlFor="mobile-flight-query" className="flex items-center gap-2 text-xs font-black text-brand-orange">
-          <Search className="h-4 w-4" />
-          用一句话告诉我出发计划
-        </label>
-        <div className="mt-3 flex items-center gap-2">
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_5.25rem] gap-2.5">
+        <form onSubmit={submit} className="flex min-w-0 items-center gap-2 rounded-[20px] border border-brand-orange/15 bg-white p-2.5 pl-3 shadow-sm">
+          <Search className="h-4 w-4 shrink-0 text-brand-orange" />
           <input
             id="mobile-flight-query"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="例如：下周五上海去三亚，预算 800"
-            className="min-w-0 flex-1 bg-transparent py-2 text-sm font-semibold text-brand-text placeholder:font-normal placeholder:text-brand-muted/65"
+            aria-label="探索页出发计划"
+            placeholder="说一个想去的地方"
+            className="min-w-0 flex-1 bg-transparent py-1 text-xs font-semibold text-brand-text placeholder:font-normal placeholder:text-brand-muted/65"
           />
-          <button type="submit" aria-label="开始查询" disabled={!query.trim()} className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-orange text-white disabled:opacity-35">
-            <Send className="h-5 w-5" />
+          <button type="submit" aria-label="开始查询" disabled={!query.trim()} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-orange text-white disabled:opacity-35">
+            <Send className="h-4 w-4" />
           </button>
-        </div>
-      </form>
+        </form>
+        <button type="button" onClick={drawDestination} disabled={!recommendations.length} className="flex flex-col items-center justify-center rounded-[20px] bg-[#fff0dc] text-[10px] font-black text-brand-orange disabled:opacity-40">
+          <Gift className="mb-1 h-4 w-4" />
+          盲盒抽
+        </button>
+      </div>
 
-      <section className="mt-7">
+      {blindPick ? (
+        <section aria-label="盲盒结果" className="mt-3 flex items-center gap-3 rounded-[20px] border border-dashed border-brand-orange/35 bg-white px-3 py-2.5">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-orange-light text-brand-orange"><Sparkles className="h-4 w-4" /></div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[9px] font-black text-brand-orange">今天的盲盒目的地</div>
+            <div className="truncate text-xs font-black text-brand-text">{recommendationTitle(blindPick)}</div>
+          </div>
+          <button type="button" onClick={() => onSearch(blindPick.query_hint || `查询${recommendationTitle(blindPick)}的机票`)} className="rounded-xl bg-brand-text px-3 py-2 text-[10px] font-black text-white">去查票</button>
+        </section>
+      ) : null}
+
+      <section className="mt-5">
         <div className="flex items-end justify-between">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold text-brand-orange"><Compass className="h-4 w-4" />真实推荐</div>
-            <h2 className="mt-1 text-xl font-black text-brand-text">值得查一查</h2>
+            <h2 className="mt-1 text-xl font-black text-brand-text">为你发现</h2>
           </div>
-          <span className="text-xs font-semibold text-brand-muted">价格以预订页为准</span>
+          <span className="text-[10px] font-semibold text-brand-muted">向下继续发现</span>
         </div>
 
-        <div className="mt-4 space-y-3">
+        <div className="mt-3 columns-2 gap-3">
           {loading ? (
-            [0, 1].map((item) => <div key={item} className="h-28 animate-pulse rounded-[24px] bg-white/70" />)
+            [0, 1, 2, 3].map((item) => <div key={item} className={`mb-3 break-inside-avoid animate-pulse rounded-[22px] bg-white/70 ${item % 2 ? 'h-52' : 'h-44'}`} />)
           ) : recommendations.length ? (
-            recommendations.slice(0, 3).map((card, index) => (
+            recommendations.map((card, index) => (
               <button
                 key={card.id ?? `${recommendationTitle(card)}-${index}`}
                 type="button"
+                aria-label={`查看推荐 ${recommendationTitle(card)}`}
                 onClick={() => onSearch(card.query_hint || `查询${recommendationTitle(card)}的机票`)}
-                className="flex w-full items-center gap-4 rounded-[24px] border border-brand-text/7 bg-white p-4 text-left shadow-sm transition active:scale-[0.99]"
+                className="mb-3 w-full break-inside-avoid overflow-hidden rounded-[22px] border border-brand-text/7 bg-white text-left shadow-sm transition active:scale-[0.98]"
               >
-                <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-brand-orange-light text-brand-orange"><Plane className="h-5 w-5" /></div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-base font-black text-brand-text">{recommendationTitle(card)}</div>
-                  <div className="mt-1 truncate text-xs text-brand-muted">{card.reason || '进入对话获取最新可售结果'}</div>
+                <div
+                  className={`relative bg-cover bg-center ${index % 3 === 1 ? 'h-36' : index % 3 === 2 ? 'h-24' : 'h-28'}`}
+                  style={{ backgroundImage: `linear-gradient(to top, rgba(35,22,14,.64), transparent 58%), url("${recommendationImage(card)}")` }}
+                >
+                  <div className="absolute inset-x-0 bottom-0 p-3 text-xs font-black text-white">{recommendationTitle(card)}</div>
                 </div>
-                <div className="text-right">
-                  <div className="whitespace-nowrap text-sm font-black text-brand-orange">{recommendationPrice(card)}</div>
-                  <ChevronRight className="ml-auto mt-2 h-4 w-4 text-brand-muted" />
+                <div className="p-3">
+                  <div className="text-sm font-black text-brand-orange">{recommendationPrice(card)}</div>
+                  <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-brand-muted">{card.reason || '进入对话获取最新可售结果'}</p>
+                  <div className="mt-2 flex items-center justify-between text-[9px] font-bold text-brand-text">
+                    <span>查看实时航班</span><ChevronRight className="h-3.5 w-3.5" />
+                  </div>
                 </div>
               </button>
             ))
@@ -675,13 +721,13 @@ function MobileExploreHome({
         </div>
       </section>
 
-      <button type="button" onClick={onOpenMemory} className="mt-7 flex w-full items-center gap-4 rounded-[26px] bg-[#fff0dc] p-5 text-left">
-        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-brand-orange"><BookHeart className="h-5 w-5" /></div>
+      <button type="button" onClick={onOpenMemory} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-[#fff0dc] p-4 text-left">
+        <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white text-brand-orange"><BookHeart className="h-4 w-4" /></div>
         <div className="min-w-0 flex-1">
-          <div className="text-base font-black text-brand-text">看看它记住了什么</div>
-          <div className="mt-1 text-xs leading-5 text-brand-muted">偏好可以修改；明确关注、最近查询和旅行手帐彼此分开。</div>
+          <div className="text-sm font-black text-brand-text">看看它记住了什么</div>
+          <div className="mt-1 text-[10px] leading-4 text-brand-muted">偏好、关注、查询和手帐彼此分开。</div>
         </div>
-        <ChevronRight className="h-5 w-5 text-brand-muted" />
+        <ChevronRight className="h-4 w-4 text-brand-muted" />
       </button>
     </div>
   )
@@ -907,15 +953,30 @@ function MobileMemoryPage({
             </div>
           </section>
         ) : (
-          <section className="relative overflow-hidden rounded-[20px_28px_22px_30px] border-2 border-[#725b49]/20 bg-[#fffaf0] px-6 py-7 shadow-[6px_8px_0_rgba(92,68,46,0.08)]" style={{ backgroundImage: 'linear-gradient(rgba(121,174,191,0.12) 1px, transparent 1px)', backgroundSize: '100% 28px' }}>
-            <div className="absolute left-4 top-0 h-full border-l-2 border-dashed border-[#dc7d61]/25" />
-            <div className="absolute left-1/2 top-0 h-6 w-24 -translate-x-1/2 -translate-y-2 -rotate-2 bg-[#f4cf86]/70" />
+          <section aria-label="旅行手帐留白页" className="relative overflow-hidden rounded-[18px_26px_20px_28px] border-2 border-[#725b49]/20 bg-[#fffaf0] px-5 py-5 shadow-[5px_7px_0_rgba(92,68,46,0.08)]" style={{ backgroundImage: 'linear-gradient(rgba(121,174,191,0.12) 1px, transparent 1px)', backgroundSize: '100% 25px' }}>
+            <div className="absolute left-3.5 top-0 h-full border-l-2 border-dashed border-[#dc7d61]/25" />
+            <div className="absolute left-1/2 top-0 h-5 w-20 -translate-x-1/2 -translate-y-1.5 -rotate-2 bg-[#f4cf86]/75" />
+            <div className="absolute right-4 top-4 rotate-6 rounded-full border-2 border-[#d47752]/30 px-2 py-1 text-[8px] font-black text-[#b7674c]">尚未成行</div>
             <div className="relative pl-3">
-              <div className="text-[10px] font-black tracking-[0.15em] text-[#9a674b]">旅行手帐 · 留白页</div>
-              <h2 className="mt-3 rotate-[-1deg] font-serif text-2xl font-black text-[#493526]">这一页先留白</h2>
-              <p className="mt-3 text-xs font-semibold leading-6 text-[#725b49]">等你确认已经买票或录入真实行程，{companion.name} 才会开始写。</p>
-              <div className="mx-auto mt-4 w-32 rotate-2"><MobileCompanion kind={companion.kind} pose="journal" /></div>
-              <p className="mt-5 border-t border-dashed border-[#d47752]/35 pt-3 text-[11px] font-semibold leading-5 text-[#876d58]">查询、收藏和点击预订，都不会自动变成旅行经历。</p>
+              <div className="text-[9px] font-black tracking-[0.15em] text-[#9a674b]">TRAVEL NOTE · 第一页</div>
+              <h2 className="mt-3 max-w-[13rem] rotate-[-1deg] font-serif text-[1.65rem] font-black leading-tight text-[#493526]">把真正出发的那天，留给手帐</h2>
+              <div className="mt-4 grid grid-cols-[minmax(0,1fr)_5.8rem] items-center gap-3">
+                <div>
+                  <div className="inline-block -rotate-1 bg-[#f9dda3]/65 px-2 py-1 text-[10px] font-black text-[#725b49]">等待第一段旅程</div>
+                  <p className="mt-2 text-[11px] font-semibold leading-5 text-[#725b49]">确认买票或录入真实行程后，{companion.name} 才会写下日期、目的地和当时的想法。</p>
+                </div>
+                <div className="rotate-2"><MobileCompanion kind={companion.kind} pose="journal" /></div>
+              </div>
+              <div className="mt-4 rotate-[0.4deg] rounded-[14px_18px_13px_16px] border border-dashed border-[#c97858]/40 bg-white/45 px-3 py-3">
+                <div className="flex items-center gap-2 text-[10px] font-black text-[#725b49]"><Plane className="h-3.5 w-3.5 text-[#d47752]" />未来的一页会记录</div>
+                <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-bold text-[#876d58]">
+                  <span className="rounded-full bg-[#f7e8d1] px-2 py-1">出发日期</span>
+                  <span className="rounded-full bg-[#f7e8d1] px-2 py-1">真实行程</span>
+                  <span className="rounded-full bg-[#f7e8d1] px-2 py-1">你的想法</span>
+                  <span className="rounded-full bg-[#f7e8d1] px-2 py-1">旅伴小记</span>
+                </div>
+              </div>
+              <p className="mt-4 border-t border-dashed border-[#d47752]/35 pt-3 text-[10px] font-semibold leading-5 text-[#876d58]">查询、关注和点击预订仍只保留原本含义，不会被写成已经去过。</p>
             </div>
           </section>
         )}
@@ -956,46 +1017,54 @@ function MobileProfile({
   const [showLogin, setShowLogin] = React.useState(false)
   const [showAlerts, setShowAlerts] = React.useState(false)
   return (
-    <div className="thin-scrollbar h-full overflow-y-auto px-5 pb-8 pt-[max(1.25rem,env(safe-area-inset-top))]">
-      <div className="text-[11px] font-black tracking-[0.2em] text-brand-orange">账号与旅伴</div>
-      <h1 className="mt-1 font-serif text-3xl font-black text-brand-text">我的账号</h1>
+    <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-8 pt-[max(1.1rem,env(safe-area-inset-top))]">
+      <div className="text-[10px] font-black tracking-[0.2em] text-brand-orange">我的空间</div>
+      <h1 className="mt-1 font-serif text-[2rem] font-black leading-tight text-brand-text">账号与旅伴</h1>
 
-      <section className="relative mt-6 overflow-hidden rounded-[28px] bg-brand-text p-5 text-white shadow-card">
-        <div className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-brand-orange/30 blur-2xl" />
-        <div className="relative flex items-start gap-4">
-          <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10"><UserCheck className="h-5 w-5" /></div>
+      <section className="mt-4 rounded-[24px] border border-brand-text/7 bg-white p-4 shadow-sm">
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-text text-white"><UserCheck className="h-4 w-4" /></div>
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[10px] font-bold text-white/55">
-              <span className={`h-2 w-2 rounded-full ${account.loggedIn ? 'bg-emerald-400' : 'bg-amber-300'}`} />
-              {account.loggedIn ? '正式账号' : '本机游客账号'}
+            <div className="flex items-center gap-2 text-[10px] font-bold text-brand-muted">
+              <span className={`h-2 w-2 rounded-full ${account.loggedIn ? 'bg-emerald-500' : 'bg-amber-400'}`} />
+              {account.loggedIn ? '已登录并同步' : '游客模式'}
             </div>
-            <div className="mt-1 text-lg font-black">{account.loggedIn ? maskPhone(account.phone) : '当前设备正在使用'}</div>
-            <p className="mt-1 text-[11px] leading-5 text-white/65">{account.loggedIn ? '偏好、旅伴和提醒已经跟随账号保存。' : '数据已保存在服务端，但换设备前需要绑定手机号。'}</p>
+            <div className="mt-1 text-base font-black text-brand-text">{account.loggedIn ? maskPhone(account.phone) : '先在这台设备继续使用'}</div>
+            <p className="mt-1 text-[10px] leading-5 text-brand-muted">{account.loggedIn ? '偏好、旅伴和提醒会跟随账号。' : '这台设备会继续使用当前记忆；绑定手机号后才能跨设备接回。'}</p>
           </div>
         </div>
-        {account.userId ? <div className="relative mt-4 truncate rounded-xl bg-white/8 px-3 py-2 text-[10px] font-semibold text-white/45">账号编号 · {shortAccountId(account.userId)}</div> : null}
+        <div className="mt-3 flex items-center justify-between rounded-xl bg-brand-bg px-3 py-2 text-[9px] font-semibold text-brand-muted">
+          <span>{account.loggedIn ? '跨设备同步已开启' : '仅当前设备可直接使用'}</span>
+          {account.userId ? <span>编号 {shortAccountId(account.userId)}</span> : null}
+        </div>
         {!account.loggedIn ? (
           phoneLoginAvailable ? (
-            <button type="button" onClick={() => setShowLogin((value) => !value)} className="relative mt-4 h-10 w-full rounded-xl bg-white text-xs font-black text-brand-text">{showLogin ? '收起登录' : '绑定手机号，跨设备保留'}</button>
+            <button type="button" onClick={() => setShowLogin((value) => !value)} className="mt-3 h-10 w-full rounded-xl bg-brand-text text-xs font-black text-white">{showLogin ? '收起登录' : '绑定手机号，开启跨设备同步'}</button>
           ) : (
-            <div className="relative mt-4 flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2.5 text-[10px] font-semibold text-white/65"><ShieldCheck className="h-4 w-4" />手机号登录将在短信服务配置后开放</div>
+            <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#fff0dc] px-3 py-2.5 text-[10px] font-semibold text-brand-text"><ShieldCheck className="h-4 w-4 text-brand-orange" />跨设备同步暂未开放，不影响当前设备使用</div>
           )
         ) : null}
       </section>
 
       {showLogin && phoneLoginAvailable ? <MobileOtpForm onSuccess={() => { setShowLogin(false); onAccountChanged() }} /> : null}
 
-      <section className="mt-4 flex items-center gap-4 rounded-[28px] bg-white p-5 shadow-sm">
-        <div className="w-20 shrink-0"><MobileCompanion kind={companion.kind} /></div>
+      <section className="mt-3 flex items-center gap-3 rounded-[24px] bg-brand-text p-4 text-white shadow-sm">
+        <div className="w-16 shrink-0"><MobileCompanion kind={companion.kind} /></div>
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-bold text-brand-orange">当前旅伴</div>
-          <div className="mt-1 text-xl font-black text-brand-text">{companion.name}</div>
-          <div className="mt-1 text-xs leading-5 text-brand-muted">负责呈现记忆与提醒，不替你做购买决定。</div>
-          <button type="button" onClick={onChooseCompanion} className="mt-3 rounded-xl bg-brand-orange-light px-3 py-2 text-[11px] font-black text-brand-orange">更换旅伴</button>
+          <div className="text-[10px] font-bold text-white/55">当前旅伴</div>
+          <div className="mt-0.5 text-lg font-black">{companion.name}</div>
+          <div className="mt-1 text-[10px] leading-4 text-white/60">陪你记忆和提醒，不替你做购买决定。</div>
         </div>
+        <button type="button" onClick={onChooseCompanion} className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white">更换</button>
       </section>
 
-      <div className="mt-5 space-y-3">
+      <section className="mt-3 grid grid-cols-3 gap-2" aria-label="账号数据概览">
+        <ProfileStat label="偏好" value={memory.memories.filter((item) => !INTERNAL_MEMORY_FIELDS.has(item.field)).length} />
+        <ProfileStat label="查询" value={memory.query_history.length} />
+        <ProfileStat label="提醒" value={alerts.length} />
+      </section>
+
+      <div className="mt-4 space-y-2.5">
         <ProfileRow icon={<Heart />} title="管理机票偏好" detail="添加、修改或忘记预算和出行习惯" onClick={onOpenMemory} />
         <ProfileRow icon={<BookHeart />} title="查看旅行手帐" detail="确认成行后才会写入真实旅行" onClick={onOpenMemory} />
         <ProfileRow icon={<MessageCircle />} title="继续查票对话" detail="接着当前上下文补充时间和条件" onClick={onOpenChat} />
@@ -1025,14 +1094,23 @@ function MobileProfile({
 
 function ProfileRow({ icon, title, detail, onClick }: { icon: React.ReactElement; title: string; detail: string; onClick?: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="flex w-full items-center gap-4 rounded-[22px] border border-brand-text/7 bg-white p-4 text-left">
-      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-brand-orange-light text-brand-orange [&>svg]:h-4 [&>svg]:w-4">{icon}</div>
+    <button type="button" onClick={onClick} className="flex w-full items-center gap-3 rounded-[20px] border border-brand-text/7 bg-white p-3.5 text-left">
+      <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-orange-light text-brand-orange [&>svg]:h-4 [&>svg]:w-4">{icon}</div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-black text-brand-text">{title}</div>
-        <div className="mt-1 text-xs leading-5 text-brand-muted">{detail}</div>
+        <div className="text-xs font-black text-brand-text">{title}</div>
+        <div className="mt-0.5 text-[10px] leading-4 text-brand-muted">{detail}</div>
       </div>
       <ChevronRight className="h-4 w-4 text-brand-muted" />
     </button>
+  )
+}
+
+function ProfileStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-[18px] bg-white px-2 py-3 text-center shadow-sm">
+      <div className="text-base font-black text-brand-text">{value}</div>
+      <div className="mt-0.5 text-[9px] font-bold text-brand-muted">{label}</div>
+    </div>
   )
 }
 

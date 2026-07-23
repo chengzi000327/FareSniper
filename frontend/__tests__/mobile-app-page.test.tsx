@@ -84,10 +84,16 @@ test('shows a four-item mobile navigation and real memory summaries', async () =
   fireEvent.click(screen.getByRole('button', { name: /查一趟具体航班/ }))
   await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('下周上海去三亚'))
   fireEvent.click(screen.getByRole('button', { name: /还没想好，先逛探索/ }))
-  expect(await screen.findByText('云朵 在陪你找低价')).toBeInTheDocument()
-  expect(screen.getByText('1 个明确关注')).toBeInTheDocument()
-  expect(screen.getByText('1 次查询')).toBeInTheDocument()
+  expect(await screen.findByText('从真实推荐里发现下一程')).toBeInTheDocument()
+  expect(screen.getByText('1 个关注')).toBeInTheDocument()
+  expect(screen.getByText('为你发现')).toBeInTheDocument()
   expect(screen.getByText('上海 → 三亚')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '盲盒抽' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '查看推荐 上海 → 三亚' })).toHaveClass('break-inside-avoid')
+
+  fireEvent.click(screen.getByRole('button', { name: '盲盒抽' }))
+  expect(screen.getByRole('region', { name: '盲盒结果' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: '去查票' })).toBeInTheDocument()
 })
 
 test('uses a dedicated compact memory layout with Chinese preference values', async () => {
@@ -106,6 +112,11 @@ test('uses a dedicated compact memory layout with Chinese preference values', as
 
   fireEvent.click(screen.getByRole('button', { name: '查询 1' }))
   expect(screen.getByText('上海去三亚')).toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: '手帐 0' }))
+  expect(screen.getByRole('region', { name: '旅行手帐留白页' })).toBeInTheDocument()
+  expect(screen.getByText('把真正出发的那天，留给手帐')).toBeInTheDocument()
+  expect(screen.getByText('未来的一页会记录')).toBeInTheDocument()
 })
 
 test('asks a first-time user to choose and name a companion before entering the app', async () => {
@@ -133,9 +144,10 @@ test('shows the real guest account state when phone login is not configured', as
   await waitFor(() => expect(getMemory).toHaveBeenCalledTimes(1))
 
   fireEvent.click(screen.getByRole('button', { name: '我的' }))
-  expect(await screen.findByText('本机游客账号')).toBeInTheDocument()
-  expect(screen.getByText('手机号登录将在短信服务配置后开放')).toBeInTheDocument()
-  expect(screen.getByText('账号编号 · BILETEST')).toBeInTheDocument()
+  expect(await screen.findByText('游客模式')).toBeInTheDocument()
+  expect(screen.getByText('跨设备同步暂未开放，不影响当前设备使用')).toBeInTheDocument()
+  expect(screen.getByText('编号 BILETEST')).toBeInTheDocument()
+  expect(screen.getByRole('region', { name: '账号数据概览' })).toBeInTheDocument()
   expect(screen.getByText('1 条提醒已保存到后端')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: /价格提醒/ }))
   expect(screen.getByRole('region', { name: '手机端价格提醒列表' })).toBeInTheDocument()
@@ -154,7 +166,7 @@ test('binds a guest account by phone when SMS login is available', async () => {
   await waitFor(() => expect(authStatus).toHaveBeenCalledTimes(1))
 
   fireEvent.click(screen.getByRole('button', { name: '我的' }))
-  fireEvent.click(await screen.findByRole('button', { name: '绑定手机号，跨设备保留' }))
+  fireEvent.click(await screen.findByRole('button', { name: '绑定手机号，开启跨设备同步' }))
   fireEvent.change(screen.getByLabelText('手机号'), { target: { value: '13800000000' } })
   fireEvent.click(screen.getByRole('button', { name: '获取验证码' }))
   await waitFor(() => expect(requestOtp).toHaveBeenCalledWith('+8613800000000'))
@@ -162,6 +174,6 @@ test('binds a guest account by phone when SMS login is available', async () => {
   fireEvent.click(screen.getByRole('button', { name: '登录并接回数据' }))
 
   await waitFor(() => expect(verifyOtp).toHaveBeenCalledWith('+8613800000000', '123456'))
-  expect(await screen.findByText('正式账号')).toBeInTheDocument()
+  expect(await screen.findByText('已登录并同步')).toBeInTheDocument()
   expect(screen.getByText('1380****0000')).toBeInTheDocument()
 })
