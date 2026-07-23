@@ -15,7 +15,7 @@ async def test_alert_triggers_when_price_below_target(
         "u1",
         origin="BJS",
         destination="SYX",
-        depart_date="2026-05-01",
+        depart_date="2099-08-01",
         target_price=500,
     )
     await upsert_subscription(
@@ -39,7 +39,7 @@ async def test_alert_triggers_without_subscription_but_does_not_send(
         "u2",
         origin="BJS",
         destination="SYX",
-        depart_date="2026-05-01",
+        depart_date="2099-08-01",
         target_price=500,
     )
     await check_alerts_once()

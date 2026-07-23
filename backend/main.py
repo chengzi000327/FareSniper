@@ -14,6 +14,7 @@ from backend.__version__ import PRD_VERSION, PRODUCT_NAME, __version__
 from backend.api.admin_intents import router as admin_intents_router
 from backend.api.alerts import router as alerts_router
 from backend.api.auth import router as auth_router
+from backend.api.wechat_auth import router as wechat_auth_router
 from backend.api.collector import router as collector_router
 from backend.api.memory import router as memory_router
 from backend.api.price_history import router as price_history_router
@@ -187,6 +188,7 @@ def create_app() -> FastAPI:
     app.include_router(recommendations_router, prefix=settings.api_prefix)
     app.include_router(alerts_router, prefix=settings.api_prefix)
     app.include_router(auth_router, prefix=settings.api_prefix)
+    app.include_router(wechat_auth_router, prefix=settings.api_prefix)
     app.include_router(price_history_router, prefix=settings.api_prefix)
     app.include_router(push_subscriptions_router, prefix=settings.api_prefix)
     app.include_router(track_jump_router, prefix=settings.api_prefix)

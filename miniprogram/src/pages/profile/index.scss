@@ -1,0 +1,76 @@
+.profile-page__identity {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.profile-page__avatar {
+  display: flex;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #ff8a3d;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.profile-page__memories,
+.profile-page__history {
+  overflow: hidden;
+}
+
+.profile-memory,
+.profile-query {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 15px 16px;
+  border-bottom: 1px solid rgba(67, 44, 27, 0.08);
+  gap: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.profile-memory:last-child,
+.profile-query:last-child {
+  border-bottom: 0;
+}
+
+.profile-memory__label {
+  flex-shrink: 0;
+  color: #8c7b6e;
+}
+
+.profile-memory__value {
+  text-align: right;
+  font-weight: 700;
+}
+
+.profile-page__notice {
+  margin-top: 24px;
+  padding: 16px;
+  border: 1px solid rgba(39, 174, 96, 0.18);
+  border-radius: 8px;
+  background: #f1fbf5;
+  color: #237a48;
+}
+
+.profile-page__notice-title,
+.profile-page__notice-detail {
+  display: block;
+}
+
+.profile-page__notice-title {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.profile-page__notice-detail {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.7;
+}

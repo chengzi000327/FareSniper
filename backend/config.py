@@ -9,7 +9,6 @@ from langsmith import configure as configure_langsmith
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 ROOT_DIR = Path(__file__).resolve().parent
 ENV_FILE = ROOT_DIR / ".env"
 
@@ -36,7 +35,9 @@ class Settings(BaseSettings):
     test_database_url: str = Field(default="")
     redis_url: str = Field(default="")
 
-    model_base_url: str = Field(default="https://dashscope.aliyuncs.com/compatible-mode/v1")
+    model_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1"
+    )
     model_api_key: str = Field(default="")
     model_intent: str = Field(default="qwen-turbo")
     model_judge: str = Field(default="qwen-plus")
@@ -55,9 +56,7 @@ class Settings(BaseSettings):
     flight_provider_timeout_seconds: float = Field(default=10.0)
     ctrip_collector_token: str = Field(default="")
     ctrip_snapshot_ttl_minutes: int = Field(default=75)
-    ctrip_collector_heartbeat_timeout_seconds: int = Field(
-        default=180, gt=0
-    )
+    ctrip_collector_heartbeat_timeout_seconds: int = Field(default=180, gt=0)
     ctrip_collector_lease_seconds: int = Field(default=180, gt=0)
     ctrip_refresh_batch_size: int = Field(default=20)
     ctrip_collection_timeout_seconds: float = Field(default=90.0, gt=0)
@@ -83,6 +82,16 @@ class Settings(BaseSettings):
     vapid_public_key: str = Field(default="")
     vapid_subject: str = Field(default="mailto:ops@faresniper.app")
 
+    wechat_mini_app_id: str = Field(default="")
+    wechat_mini_app_secret: str = Field(default="")
+    wechat_price_alert_template_id: str = Field(default="")
+    wechat_api_base_url: str = Field(default="https://api.weixin.qq.com")
+    wechat_request_timeout_seconds: float = Field(default=10.0, gt=0)
+    wechat_price_alert_route_field: str = Field(default="thing1")
+    wechat_price_alert_date_field: str = Field(default="date2")
+    wechat_price_alert_price_field: str = Field(default="amount3")
+    wechat_price_alert_remark_field: str = Field(default="thing4")
+
     flight_status_api_url: str = Field(default="")
     flight_status_api_key: str = Field(default="")
 
@@ -106,7 +115,9 @@ class Settings(BaseSettings):
     langchain_tracing: bool = Field(default=False, alias="LANGCHAIN_TRACING_V2")
     langchain_api_key: str = Field(default="", alias="LANGCHAIN_API_KEY")
     langchain_project: str = Field(default="faresniper-dev", alias="LANGCHAIN_PROJECT")
-    langchain_endpoint: str = Field(default="https://api.smith.langchain.com", alias="LANGCHAIN_ENDPOINT")
+    langchain_endpoint: str = Field(
+        default="https://api.smith.langchain.com", alias="LANGCHAIN_ENDPOINT"
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -173,12 +184,8 @@ def langsmith_tracing_enabled(
 
 
 _trace_api_key = os.getenv("LANGSMITH_API_KEY") or settings.langsmith_api_key
-_trace_project = (
-    os.getenv("LANGSMITH_PROJECT") or settings.langsmith_project
-)
-_trace_endpoint = (
-    os.getenv("LANGSMITH_ENDPOINT") or settings.langsmith_endpoint
-)
+_trace_project = os.getenv("LANGSMITH_PROJECT") or settings.langsmith_project
+_trace_endpoint = os.getenv("LANGSMITH_ENDPOINT") or settings.langsmith_endpoint
 
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"

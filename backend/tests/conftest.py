@@ -111,7 +111,9 @@ async def _truncate_all(engine) -> None:
         tables = [row[0] for row in rows]
         if tables:
             quoted = ", ".join(f'"{t}"' for t in tables)
-            await conn.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
+            await conn.execute(
+                text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE")
+            )
 
 
 @pytest_asyncio.fixture
@@ -324,9 +326,11 @@ class _FakePush:
 @pytest.fixture
 def fake_push(monkeypatch):
     import backend.workers.push_dispatcher as pd
+    import backend.workers.notification_dispatcher as nd
 
     fp = _FakePush()
     monkeypatch.setattr(pd, "send_push", fp.send)
+    monkeypatch.setattr(nd, "send_push", fp.send)
     try:
         import backend.workers.alert_checker as ac
 
@@ -344,7 +348,7 @@ async def seeded_pg_with_low_price(seeded_pg):
     await write_cached_deals(
         origin="BJS",
         destination="SYX",
-        depart_date="2026-05-01",
+        depart_date="2099-08-01",
         deals=[{"flight_no": "MU001", "price": 300, "platform": "ctrip"}],
     )
     return seeded_pg
@@ -369,7 +373,11 @@ async def seeded_pg_with_user_prefs(seeded_pg):
         ltm = LongTermMemory(db)
         await ltm.upsert_preferences(
             "u1",
-            {"budget": 500, "preferred_airlines": ["东方航空"], "constraints": ["direct_only"]},
+            {
+                "budget": 500,
+                "preferred_airlines": ["东方航空"],
+                "constraints": ["direct_only"],
+            },
         )
         await db.commit()
     return seeded_pg

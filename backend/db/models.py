@@ -17,8 +17,12 @@ class UserPreference(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True)  # user_id
     budget: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    frequent_cities: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
-    preferred_airlines: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
+    frequent_cities: Mapped[list[str]] = mapped_column(
+        ARRAY(String), server_default="{}"
+    )
+    preferred_airlines: Mapped[list[str]] = mapped_column(
+        ARRAY(String), server_default="{}"
+    )
     constraints: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
     travel_scenes: Mapped[list[str]] = mapped_column(ARRAY(String), server_default="{}")
     updated_at: Mapped[datetime] = mapped_column(
@@ -74,23 +78,6 @@ class Session(Base):
     )
     last_active_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )
-
-
-class PriceAlert(Base):
-    __tablename__ = "price_alerts"
-
-    alert_id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    flight_id: Mapped[str] = mapped_column(String, nullable=False)
-    origin_city: Mapped[str] = mapped_column(String, nullable=False)
-    destination_city: Mapped[str] = mapped_column(String, nullable=False)
-    depart_date: Mapped[str] = mapped_column(String, nullable=False)
-    current_price: Mapped[int] = mapped_column(Integer, nullable=False)
-    target_price: Mapped[int] = mapped_column(Integer, nullable=False)
-    status: Mapped[str] = mapped_column(String, nullable=False, server_default="active")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
     )
 
 

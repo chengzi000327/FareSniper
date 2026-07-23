@@ -7,6 +7,7 @@ registered in ``backend.db.models``. Marking it ``xfail(strict=False)``
 keeps it discoverable so that the day a TG completes its repo registry
 the test flips to ``XPASSED`` and reminds us to drop the marker.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -21,6 +22,9 @@ CANONICAL_TABLES = {
     "query_history",
     "users",
     "alerts",
+    "wechat_accounts",
+    "alert_subscriptions",
+    "notification_outbox",
     "push_subscriptions",
     "price_history",
     "promotions",

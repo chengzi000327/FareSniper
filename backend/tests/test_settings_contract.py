@@ -33,7 +33,9 @@ def test_settings_exposes_launch_fields(monkeypatch):
 
 
 def test_settings_normalizes_postgres_url_for_async_engine(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@postgres.railway.internal:5432/railway")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://u:p@postgres.railway.internal:5432/railway"
+    )
     get_settings.cache_clear()
     s = get_settings()
     assert s.database_url.startswith("postgresql+asyncpg://")
@@ -67,6 +69,22 @@ def test_settings_exposes_flight_provider_defaults(monkeypatch):
     assert s.ctrip_request_delay_max_seconds == 5.0
     assert s.run_scheduler_in_api is False
     assert s.enable_mock_fallback is False
+
+
+def test_settings_exposes_wechat_defaults(monkeypatch):
+    for name in (
+        "WECHAT_MINI_APP_ID",
+        "WECHAT_MINI_APP_SECRET",
+        "WECHAT_PRICE_ALERT_TEMPLATE_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    s = Settings(_env_file=None)
+
+    assert s.wechat_mini_app_id == ""
+    assert s.wechat_mini_app_secret == ""
+    assert s.wechat_price_alert_template_id == ""
+    assert s.wechat_api_base_url == "https://api.weixin.qq.com"
+    assert s.wechat_price_alert_route_field == "thing1"
 
 
 @pytest.mark.parametrize(

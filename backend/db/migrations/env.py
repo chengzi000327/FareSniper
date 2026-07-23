@@ -35,6 +35,8 @@ _REPO_MODULES = [
     "backend.infrastructure.db.query_history_repo",
     "backend.infrastructure.db.user_repo",
     "backend.infrastructure.db.alert_repo",
+    "backend.infrastructure.db.wechat_repo",
+    "backend.infrastructure.db.notification_repo",
     "backend.infrastructure.db.push_subscription_repo",
     "backend.infrastructure.db.price_history_repo",
     "backend.infrastructure.db.promotion_repo",

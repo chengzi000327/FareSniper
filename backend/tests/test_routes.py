@@ -4,10 +4,10 @@ The 3 endpoints introduced by TG-05 · Task 3 (auth/otp, auth/verify,
 push/subscriptions, price_history) are placeholders today — TG-12 and
 TG-09i replace the bodies with real handlers.
 """
+
 from __future__ import annotations
 
 from backend.main import app
-
 
 EXPECTED = {
     ("POST", "/api/session"),
@@ -20,6 +20,10 @@ EXPECTED = {
     ("GET", "/api/alerts"),
     ("POST", "/api/auth/otp"),
     ("POST", "/api/auth/verify"),
+    ("POST", "/api/auth/wechat/session"),
+    ("POST", "/api/alerts/{alert_id}/wechat-subscription"),
+    ("GET", "/api/alerts/{alert_id}"),
+    ("PATCH", "/api/alerts/{alert_id}"),
     ("GET", "/api/price_history"),
     ("POST", "/api/push/subscriptions"),
 }

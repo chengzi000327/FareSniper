@@ -1,0 +1,181 @@
+.chat-page {
+  height: 100vh;
+  box-sizing: border-box;
+  padding-bottom: 76px;
+}
+
+.chat-page__scroll {
+  height: 100%;
+}
+
+.chat-page__content {
+  padding: 22px 18px 38px;
+}
+
+.chat-page__messages {
+  margin-top: 22px;
+}
+
+.chat-bubble {
+  width: fit-content;
+  max-width: 82%;
+  margin-bottom: 12px;
+  padding: 13px 15px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.chat-bubble--assistant {
+  border: 1px solid rgba(67, 44, 27, 0.08);
+  background: #fff;
+}
+
+.chat-bubble--user {
+  margin-left: auto;
+  background: #432c1b;
+  color: #fff;
+}
+
+.chat-page__deals {
+  margin-top: 24px;
+}
+
+.chat-page__composer {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  border-top: 1px solid rgba(67, 44, 27, 0.08);
+  background: rgba(255, 251, 247, 0.97);
+  gap: 10px;
+}
+
+.chat-page__input {
+  height: 46px;
+  min-width: 0;
+  flex: 1;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border: 1px solid rgba(67, 44, 27, 0.1);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+}
+
+.chat-page__send {
+  display: flex;
+  width: 68px;
+  height: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #432c1b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.chat-page__send[disabled] {
+  opacity: 0.45;
+}
+
+.alert-sheet__backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(31, 22, 16, 0.36);
+}
+
+.alert-sheet {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 20px calc(24px + env(safe-area-inset-bottom));
+  border-radius: 8px 8px 0 0;
+  background: #fff;
+}
+
+.alert-sheet__handle {
+  width: 42px;
+  height: 4px;
+  margin: 0 auto 20px;
+  border-radius: 2px;
+  background: rgba(67, 44, 27, 0.2);
+}
+
+.alert-sheet__title,
+.alert-sheet__route,
+.alert-sheet__hint {
+  display: block;
+}
+
+.alert-sheet__title {
+  color: #432c1b;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.alert-sheet__route {
+  margin-top: 7px;
+  color: #8f8176;
+  font-size: 12px;
+}
+
+.alert-sheet__price-input {
+  display: flex;
+  height: 58px;
+  align-items: center;
+  margin-top: 20px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 138, 61, 0.4);
+  border-radius: 8px;
+  background: #fffaf6;
+  color: #ff8a3d;
+  font-size: 22px;
+  font-weight: 900;
+  gap: 8px;
+}
+
+.alert-sheet__price-input input {
+  min-width: 0;
+  flex: 1;
+  color: #432c1b;
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.alert-sheet__hint {
+  margin-top: 12px;
+  color: #8f8176;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.alert-sheet__actions {
+  display: flex;
+  margin-top: 22px;
+  gap: 10px;
+}
+
+.alert-sheet__cancel,
+.alert-sheet__confirm {
+  display: flex;
+  height: 46px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.alert-sheet__cancel {
+  border: 1px solid rgba(67, 44, 27, 0.12);
+  background: #fff;
+  color: #432c1b;
+}
