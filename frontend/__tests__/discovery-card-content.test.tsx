@@ -55,6 +55,36 @@ test("renders source states without fake zeroes", () => {
   expect(screen.queryByText("¥0")).not.toBeInTheDocument();
 });
 
+test("uses mobile type density without changing the original card sections", () => {
+  const { container } = render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2026-07-24"
+      basePrice={500}
+      totalPrice={700}
+      tax={200}
+      taxSource="regulatory_estimate"
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      prices={[]}
+      compact
+      narrow
+    />
+  );
+
+  expect(container.firstElementChild).toHaveClass("p-2.5");
+  expect(screen.getByRole("heading", { name: "北京" })).toHaveClass("text-[15px]");
+  expect(screen.getByText("¥500")).toHaveClass("text-[13px]");
+  expect(screen.getByText("平台展示价")).toHaveClass("text-[10px]");
+  expect(screen.getByText("平台未返回行李额度，请在预订页确认")).toHaveClass("text-[11px]");
+  expect(screen.getByText("多端价格参考")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "监控价格" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "前往预订" })).toBeInTheDocument();
+});
+
 test("renders a numeric view-live-price row as its known amount", () => {
   render(
     <DiscoveryCardContent

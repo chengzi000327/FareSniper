@@ -1,6 +1,6 @@
 {
-  "name": "FareSniper",
-  "short_name": "FareSniper",
+  "name": "你的机票发现与出行陪伴 Agent",
+  "short_name": "出行陪伴 Agent",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

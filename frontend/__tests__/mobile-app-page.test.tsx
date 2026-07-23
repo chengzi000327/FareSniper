@@ -66,6 +66,7 @@ test('shows a four-item mobile navigation and real memory summaries', async () =
   expect(screen.getByRole('button', { name: '我的' })).toBeInTheDocument()
   expect(screen.queryByRole('button', { name: '首页' })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: '对话' })).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByText('你的机票发现与出行陪伴 Agent')).toBeInTheDocument()
   expect(screen.getByText('先说一个想法就好')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /查一趟具体航班/ })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: /还没想好，先逛探索/ })).toBeInTheDocument()

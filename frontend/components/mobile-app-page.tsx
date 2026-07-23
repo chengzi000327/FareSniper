@@ -583,7 +583,7 @@ function MobileExploreHome({
     <div className="thin-scrollbar h-full overflow-y-auto px-5 pb-8 pt-[max(1.25rem,env(safe-area-inset-top))]">
       <header className="flex items-center justify-between">
         <div>
-          <div className="text-[11px] font-black tracking-[0.2em] text-brand-orange">特价机票发现</div>
+          <div className="text-[9px] font-black tracking-[0.12em] text-brand-orange">你的机票发现与出行陪伴 Agent</div>
           <h1 className="mt-1 font-serif text-3xl font-black text-brand-text">今天想去哪儿？</h1>
         </div>
         <button type="button" aria-label="查看提醒" className="grid h-11 w-11 place-items-center rounded-2xl border border-brand-text/8 bg-white text-brand-text shadow-sm">

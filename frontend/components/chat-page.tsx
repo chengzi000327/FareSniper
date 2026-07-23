@@ -379,7 +379,7 @@ export function ChatPage({
     <div className="flex h-full flex-col overflow-hidden">
       <div className={`flex items-center justify-between ${compact ? 'px-5 pt-[max(1.25rem,env(safe-area-inset-top))]' : 'px-5 pt-6 sm:px-8 lg:px-12 lg:pt-8'}`}>
         <div>
-          {compact ? <div className="text-[10px] font-black tracking-[0.2em] text-brand-orange">特价机票发现</div> : null}
+          {compact ? <div className="text-[9px] font-black tracking-[0.12em] text-brand-orange">你的机票发现与出行陪伴 Agent</div> : null}
           <h1 className={`font-bold text-brand-text ${compact ? 'mt-1 font-serif text-[2rem] leading-tight' : 'text-3xl sm:text-4xl'}`}>对话空间</h1>
         </div>
         {compact ? (
@@ -482,7 +482,7 @@ export function ChatPage({
               </div>
 
               {'hasCard' in message && message.hasCard && message.cardData ? (
-                <div className="mt-4 w-full max-w-2xl overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card">
+                <div className={`${compact ? 'mt-3' : 'mt-4'} w-full max-w-2xl overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card`}>
                   <DiscoveryCardContent {...message.cardData} compact={compact || message.cardData.compact} narrow={compact} />
                 </div>
               ) : null}
