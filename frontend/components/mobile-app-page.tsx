@@ -268,12 +268,16 @@ export function MobileAppPage() {
   const [chatQuery, setChatQuery] = React.useState<string | null>(null)
   const [memory, setMemory] = React.useState<MobileMemory>({ memories: [], query_history: [] })
   const [recommendations, setRecommendations] = React.useState<RecCardDto[]>([])
+  const [recommendationHasMore, setRecommendationHasMore] = React.useState(false)
+  const [recommendationNextOffset, setRecommendationNextOffset] = React.useState(0)
+  const [loadingMoreRecommendations, setLoadingMoreRecommendations] = React.useState(false)
   const [alerts, setAlerts] = React.useState<AlertItemDto[]>([])
   const [loading, setLoading] = React.useState(true)
   const [memoryState, setMemoryState] = React.useState<'loading' | 'ready' | 'error'>('loading')
   const [account, setAccount] = React.useState<MobileAccount>({ userId: null, phone: null, loggedIn: false })
   const [phoneLoginAvailable, setPhoneLoginAvailable] = React.useState(false)
   const [choosingCompanion, setChoosingCompanion] = React.useState(false)
+  const loadingMoreRecommendationsRef = React.useRef(false)
 
   const loadData = React.useCallback(() => {
     let active = true
@@ -296,6 +300,8 @@ export function MobileAppPage() {
       }
       if (recommendationResult.status === 'fulfilled') {
         setRecommendations(recommendationResult.value.cards ?? [])
+        setRecommendationHasMore(recommendationResult.value.has_more ?? false)
+        setRecommendationNextOffset(recommendationResult.value.next_offset ?? 6)
       }
       if (alertsResult.status === 'fulfilled') {
         setAlerts(alertsResult.value.alerts ?? [])
@@ -306,6 +312,32 @@ export function MobileAppPage() {
   }, [])
 
   React.useEffect(() => loadData(), [loadData])
+
+  const loadMoreRecommendations = React.useCallback(async () => {
+    if (!recommendationHasMore || loadingMoreRecommendationsRef.current) return
+    loadingMoreRecommendationsRef.current = true
+    setLoadingMoreRecommendations(true)
+    try {
+      const response = await recApi.list({ limit: 6, offset: recommendationNextOffset })
+      setRecommendations((current) => {
+        const seen = new Set(current.map((card) => card.id ?? `${card.title}-${card.query_hint}`))
+        return [
+          ...current,
+          ...response.cards.filter((card) => {
+            const key = card.id ?? `${card.title}-${card.query_hint}`
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          }),
+        ]
+      })
+      setRecommendationHasMore(response.has_more ?? false)
+      setRecommendationNextOffset(response.next_offset ?? recommendationNextOffset + 6)
+    } finally {
+      loadingMoreRecommendationsRef.current = false
+      setLoadingMoreRecommendations(false)
+    }
+  }, [recommendationHasMore, recommendationNextOffset])
 
   React.useEffect(() => {
     let active = true
@@ -367,8 +399,10 @@ export function MobileAppPage() {
               loading={loading}
               memory={memory}
               recommendations={recommendations}
+              hasMore={recommendationHasMore}
+              loadingMore={loadingMoreRecommendations}
+              onLoadMore={loadMoreRecommendations}
               onSearch={startChat}
-              onOpenMemory={() => setActiveTab('memory')}
             />
           ) : activeTab === 'chat' ? (
             <ChatPage
@@ -591,17 +625,22 @@ function MobileExploreHome({
   loading,
   memory,
   recommendations,
+  hasMore,
+  loadingMore,
+  onLoadMore,
   onSearch,
-  onOpenMemory,
 }: {
   loading: boolean
   memory: MobileMemory
   recommendations: RecCardDto[]
+  hasMore: boolean
+  loadingMore: boolean
+  onLoadMore: () => void
   onSearch: (query: string) => void
-  onOpenMemory: () => void
 }) {
   const [query, setQuery] = React.useState('')
   const [blindPick, setBlindPick] = React.useState<RecCardDto | null>(null)
+  const loadMoreSentinelRef = React.useRef<HTMLDivElement | null>(null)
   const companion = companionFromMemory(memory.memories)
   const preferenceCount = memory.memories.filter((item) => !INTERNAL_MEMORY_FIELDS.has(item.field)).length
   const ideaCount = explicitIdeaCount(memory.memories)
@@ -614,6 +653,19 @@ function MobileExploreHome({
     if (!recommendations.length) return
     setBlindPick(recommendations[Math.floor(Math.random() * recommendations.length)])
   }
+
+  React.useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current
+    if (!sentinel || !hasMore || loadingMore || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) onLoadMore()
+      },
+      { rootMargin: '180px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, loadingMore, onLoadMore])
 
   return (
     <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-8 pt-[max(1.1rem,env(safe-area-inset-top))]">
@@ -719,16 +771,19 @@ function MobileExploreHome({
             </button>
           )}
         </div>
-      </section>
-
-      <button type="button" onClick={onOpenMemory} className="mt-3 flex w-full items-center gap-3 rounded-[22px] bg-[#fff0dc] p-4 text-left">
-        <div className="grid h-10 w-10 place-items-center rounded-2xl bg-white text-brand-orange"><BookHeart className="h-4 w-4" /></div>
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-black text-brand-text">看看它记住了什么</div>
-          <div className="mt-1 text-[10px] leading-4 text-brand-muted">偏好、关注、查询和手帐彼此分开。</div>
+        <div ref={loadMoreSentinelRef} aria-label="继续加载推荐" className="flex h-14 items-center justify-center">
+          {loadingMore ? (
+            <span className="inline-flex items-center gap-2 text-[10px] font-bold text-brand-muted">
+              <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-orange border-t-transparent" />
+              正在发现更多目的地
+            </span>
+          ) : hasMore ? (
+            <span className="text-[10px] font-semibold text-brand-muted">继续下滑，发现更多</span>
+          ) : recommendations.length ? (
+            <span className="text-[10px] font-semibold text-brand-muted">这次先逛到这里</span>
+          ) : null}
         </div>
-        <ChevronRight className="h-4 w-4 text-brand-muted" />
-      </button>
+      </section>
     </div>
   )
 }

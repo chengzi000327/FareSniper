@@ -1,5 +1,5 @@
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import MobilePage from '@/app/mobile/page'
 import { MobileAppPage } from '@/components/mobile-app-page'
@@ -90,10 +90,64 @@ test('shows a four-item mobile navigation and real memory summaries', async () =
   expect(screen.getByText('上海 → 三亚')).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '盲盒抽' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '查看推荐 上海 → 三亚' })).toHaveClass('break-inside-avoid')
+  expect(screen.queryByText('看看它记住了什么')).not.toBeInTheDocument()
+  expect(screen.getByLabelText('继续加载推荐')).toBeInTheDocument()
+  expect(screen.getByText('这次先逛到这里')).toBeInTheDocument()
 
   fireEvent.click(screen.getByRole('button', { name: '盲盒抽' }))
   expect(screen.getByRole('region', { name: '盲盒结果' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: '去查票' })).toBeInTheDocument()
+})
+
+test('loads another recommendation page when the mobile waterfall reaches its end', async () => {
+  let intersectionCallback: IntersectionObserverCallback | null = null
+  class MockIntersectionObserver {
+    constructor(callback: IntersectionObserverCallback) {
+      intersectionCallback = callback
+    }
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+    takeRecords() { return [] }
+    root = null
+    rootMargin = ''
+    thresholds = []
+  }
+  vi.stubGlobal('IntersectionObserver', MockIntersectionObserver)
+
+  listRecommendations
+    .mockReset()
+    .mockResolvedValueOnce({
+      personalized: true,
+      cards: [{ id: 'route-1', title: '上海 → 三亚', query_hint: '下周上海去三亚', reason: '第一批推荐' }],
+      has_more: true,
+      next_offset: 6,
+    })
+    .mockResolvedValueOnce({
+      personalized: true,
+      cards: [],
+      has_more: false,
+      next_offset: 0,
+    })
+    .mockResolvedValueOnce({
+      personalized: true,
+      cards: [{ id: 'route-2', title: '上海 → 厦门', query_hint: '下周上海去厦门', reason: '继续下滑发现' }],
+      has_more: false,
+      next_offset: 7,
+    })
+
+  render(<MobileAppPage />)
+  await waitFor(() => expect(listRecommendations).toHaveBeenCalledTimes(2))
+  fireEvent.click(screen.getByRole('button', { name: '探索' }))
+  await waitFor(() => expect(intersectionCallback).not.toBeNull())
+
+  act(() => {
+    intersectionCallback?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+  })
+
+  await waitFor(() => expect(listRecommendations).toHaveBeenLastCalledWith({ limit: 6, offset: 6 }))
+  expect(await screen.findByRole('button', { name: '查看推荐 上海 → 厦门' })).toBeInTheDocument()
+  expect(screen.getByText('这次先逛到这里')).toBeInTheDocument()
 })
 
 test('uses a dedicated compact memory layout with Chinese preference values', async () => {
