@@ -38,8 +38,8 @@ Mac 携程节点（每小时）
 
 1. 注册并认证微信小程序，取得 AppID 和 AppSecret。
 2. 在“开发管理 -> 开发设置 -> 服务器域名”中加入 Railway 后端 HTTPS 域名：
-   - `request 合法域名`：`https://<backend>.up.railway.app`
-   - `downloadFile 合法域名`：`https://<frontend>.up.railway.app`
+   - `request 合法域名`：`https://backend-production-8a88.up.railway.app`
+   - `downloadFile 合法域名`：`https://frontend-production-9c2c.up.railway.app`
    - 生产环境必须开启域名校验，不要保留开发工具中的“不校验合法域名”。
 3. 在“订阅消息”中选择一条价格提醒模板，模板至少包含：
    - 航线：`thing`
@@ -48,8 +48,12 @@ Mac 携程节点（每小时）
    - 提醒说明：`thing`
 4. 记录模板 ID 和四个真实字段键。字段键以微信后台为准，不一定是示例中的
    `thing1/date2/amount3/thing4`。
-5. 把 `miniprogram/project.config.json` 的 `appid` 从 `touristappid`
-   改为正式 AppID。
+5. 仓库和正式微信工程都必须保留当前正式 AppID：
+   `wx8dfe97d9e078549a`。同步脚本会校验 AppID，不匹配时直接停止。
+
+项目已将 `libVersion` 固定为 `widelyUsed`，避免开发者工具自动选择灰度或
+本地异常的基础库版本。不要把它改为 `trial`；如需定位兼容问题，可在开发者
+工具“详情 -> 本地设置”中临时切换版本，但提交前应恢复为 `widelyUsed`。
 
 AppSecret 只能配置在 Railway 后端，绝不能写进小程序代码、构建变量或 Git。
 
@@ -94,8 +98,8 @@ alembic -c backend/alembic.ini upgrade head
 复制 `miniprogram/.env.example` 为 `miniprogram/.env`：
 
 ```dotenv
-TARO_APP_API_BASE_URL=https://<backend>.up.railway.app
-TARO_APP_ASSET_BASE_URL=https://<frontend>.up.railway.app
+TARO_APP_API_BASE_URL=https://backend-production-8a88.up.railway.app
+TARO_APP_ASSET_BASE_URL=https://frontend-production-9c2c.up.railway.app
 TARO_APP_WECHAT_PRICE_ALERT_TEMPLATE_ID=
 TARO_APP_USE_MOCK=false
 ```
@@ -114,6 +118,19 @@ npm --prefix miniprogram run build:weapp
 
 微信开发者工具选择“导入项目”，项目目录选 `miniprogram/`，构建目录由
 `project.config.json` 指向 `dist/`。
+
+当前正式微信工程位于 `/Users/chengzi/WeChatProjects/faresniper`。开发完成后
+使用受保护的同步脚本构建生产包并复制到该工程：
+
+```bash
+cd miniprogram
+TARO_APP_API_BASE_URL=https://backend-production-8a88.up.railway.app \
+  ./scripts/sync-formal-project.sh \
+  /Users/chengzi/WeChatProjects/faresniper production
+```
+
+只做本地界面验收时可以将最后一个参数改为 `mock`。生产同步如果没有传入
+`TARO_APP_API_BASE_URL` 会直接失败，避免误把 Mock 包或空后端地址上传审核。
 
 至少完成以下真机验收：
 

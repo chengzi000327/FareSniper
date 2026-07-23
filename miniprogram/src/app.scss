@@ -19,15 +19,16 @@ button::after {
 
 .page-shell {
   min-height: 100vh;
-  padding: 22px 18px 36px;
+  padding: calc(52px + env(safe-area-inset-top)) 16px 36px;
   box-sizing: border-box;
 }
 
 .page-title {
   display: block;
-  font-size: 28px;
-  font-weight: 800;
-  line-height: 1.2;
+  font-family: "Songti SC", "STSong", serif;
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1.12;
 }
 
 .page-subtitle {
@@ -47,9 +48,9 @@ button::after {
 
 .card {
   border: 1px solid rgba(67, 44, 27, 0.08);
-  border-radius: 8px;
+  border-radius: 22px;
   background: #fff;
-  box-shadow: 0 12px 34px rgba(67, 44, 27, 0.08);
+  box-shadow: 0 8px 24px rgba(67, 44, 27, 0.07);
 }
 
 .primary-button {
@@ -57,7 +58,7 @@ button::after {
   height: 46px;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
+  border-radius: 15px;
   background: #432c1b;
   color: #fff;
   font-size: 14px;
@@ -70,11 +71,64 @@ button::after {
   align-items: center;
   justify-content: center;
   border: 1px solid rgba(67, 44, 27, 0.12);
-  border-radius: 8px;
+  border-radius: 15px;
   background: #fff;
   color: #432c1b;
   font-size: 13px;
   font-weight: 800;
+}
+
+.eyebrow {
+  display: block;
+  color: #ff7a2f;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+
+.icon-button {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(67, 44, 27, 0.08);
+  border-radius: 15px;
+  background: #fff;
+  color: #432c1b;
+  font-size: 17px;
+  box-shadow: 0 5px 14px rgba(67, 44, 27, 0.06);
+}
+
+.companion-card {
+  position: relative;
+  overflow: hidden;
+  background: #432c1b;
+  color: #fff;
+}
+
+.companion-card::after {
+  position: absolute;
+  top: -35px;
+  right: -25px;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(255, 122, 47, 0.3);
+  filter: blur(20px);
+  content: "";
+}
+
+.companion-avatar {
+  display: flex;
+  width: 58px;
+  height: 58px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 19px;
+  background: #fffaf1;
+  font-size: 32px;
 }
 
 .empty-state {

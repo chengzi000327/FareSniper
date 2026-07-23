@@ -123,17 +123,35 @@ export const MOCK_ALERTS: AlertItem[] = [
 
 export const MOCK_MEMORY: MemoryResponse = {
   memories: [
-    { field: 'budget', value: 800, source: 'user' },
+    {
+      field: 'companion_profile',
+      value: { kind: 'cat', name: '云朵' },
+      label: '旅伴档案',
+      value_display: '云朵',
+      source: 'manual',
+    },
+    {
+      field: 'budget',
+      value: 800,
+      label: '心理价位',
+      value_display: '¥800',
+      source: 'manual',
+    },
     {
       field: 'constraints',
       value: ['direct_only', 'checked_baggage'],
-      source: 'learned',
+      label: '出行习惯',
+      value_display: '只看直飞、需要托运行李',
+      source: 'auto',
     },
   ],
   query_history: [
     {
       id: 'q1',
-      query_text: '下个月北京去三亚，直飞，带20KG行李',
+      query: {
+        text: '下个月北京去三亚，直飞，带20KG行李',
+        intent: {},
+      },
       created_at: new Date().toISOString(),
     },
   ],

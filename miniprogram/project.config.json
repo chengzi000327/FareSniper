@@ -2,7 +2,8 @@
   "miniprogramRoot": "dist/",
   "projectname": "FareSniper",
   "description": "会记住你如何定义特价的机票决策 Agent",
-  "appid": "touristappid",
+  "appid": "wx8dfe97d9e078549a",
+  "libVersion": "widelyUsed",
   "compileType": "miniprogram",
   "setting": {
     "urlCheck": true,
@@ -12,5 +13,6 @@
     "enhance": true,
     "minifyWXML": true
   },
-  "condition": {}
+  "condition": {},
+  "simulatorPluginLibVersion": {}
 }

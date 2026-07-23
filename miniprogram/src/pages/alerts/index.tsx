@@ -42,13 +42,31 @@ export default function AlertsPage() {
 
   const toggle = async (alert: AlertItem) => {
     const next = alert.status === 'paused' ? 'active' : 'paused'
-    await miniApi.updateAlert(alert.id, next)
-    await load()
+    try {
+      await miniApi.updateAlert(alert.id, next)
+      await load()
+      await Taro.showToast({
+        title: next === 'active' ? '已继续监控' : '已暂停监控',
+        icon: 'success',
+      })
+    } catch {
+      await Taro.showToast({
+        title: '操作失败，请稍后重试',
+        icon: 'none',
+      })
+    }
   }
 
   const enableWechat = async (alert: AlertItem) => {
-    if (await enableWechatNotification(alert.id)) {
-      await load()
+    try {
+      if (await enableWechatNotification(alert.id)) {
+        await load()
+      }
+    } catch {
+      await Taro.showToast({
+        title: '微信提醒开启失败',
+        icon: 'none',
+      })
     }
   }
 
@@ -73,7 +91,7 @@ export default function AlertsPage() {
           <Text className="alerts-page__summary-label">已经命中</Text>
         </View>
         <View>
-          <Text className="alerts-page__summary-value">15m</Text>
+          <Text className="alerts-page__summary-value">15分钟</Text>
           <Text className="alerts-page__summary-label">最快检查</Text>
         </View>
       </View>

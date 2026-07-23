@@ -1,5 +1,5 @@
 export default definePageConfig({
-  navigationBarTitleText: '发现特价',
+  navigationBarTitleText: '我的记忆',
   navigationStyle: 'custom',
   enablePullDownRefresh: true,
 })

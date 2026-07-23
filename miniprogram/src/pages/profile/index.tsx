@@ -1,46 +1,34 @@
-import { Text, View } from '@tarojs/components'
+import { Button, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { useState } from 'react'
 
+import { Companion } from '../../components/Companion'
 import { ensureWechatSession, miniApi } from '../../services/api'
-import type { MemoryResponse } from '../../types/api'
+import type { AlertItem, MemoryResponse } from '../../types/api'
+import {
+  companionFromMemory,
+  preferenceCount,
+} from '../../utils/companion'
 import './index.scss'
-
-const FIELD_LABELS: Record<string, string> = {
-  budget: '心理价位',
-  budget_ceiling: '预算上限',
-  frequent_cities: '常去城市',
-  preferred_airlines: '偏好航司',
-  constraints: '出行约束',
-  travel_scenes: '出行场景',
-}
-
-const VALUE_LABELS: Record<string, string> = {
-  direct_only: '只看直飞',
-  avoid_redeye: '避开红眼航班',
-  checked_baggage: '需要托运行李',
-  carry_on_only: '只带随身行李',
-}
-
-function displayValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => VALUE_LABELS[String(item)] || String(item))
-      .join('、')
-  }
-  return VALUE_LABELS[String(value)] || String(value)
-}
 
 export default function ProfilePage() {
   const [memory, setMemory] = useState<MemoryResponse | null>(null)
   const [userId, setUserId] = useState('')
+  const [alerts, setAlerts] = useState<AlertItem[]>([])
+  const [authMode, setAuthMode] = useState('')
 
   useDidShow(() => {
     void (async () => {
       try {
         await ensureWechatSession()
         setUserId(miniApi.userId())
-        setMemory(await miniApi.memory())
+        setAuthMode(miniApi.authMode())
+        const [nextMemory, nextAlerts] = await Promise.all([
+          miniApi.memory(),
+          miniApi.alerts(),
+        ])
+        setMemory(nextMemory)
+        setAlerts(nextAlerts)
       } catch {
         await Taro.showToast({
           title: '用户信息暂时没有加载出来',
@@ -50,63 +38,43 @@ export default function ProfilePage() {
     })()
   })
 
+  const companion = companionFromMemory(memory?.memories || [])
+  const activeAlerts = alerts.filter((item) => item.status === 'active').length
+
   return (
     <View className="page-shell profile-page">
-      <View className="profile-page__identity">
-        <View className="profile-page__avatar">橙</View>
-        <View>
-          <Text className="page-title">我的 FareSniper</Text>
-          <Text className="page-subtitle">
-            {userId ? `微信账号已连接 · ${userId.slice(0, 12)}` : '正在连接微信账号'}
-          </Text>
-        </View>
+      <Text className="eyebrow">我的空间</Text>
+      <Text className="page-title">我的</Text>
+
+      <View className="profile-page__identity card">
+        <View className="profile-page__avatar">旅</View>
+        <View><Text className="profile-page__label">{authMode === 'wechat' ? '微信身份' : authMode === 'mock' ? '界面验收' : '临时身份'}</Text><Text className="profile-page__name">FareSniper 旅行者</Text><Text className="profile-page__connection">{authMode === 'wechat' ? '微信账号已连接，数据可跨会话保留' : authMode === 'mock' ? '当前使用显式演示数据' : userId ? '已连接真实服务，微信账号绑定即将开放' : '正在连接账号'}</Text></View>
       </View>
 
-      <Text className="section-title">Agent 记住了什么</Text>
-      <View className="profile-page__memories card">
-        {memory?.memories.length ? (
-          memory.memories.map((item) => (
-            <View className="profile-memory" key={item.field}>
-              <Text className="profile-memory__label">
-                {FIELD_LABELS[item.field] || item.field}
-              </Text>
-              <Text className="profile-memory__value">
-                {displayValue(item.value)}
-              </Text>
-            </View>
-          ))
-        ) : (
-          <View className="empty-state">
-            <Text className="empty-title">还没有形成稳定偏好</Text>
-            <Text className="empty-detail">
-              多完成几次搜索后，Agent 会逐步理解你的特价定义。
-            </Text>
-          </View>
-        )}
+      <View className="profile-page__companion companion-card">
+        <Companion kind={companion.kind} className="profile-page__companion-avatar" />
+        <View className="profile-page__companion-copy"><Text>当前旅伴</Text><Text className="profile-page__companion-name">{companion.name}</Text><Text>陪你记忆和提醒，不替你做购买决定。</Text></View>
+        <Button onClick={() => {
+          Taro.setStorageSync('fs_choose_companion', true)
+          Taro.switchTab({ url: '/pages/chat/index' })
+        }}>更换</Button>
       </View>
 
-      <Text className="section-title">最近问过</Text>
-      <View className="profile-page__history card">
-        {memory?.query_history.slice(0, 5).map((item, index) => (
-          <View className="profile-query" key={String(item.id || index)}>
-            <Text>
-              {item.query_text || item.query || '一次机票搜索'}
-            </Text>
-          </View>
-        ))}
-        {!memory?.query_history.length ? (
-          <View className="empty-state">
-            <Text className="empty-detail">搜索记录会显示在这里。</Text>
-          </View>
-        ) : null}
+      <View className="profile-page__menu">
+        <MenuRow icon="♡" title="管理机票偏好" detail={`${preferenceCount(memory?.memories || [])} 项会参与下次查价和排序`} onClick={() => Taro.switchTab({ url: '/pages/memory/index' })} />
+        <MenuRow icon="▤" title="查看旅行手帐" detail="确认成行后才会写入真实旅行" onClick={() => { Taro.setStorageSync('fs_memory_section', 'journal'); Taro.switchTab({ url: '/pages/memory/index' }) }} />
+        <MenuRow icon="◌" title="继续查票对话" detail="接着当前上下文补充时间和条件" onClick={() => Taro.switchTab({ url: '/pages/chat/index' })} />
+        <MenuRow icon="♧" title="价格提醒" detail={`${activeAlerts} 条监控中 · 查看微信订阅状态`} onClick={() => Taro.navigateTo({ url: '/pages/alerts/index' })} />
       </View>
 
       <View className="profile-page__notice">
-        <Text className="profile-page__notice-title">关于微信提醒</Text>
-        <Text className="profile-page__notice-detail">
-          微信只会发送你主动订阅的价格监控消息；每条一次性订阅在成功发送后即被消费。
-        </Text>
+        <Text className="profile-page__notice-title">隐私与记忆</Text>
+        <Text className="profile-page__notice-detail">查询只是查询，只有明确关注或真实成行才会进入对应记录。你可以随时查看和管理。</Text>
       </View>
     </View>
   )
+}
+
+function MenuRow({ icon, title, detail, onClick }: { icon: string; title: string; detail: string; onClick: () => void }) {
+  return <View className="profile-row" onClick={onClick}><View className="profile-row__icon">{icon}</View><View className="profile-row__copy"><Text>{title}</Text><Text>{detail}</Text></View><Text className="profile-row__arrow">›</Text></View>
 }

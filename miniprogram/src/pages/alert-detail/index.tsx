@@ -6,6 +6,23 @@ import { miniApi } from '../../services/api'
 import type { AlertItem } from '../../types/api'
 import './index.scss'
 
+function notificationLabel(status: string) {
+  if (status === 'subscribed') return '已订阅'
+  if (status === 'queued') return '等待发送'
+  if (status === 'retrying') return '发送重试中'
+  if (status === 'sent') return '已发送'
+  if (status === 'failed') return '发送失败'
+  return '未开启'
+}
+
+function alertStatusLabel(status: string) {
+  if (status === 'active') return '监控中'
+  if (status === 'paused') return '已暂停'
+  if (status === 'triggered') return '已达到目标价'
+  if (status === 'cancelled') return '已取消'
+  return status
+}
+
 export default function AlertDetailPage() {
   const [alert, setAlert] = useState<AlertItem | null>(null)
 
@@ -39,8 +56,19 @@ export default function AlertDetailPage() {
       content: '取消后不会再检查价格，也不会发送微信提醒。',
     })
     if (!result.confirm) return
-    await miniApi.updateAlert(alert.id, 'cancelled')
-    setAlert({ ...alert, status: 'cancelled' })
+    try {
+      await miniApi.updateAlert(alert.id, 'cancelled')
+      setAlert({ ...alert, status: 'cancelled' })
+      await Taro.showToast({
+        title: '监控已取消',
+        icon: 'success',
+      })
+    } catch {
+      await Taro.showToast({
+        title: '取消失败，请稍后重试',
+        icon: 'none',
+      })
+    }
   }
 
   return (
@@ -83,17 +111,11 @@ export default function AlertDetailPage() {
         </View>
         <View className="detail-fact">
           <Text>微信通知</Text>
-          <Text>
-            {alert.notification_status === 'subscribed'
-              ? '已订阅'
-              : alert.notification_status === 'sent'
-                ? '已发送'
-                : alert.notification_status}
-          </Text>
+          <Text>{notificationLabel(alert.notification_status)}</Text>
         </View>
         <View className="detail-fact">
           <Text>监控状态</Text>
-          <Text>{alert.status}</Text>
+          <Text>{alertStatusLabel(alert.status)}</Text>
         </View>
       </View>
 

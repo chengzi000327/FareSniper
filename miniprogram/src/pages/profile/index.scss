@@ -1,6 +1,9 @@
+.profile-page .page-title { margin-top:5px; }
 .profile-page__identity {
   display: flex;
   align-items: center;
+  margin-top:18px;
+  padding:16px;
   gap: 13px;
 }
 
@@ -12,11 +15,28 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #ff8a3d;
+  background: #432c1b;
   color: #fff;
   font-size: 20px;
   font-weight: 900;
 }
+.profile-page__label,.profile-page__name,.profile-page__connection { display:block; }
+.profile-page__label { color:#8c7b6e; font-size:9px; font-weight:700; }
+.profile-page__name { margin-top:2px; font-size:20px; font-weight:900; }
+.profile-page__connection { margin-top:3px; color:#8c7b6e; font-size:9px; }
+.profile-page__companion { z-index:0; display:flex; align-items:center; margin-top:12px; padding:14px; border-radius:24px; gap:12px; }
+.profile-page__companion-avatar { width:64px; flex-shrink:0; border-radius:20px; }
+.profile-page__companion-copy { position:relative; z-index:1; min-width:0; flex:1; color:rgba(255,255,255,.58); font-size:9px; line-height:1.5; }
+.profile-page__companion-copy text { display:block; }
+.profile-page__companion-name { margin:2px 0; color:#fff; font-size:18px; font-weight:900; }
+.profile-page__companion button { position:relative; z-index:1; width:48px; height:34px; border-radius:11px; background:rgba(255,255,255,.1); color:#fff; font-size:9px; font-weight:900; }
+.profile-page__menu { margin-top:16px; }
+.profile-row { display:flex; align-items:center; margin-top:9px; padding:13px; border:1px solid rgba(67,44,27,.07); border-radius:19px; background:#fff; gap:11px; }
+.profile-row__icon { display:flex; width:37px; height:37px; flex-shrink:0; align-items:center; justify-content:center; border-radius:12px; background:#fff0e5; color:#ff7a2f; font-size:19px; }
+.profile-row__copy { min-width:0; flex:1; }
+.profile-row__copy text { display:block; font-size:12px; font-weight:900; }
+.profile-row__copy text + text { margin-top:3px; color:#8c7b6e; font-size:9px; font-weight:500; line-height:1.5; }
+.profile-row__arrow { color:#8c7b6e; font-size:20px; }
 
 .profile-page__memories,
 .profile-page__history {
@@ -51,12 +71,12 @@
 }
 
 .profile-page__notice {
-  margin-top: 24px;
+  margin-top: 18px;
   padding: 16px;
-  border: 1px solid rgba(39, 174, 96, 0.18);
-  border-radius: 8px;
-  background: #f1fbf5;
-  color: #237a48;
+  border: 1px solid rgba(255,122,47,.14);
+  border-radius: 19px;
+  background: #fff0e5;
+  color: #7e4a2c;
 }
 
 .profile-page__notice-title,

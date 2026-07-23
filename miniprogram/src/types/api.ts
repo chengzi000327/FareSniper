@@ -53,6 +53,12 @@ export interface RecommendationCard {
   preview_deal?: DealCard | null
 }
 
+export interface RecommendationPage {
+  cards: RecommendationCard[]
+  has_more?: boolean
+  next_offset?: number
+}
+
 export interface AlertItem {
   id: string
   origin: string
@@ -68,16 +74,32 @@ export interface AlertItem {
   status: string
 }
 
+export type CompanionKind = 'cat' | 'corgi' | 'penguin' | 'plain'
+
+export interface CompanionProfile {
+  kind: CompanionKind
+  name: string
+}
+
+export interface MemoryItem {
+  field: string
+  value: unknown
+  label?: string
+  value_display?: string
+  source?: 'manual' | 'auto' | 'user' | 'learned' | string
+}
+
+export interface QueryHistoryItem {
+  id?: string | number
+  query?: {
+    text?: string
+    intent?: Record<string, unknown>
+  } | string
+  query_text?: string
+  created_at?: string
+}
+
 export interface MemoryResponse {
-  memories: Array<{
-    field: string
-    value: unknown
-    source?: string
-  }>
-  query_history: Array<{
-    id?: string | number
-    query?: string
-    query_text?: string
-    created_at?: string
-  }>
+  memories: MemoryItem[]
+  query_history: QueryHistoryItem[]
 }

@@ -8,19 +8,26 @@ import {
 } from './mock'
 import type {
   AlertItem,
+  MemoryItem,
   MemoryResponse,
+  RecommendationPage,
   RecommendationCard,
   SearchResponse,
 } from '../types/api'
 
 const API_BASE = (process.env.TARO_APP_API_BASE_URL || '').replace(/\/$/, '')
-const USE_MOCK = process.env.TARO_APP_USE_MOCK === 'true' || !API_BASE
+const USE_MOCK = process.env.TARO_APP_USE_MOCK === 'true'
 const TOKEN_KEY = 'fs_wechat_token'
 const USER_KEY = 'fs_wechat_user_id'
+const AUTH_MODE_KEY = 'fs_auth_mode'
 
 interface WechatSessionResponse {
   access_token: string
   user_id: string
+}
+
+interface VisitorSessionResponse extends WechatSessionResponse {
+  session_id: string
 }
 
 function token() {
@@ -30,13 +37,19 @@ function token() {
 export async function ensureWechatSession(force = false): Promise<string> {
   if (USE_MOCK) {
     Taro.setStorageSync(USER_KEY, 'wechat_mock_user')
+    Taro.setStorageSync(AUTH_MODE_KEY, 'mock')
     return 'wechat_mock_token'
+  }
+  if (!API_BASE) {
+    throw new Error('未配置 TARO_APP_API_BASE_URL')
   }
   if (!force && token()) return token()
 
   const login = await Taro.login()
   if (!login.code) throw new Error('微信登录未返回 code')
-  const response = await Taro.request<WechatSessionResponse>({
+  const response = await Taro.request<
+    WechatSessionResponse | { detail?: string }
+  >({
     url: `${API_BASE}/api/auth/wechat/session`,
     method: 'POST',
     header: {
@@ -46,21 +59,46 @@ export async function ensureWechatSession(force = false): Promise<string> {
       code: login.code,
     },
   })
-  if (response.statusCode !== 200) {
+  if (response.statusCode === 200 && 'access_token' in response.data) {
+    Taro.setStorageSync(TOKEN_KEY, response.data.access_token)
+    Taro.setStorageSync(USER_KEY, response.data.user_id)
+    Taro.setStorageSync(AUTH_MODE_KEY, 'wechat')
+    return response.data.access_token
+  }
+
+  if (response.statusCode !== 404 && response.statusCode !== 503) {
     throw new Error(`微信登录失败：${response.statusCode}`)
   }
-  Taro.setStorageSync(TOKEN_KEY, response.data.access_token)
-  Taro.setStorageSync(USER_KEY, response.data.user_id)
-  return response.data.access_token
+
+  const visitor = await Taro.request<VisitorSessionResponse>({
+    url: `${API_BASE}/api/session`,
+    method: 'POST',
+    header: {
+      'content-type': 'application/json',
+    },
+    data: {},
+  })
+  if (visitor.statusCode !== 200) {
+    throw new Error(`访客会话创建失败：${visitor.statusCode}`)
+  }
+  Taro.setStorageSync(TOKEN_KEY, visitor.data.access_token)
+  Taro.setStorageSync(USER_KEY, visitor.data.user_id)
+  Taro.setStorageSync(AUTH_MODE_KEY, 'visitor')
+  return visitor.data.access_token
 }
 
 async function request<T>(
   path: string,
   options: {
-    method?: 'GET' | 'POST' | 'PATCH'
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
     data?: unknown
   } = {},
 ): Promise<T> {
+  if (!API_BASE) {
+    throw new Error(
+      '未配置 TARO_APP_API_BASE_URL。正式构建不会自动回退到演示票价。',
+    )
+  }
   const send = async (accessToken: string) =>
     Taro.request<T>({
       url: `${API_BASE}${path}`,
@@ -101,12 +139,25 @@ export const miniApi = {
     })
   },
 
+  async recommendationPage(
+    limit = 8,
+    offset = 0,
+  ): Promise<RecommendationPage> {
+    if (USE_MOCK) {
+      const cards = MOCK_RECOMMENDATIONS.slice(offset, offset + limit)
+      return {
+        cards,
+        has_more: offset + cards.length < MOCK_RECOMMENDATIONS.length,
+        next_offset: offset + cards.length,
+      }
+    }
+    return request<RecommendationPage>(
+      `/api/recommendations?limit=${limit}&offset=${offset}`,
+    )
+  },
+
   async recommendations(): Promise<RecommendationCard[]> {
-    if (USE_MOCK) return MOCK_RECOMMENDATIONS
-    const response = await request<{
-      cards: RecommendationCard[]
-    }>('/api/recommendations?limit=8&offset=0')
-    return response.cards
+    return (await this.recommendationPage()).cards
   },
 
   async alerts(): Promise<AlertItem[]> {
@@ -134,8 +185,25 @@ export const miniApi = {
     notify_wechat: boolean
   }): Promise<{ id: string; wechat_notification: string }> {
     if (USE_MOCK) {
+      const id = `alert_${Date.now()}`
+      MOCK_ALERTS.unshift({
+        id,
+        origin: input.origin,
+        destination: input.destination,
+        depart_date: input.depart_date,
+        target_price: input.target_price,
+        current_price: input.current_price,
+        latest_price: input.current_price,
+        latest_provider: '演示报价',
+        latest_quote_at: new Date().toISOString(),
+        currency: input.currency,
+        notification_status: input.notify_wechat
+          ? 'subscribed'
+          : 'not_requested',
+        status: 'active',
+      })
       return {
-        id: `alert_${Date.now()}`,
+        id,
         wechat_notification: input.notify_wechat
           ? 'subscribed'
           : 'not_requested',
@@ -151,7 +219,11 @@ export const miniApi = {
     alertId: string,
     status: 'active' | 'paused' | 'cancelled',
   ) {
-    if (USE_MOCK) return { id: alertId, status }
+    if (USE_MOCK) {
+      const alert = MOCK_ALERTS.find((item) => item.id === alertId)
+      if (alert) alert.status = status
+      return { id: alertId, status }
+    }
     return request(`/api/alerts/${encodeURIComponent(alertId)}`, {
       method: 'PATCH',
       data: { status },
@@ -160,6 +232,8 @@ export const miniApi = {
 
   async subscribeAlert(alertId: string) {
     if (USE_MOCK) {
+      const alert = MOCK_ALERTS.find((item) => item.id === alertId)
+      if (alert) alert.notification_status = 'subscribed'
       return { id: alertId, wechat_notification: 'subscribed' }
     }
     return request<{
@@ -175,8 +249,53 @@ export const miniApi = {
     return request<MemoryResponse>('/api/memory')
   },
 
+  async patchMemory(field: string, value: unknown) {
+    if (USE_MOCK) {
+      const existing = MOCK_MEMORY.memories.find((item) => item.field === field)
+      const next: MemoryItem = {
+        field,
+        value,
+        label: existing?.label || field,
+        value_display:
+          typeof value === 'number'
+            ? `¥${value}`
+            : Array.isArray(value)
+              ? value.join('、')
+              : typeof value === 'object'
+                ? String((value as Record<string, unknown>)?.name || '已保存')
+                : String(value),
+        source: 'manual',
+      }
+      MOCK_MEMORY.memories = [
+        next,
+        ...MOCK_MEMORY.memories.filter((item) => item.field !== field),
+      ]
+      return { ok: true }
+    }
+    return request<{ ok: boolean }>('/api/memory', {
+      method: 'PATCH',
+      data: { field, value },
+    })
+  },
+
+  async deleteMemory(field: string) {
+    if (USE_MOCK) {
+      MOCK_MEMORY.memories = MOCK_MEMORY.memories.filter(
+        (item) => item.field !== field,
+      )
+      return
+    }
+    await request<void>(`/api/memory/${encodeURIComponent(field)}`, {
+      method: 'DELETE',
+    })
+  },
+
   userId(): string {
     return Taro.getStorageSync<string>(USER_KEY) || ''
+  },
+
+  authMode(): 'wechat' | 'visitor' | 'mock' | '' {
+    return Taro.getStorageSync(AUTH_MODE_KEY) || ''
   },
 
   isMock(): boolean {

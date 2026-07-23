@@ -38,7 +38,7 @@ def test_ctrip_hourly_refresh_registered_at_minute_zero():
 
 
 @pytest.mark.asyncio
-async def test_external_worker_keeps_fifteen_minute_alert_job(monkeypatch):
+async def test_external_worker_registers_alert_and_notification_jobs(monkeypatch):
     scheduler = _FakeScheduler()
     monkeypatch.setattr(run_all, "build_scheduler", lambda: scheduler)
     monkeypatch.setattr(run_all.asyncio, "Event", _FinishedEvent)
@@ -47,7 +47,20 @@ async def test_external_worker_keeps_fifteen_minute_alert_job(monkeypatch):
 
     assert scheduler.started is True
     assert scheduler.jobs == [
-        (run_all.check_alerts_once, "interval", 15, "alert_loop")
+        (
+            run_all.check_alerts_once,
+            "interval",
+            15,
+            "alert_loop",
+            {},
+        ),
+        (
+            run_all.dispatch_notifications_once,
+            "interval",
+            1,
+            "notification_dispatch",
+            {"max_instances": 1, "coalesce": True},
+        ),
     ]
 
 
@@ -56,8 +69,8 @@ class _FakeScheduler:
         self.jobs = []
         self.started = False
 
-    def add_job(self, func, trigger, *, minutes, id):
-        self.jobs.append((func, trigger, minutes, id))
+    def add_job(self, func, trigger, *, minutes, id, **kwargs):
+        self.jobs.append((func, trigger, minutes, id, kwargs))
 
     def start(self):
         self.started = True
