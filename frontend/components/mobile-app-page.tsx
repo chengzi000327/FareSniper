@@ -19,10 +19,8 @@ import {
   Plus,
   Search,
   Send,
-  ShieldCheck,
   Sparkles,
   Trash2,
-  UserCheck,
   UserRound,
   X,
 } from 'lucide-react'
@@ -47,11 +45,6 @@ type TravelIdea = {
 type CompanionKind = 'cat' | 'corgi' | 'penguin' | 'plain'
 type CompanionPose = 'idle' | 'journal'
 type MobileMemorySection = 'preferences' | 'ideas' | 'queries' | 'journal'
-type MobileAccount = {
-  userId: string | null
-  phone: string | null
-  loggedIn: boolean
-}
 
 const COMPANION_ASSETS: Record<Exclude<CompanionKind, 'plain'>, string> = {
   cat: '/companions/cloud-cat-actions.png',
@@ -123,29 +116,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
-}
-
-function readMobileAccount(): MobileAccount {
-  if (typeof window === 'undefined') return { userId: null, phone: null, loggedIn: false }
-  const userId = window.localStorage.getItem('fs_user_id')
-  const phone = window.localStorage.getItem('fs_phone')
-  return {
-    userId,
-    phone,
-    loggedIn: !!userId && !userId.startsWith('anon_'),
-  }
-}
-
-function maskPhone(phone: string | null) {
-  if (!phone) return '已绑定手机号'
-  const digits = phone.replace(/\D/g, '')
-  return digits.length >= 11 ? `${digits.slice(-11, -7)}****${digits.slice(-4)}` : phone
-}
-
-function shortAccountId(userId: string | null) {
-  if (!userId) return ''
-  const compact = userId.replace(/[^a-zA-Z0-9]/g, '')
-  return compact.slice(-8).toUpperCase()
 }
 
 function normalizePhone(phone: string) {
@@ -274,7 +244,6 @@ export function MobileAppPage() {
   const [alerts, setAlerts] = React.useState<AlertItemDto[]>([])
   const [loading, setLoading] = React.useState(true)
   const [memoryState, setMemoryState] = React.useState<'loading' | 'ready' | 'error'>('loading')
-  const [account, setAccount] = React.useState<MobileAccount>({ userId: null, phone: null, loggedIn: false })
   const [phoneLoginAvailable, setPhoneLoginAvailable] = React.useState(false)
   const [choosingCompanion, setChoosingCompanion] = React.useState(false)
   const loadingMoreRecommendationsRef = React.useRef(false)
@@ -294,7 +263,6 @@ export function MobileAppPage() {
           query_history: memoryResult.value.query_history ?? [],
         })
         setMemoryState('ready')
-        setAccount(readMobileAccount())
       } else {
         setMemoryState('error')
       }
@@ -370,7 +338,6 @@ export function MobileAppPage() {
   }
 
   const accountChanged = () => {
-    setAccount(readMobileAccount())
     loadData()
   }
 
@@ -420,9 +387,6 @@ export function MobileAppPage() {
             <MobileProfile
               memory={memory}
               alerts={alerts}
-              account={account}
-              phoneLoginAvailable={phoneLoginAvailable}
-              onAccountChanged={accountChanged}
               onChooseCompanion={() => setChoosingCompanion(true)}
               onOpenMemory={() => setActiveTab('memory')}
               onOpenChat={() => setActiveTab('chat')}
@@ -1052,56 +1016,32 @@ function MobileEmpty({ title, detail }: { title: string; detail: string }) {
 function MobileProfile({
   memory,
   alerts,
-  account,
-  phoneLoginAvailable,
-  onAccountChanged,
   onChooseCompanion,
   onOpenMemory,
   onOpenChat,
 }: {
   memory: MobileMemory
   alerts: AlertItemDto[]
-  account: MobileAccount
-  phoneLoginAvailable: boolean
-  onAccountChanged: () => void
   onChooseCompanion: () => void
   onOpenMemory: () => void
   onOpenChat: () => void
 }) {
   const companion = companionFromMemory(memory.memories)
-  const [showLogin, setShowLogin] = React.useState(false)
   const [showAlerts, setShowAlerts] = React.useState(false)
   return (
     <div className="thin-scrollbar h-full overflow-y-auto px-4 pb-8 pt-[max(1.1rem,env(safe-area-inset-top))]">
       <div className="text-[10px] font-black tracking-[0.2em] text-brand-orange">我的空间</div>
-      <h1 className="mt-1 font-serif text-[2rem] font-black leading-tight text-brand-text">账号与旅伴</h1>
+      <h1 className="mt-1 font-serif text-[2rem] font-black leading-tight text-brand-text">我的</h1>
 
-      <section className="mt-4 rounded-[24px] border border-brand-text/7 bg-white p-4 shadow-sm">
-        <div className="flex items-start gap-3">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-brand-text text-white"><UserCheck className="h-4 w-4" /></div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[10px] font-bold text-brand-muted">
-              <span className={`h-2 w-2 rounded-full ${account.loggedIn ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-              {account.loggedIn ? '已登录并同步' : '游客模式'}
-            </div>
-            <div className="mt-1 text-base font-black text-brand-text">{account.loggedIn ? maskPhone(account.phone) : '先在这台设备继续使用'}</div>
-            <p className="mt-1 text-[10px] leading-5 text-brand-muted">{account.loggedIn ? '偏好、旅伴和提醒会跟随账号。' : '这台设备会继续使用当前记忆；绑定手机号后才能跨设备接回。'}</p>
-          </div>
+      <section aria-label="账号资料" className="mt-4 flex items-center gap-3 rounded-[24px] border border-brand-text/7 bg-white p-4 shadow-sm">
+        <div aria-label="账号头像" className="grid h-14 w-14 shrink-0 place-items-center rounded-full bg-brand-text text-white">
+          <UserRound className="h-6 w-6" />
         </div>
-        <div className="mt-3 flex items-center justify-between rounded-xl bg-brand-bg px-3 py-2 text-[9px] font-semibold text-brand-muted">
-          <span>{account.loggedIn ? '跨设备同步已开启' : '仅当前设备可直接使用'}</span>
-          {account.userId ? <span>编号 {shortAccountId(account.userId)}</span> : null}
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold text-brand-muted">昵称</div>
+          <div className="mt-0.5 text-xl font-black text-brand-text">旅行者</div>
         </div>
-        {!account.loggedIn ? (
-          phoneLoginAvailable ? (
-            <button type="button" onClick={() => setShowLogin((value) => !value)} className="mt-3 h-10 w-full rounded-xl bg-brand-text text-xs font-black text-white">{showLogin ? '收起登录' : '绑定手机号，开启跨设备同步'}</button>
-          ) : (
-            <div className="mt-3 flex items-center gap-2 rounded-xl bg-[#fff0dc] px-3 py-2.5 text-[10px] font-semibold text-brand-text"><ShieldCheck className="h-4 w-4 text-brand-orange" />跨设备同步暂未开放，不影响当前设备使用</div>
-          )
-        ) : null}
       </section>
-
-      {showLogin && phoneLoginAvailable ? <MobileOtpForm onSuccess={() => { setShowLogin(false); onAccountChanged() }} /> : null}
 
       <section className="mt-3 flex items-center gap-3 rounded-[24px] bg-brand-text p-4 text-white shadow-sm">
         <div className="w-16 shrink-0"><MobileCompanion kind={companion.kind} /></div>
@@ -1111,12 +1051,6 @@ function MobileProfile({
           <div className="mt-1 text-[10px] leading-4 text-white/60">陪你记忆和提醒，不替你做购买决定。</div>
         </div>
         <button type="button" onClick={onChooseCompanion} className="shrink-0 rounded-xl bg-white/10 px-3 py-2 text-[10px] font-black text-white">更换</button>
-      </section>
-
-      <section className="mt-3 grid grid-cols-3 gap-2" aria-label="账号数据概览">
-        <ProfileStat label="偏好" value={memory.memories.filter((item) => !INTERNAL_MEMORY_FIELDS.has(item.field)).length} />
-        <ProfileStat label="查询" value={memory.query_history.length} />
-        <ProfileStat label="提醒" value={alerts.length} />
       </section>
 
       <div className="mt-4 space-y-2.5">
@@ -1157,15 +1091,6 @@ function ProfileRow({ icon, title, detail, onClick }: { icon: React.ReactElement
       </div>
       <ChevronRight className="h-4 w-4 text-brand-muted" />
     </button>
-  )
-}
-
-function ProfileStat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-[18px] bg-white px-2 py-3 text-center shadow-sm">
-      <div className="text-base font-black text-brand-text">{value}</div>
-      <div className="mt-0.5 text-[9px] font-bold text-brand-muted">{label}</div>
-    </div>
   )
 }
 

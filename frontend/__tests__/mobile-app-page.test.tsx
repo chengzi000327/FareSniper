@@ -191,43 +191,35 @@ test('asks a first-time user to choose and name a companion before entering the 
   expect(screen.getByText('旺仔 在这里')).toBeInTheDocument()
 })
 
-test('shows the real guest account state when phone login is not configured', async () => {
+test('keeps the profile header to avatar and nickname only', async () => {
   localStorage.setItem('fs_user_id', 'anon_mobile_test')
   localStorage.removeItem('fs_phone')
   render(<MobileAppPage />)
   await waitFor(() => expect(getMemory).toHaveBeenCalledTimes(1))
 
   fireEvent.click(screen.getByRole('button', { name: '我的' }))
-  expect(await screen.findByText('游客模式')).toBeInTheDocument()
-  expect(screen.getByText('跨设备同步暂未开放，不影响当前设备使用')).toBeInTheDocument()
-  expect(screen.getByText('编号 BILETEST')).toBeInTheDocument()
-  expect(screen.getByRole('region', { name: '账号数据概览' })).toBeInTheDocument()
+  expect(await screen.findByRole('region', { name: '账号资料' })).toBeInTheDocument()
+  expect(screen.getByLabelText('账号头像')).toBeInTheDocument()
+  expect(screen.getByText('旅行者')).toBeInTheDocument()
+  expect(screen.queryByText('游客模式')).not.toBeInTheDocument()
+  expect(screen.queryByText(/跨设备同步/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/编号/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: '账号数据概览' })).not.toBeInTheDocument()
+  expect(screen.queryByText('偏好', { selector: 'div' })).not.toBeInTheDocument()
+  expect(screen.queryByText('查询', { selector: 'div' })).not.toBeInTheDocument()
+  expect(screen.queryByText('提醒', { selector: 'div' })).not.toBeInTheDocument()
   expect(screen.getByText('1 条提醒已保存到后端')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: /价格提醒/ }))
   expect(screen.getByRole('region', { name: '手机端价格提醒列表' })).toBeInTheDocument()
   expect(screen.getByText('BJS → SHA')).toBeInTheDocument()
 })
 
-test('binds a guest account by phone when SMS login is available', async () => {
-  localStorage.setItem('fs_user_id', 'anon_mobile_test')
-  localStorage.removeItem('fs_phone')
-  authStatus.mockResolvedValueOnce({ phone_login_available: true })
-  verifyOtp.mockImplementationOnce(async () => {
-    localStorage.setItem('fs_user_id', 'user_phone_test')
-    return { access_token: 'token', user_id: 'user_phone_test' }
-  })
+test('does not expose phone or account diagnostics for a stored account', async () => {
   render(<MobileAppPage />)
-  await waitFor(() => expect(authStatus).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(getMemory).toHaveBeenCalledTimes(1))
 
   fireEvent.click(screen.getByRole('button', { name: '我的' }))
-  fireEvent.click(await screen.findByRole('button', { name: '绑定手机号，开启跨设备同步' }))
-  fireEvent.change(screen.getByLabelText('手机号'), { target: { value: '13800000000' } })
-  fireEvent.click(screen.getByRole('button', { name: '获取验证码' }))
-  await waitFor(() => expect(requestOtp).toHaveBeenCalledWith('+8613800000000'))
-  fireEvent.change(screen.getByLabelText('验证码'), { target: { value: '123456' } })
-  fireEvent.click(screen.getByRole('button', { name: '登录并接回数据' }))
-
-  await waitFor(() => expect(verifyOtp).toHaveBeenCalledWith('+8613800000000', '123456'))
-  expect(await screen.findByText('已登录并同步')).toBeInTheDocument()
-  expect(screen.getByText('1380****0000')).toBeInTheDocument()
+  expect(await screen.findByText('旅行者')).toBeInTheDocument()
+  expect(screen.queryByText('1380****0000')).not.toBeInTheDocument()
+  expect(screen.queryByText(/已登录/)).not.toBeInTheDocument()
 })
