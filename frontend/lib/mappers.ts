@@ -22,6 +22,7 @@ export function dealToCardProps(deal: DealCardDto): DiscoveryCardContentProps {
     date: deal.depart_date,
     flightNo: deal.flight_no,
     airline: deal.airline,
+    stops: deal.stops,
     signals: deal.signals,
     basePrice: deal.base_price ?? null,
     totalPrice: deal.total_price,

@@ -216,18 +216,25 @@ test("uses the deal currency in fallback assistant copy", async () => {
   expect(screen.queryByText("为您找到 1 个航班，最低价 ¥80")).not.toBeInTheDocument();
 });
 
-test("marks result tables as horizontally scrollable in compact chat", async () => {
+test("turns compact result tables into an expandable phone list", async () => {
   render(<ChatPage compact />);
   await send("上海去三亚");
 
   await act(async () => {
     calls[0].onEvent(complete(1, response(
-      "| 航班 | 平台 | 出发 | 到达 | 平台展示价 |\n| --- | --- | --- | --- | --- |\n| 9C8779 | 飞猪 | 07:25 | 10:55 | ¥797 |"
+      "| 航班 | 平台 | 出发 | 到达 | 平台展示价 |\n| --- | --- | --- | --- | --- |\n| 9C8779 | 飞猪 | 07:25 | 10:55 | ¥797 |\n| MU1234 | 携程 | 08:00 | 11:20 | ¥810 |\n| CZ5678 | 飞猪 | 09:10 | 12:30 | ¥820 |\n| HO9012 | 携程 | 10:15 | 13:40 | ¥830 |\n| CA3456 | 飞猪 | 11:20 | 14:50 | ¥840 |\n\n平台展示价最低：¥797。"
     )));
   });
 
-  expect(await screen.findByText("航班列表可左右滑动")).toBeInTheDocument();
-  expect(screen.getByRole("table").closest(".prose")).toHaveClass("[&_table]:text-[10px]");
+  expect(await screen.findByRole("region", { name: "手机端航班结果" })).toBeInTheDocument();
+  expect(screen.getByText("找到 5 个航班")).toBeInTheDocument();
+  expect(screen.getByText("9C8779")).toBeInTheDocument();
+  expect(screen.queryByText("CA3456")).not.toBeInTheDocument();
+  expect(screen.queryByRole("table")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "查看其余 1 个航班" }));
+  expect(screen.getByText("CA3456")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "收起航班列表" })).toBeInTheDocument();
 });
 
 test("aborts and settles the old assistant while ignoring its late events", async () => {

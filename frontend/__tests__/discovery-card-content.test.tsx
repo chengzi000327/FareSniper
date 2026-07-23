@@ -85,6 +85,42 @@ test("uses mobile type density without changing the original card sections", () 
   expect(screen.getByRole("button", { name: "前往预订" })).toBeInTheDocument();
 });
 
+test("uses the real stop count and hides a meaningless zero score on mobile", () => {
+  render(
+    <DiscoveryCardContent
+      from="北京"
+      to="上海"
+      date="2026-07-24"
+      stops={1}
+      basePrice={500}
+      totalPrice={700}
+      tax={200}
+      baggageFee={null}
+      hasBaggage={null}
+      currency="CNY"
+      platform="飞猪"
+      recommendScore="0.0"
+      winningPriceId="row-飞猪"
+      dataFreshness="fresh"
+      prices={[
+        priceRow({
+          name: "飞猪",
+          price: 700,
+          price_status: "priced",
+          lowest: true,
+        }),
+      ]}
+      compact
+      narrow
+    />
+  );
+
+  expect(screen.getByText("中转 1 次 · 2026-07-24")).toBeInTheDocument();
+  expect(screen.queryByText(/直飞特惠/)).not.toBeInTheDocument();
+  expect(screen.queryByText("发现指数")).not.toBeInTheDocument();
+  expect(screen.queryByText("0.0")).not.toBeInTheDocument();
+});
+
 test("renders a numeric view-live-price row as its known amount", () => {
   render(
     <DiscoveryCardContent

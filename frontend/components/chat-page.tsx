@@ -80,6 +80,10 @@ function applyProviderStatus(
 // prose 限定在气泡内，避免 LLM 输出的 ### / |表格| 直接暴露成纯文本。
 function MarkdownMessage({ content, compact = false }: { content: string; compact?: boolean }) {
   const hasTable = /^\s*\|.+\|\s*$/m.test(content)
+  const mobileFlights = compact ? parseMobileFlightResults(content) : null
+
+  if (mobileFlights) return <MobileFlightResults result={mobileFlights} />
+
   return (
     <>
       {compact && hasTable ? (
@@ -95,6 +99,93 @@ function MarkdownMessage({ content, compact = false }: { content: string; compac
         </ReactMarkdown>
       </div>
     </>
+  )
+}
+
+type MobileFlightResult = {
+  rows: Array<{ flight: string; platform: string; depart: string; arrive: string; price: string }>
+  lowestPrice: string | null
+}
+
+function markdownCells(line: string) {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim().replace(/\*\*/g, ''))
+}
+
+function parseMobileFlightResults(content: string): MobileFlightResult | null {
+  const lines = content.split('\n')
+  const dividerIndex = lines.findIndex((line) => /^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(line))
+  if (dividerIndex < 1) return null
+
+  const headers = markdownCells(lines[dividerIndex - 1])
+  const indexes = {
+    flight: headers.indexOf('航班'),
+    platform: headers.indexOf('平台'),
+    depart: headers.indexOf('出发'),
+    arrive: headers.indexOf('到达'),
+    price: headers.findIndex((header) => header.includes('价')),
+  }
+  if (Object.values(indexes).some((index) => index < 0)) return null
+
+  const rows: MobileFlightResult['rows'] = []
+  for (const line of lines.slice(dividerIndex + 1)) {
+    if (!/^\s*\|.+\|\s*$/.test(line)) break
+    const cells = markdownCells(line)
+    rows.push({
+      flight: cells[indexes.flight] ?? '待确认',
+      platform: cells[indexes.platform] ?? '来源待确认',
+      depart: cells[indexes.depart] ?? '--:--',
+      arrive: cells[indexes.arrive] ?? '--:--',
+      price: cells[indexes.price] ?? '待确认',
+    })
+  }
+  if (!rows.length) return null
+
+  const lowestPrice = content.match(/平台展示价最低[:：]\s*([^\s（(。]+)/)?.[1]?.replace(/\*\*/g, '') ?? null
+  return { rows, lowestPrice }
+}
+
+function MobileFlightResults({ result }: { result: MobileFlightResult }) {
+  const [expanded, setExpanded] = React.useState(false)
+  const visibleRows = expanded ? result.rows : result.rows.slice(0, 4)
+  const hiddenCount = result.rows.length - visibleRows.length
+
+  return (
+    <section aria-label="手机端航班结果" className="w-full">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <div className="text-[9px] font-black tracking-[0.14em] text-brand-orange">真实来源结果</div>
+          <h3 className="mt-1 text-[13px] font-black text-brand-text">找到 {result.rows.length} 个航班</h3>
+        </div>
+        {result.lowestPrice ? <div className="text-right"><div className="text-[8px] font-bold text-brand-muted">最低展示价</div><div className="text-sm font-black text-brand-orange">{result.lowestPrice}</div></div> : null}
+      </div>
+
+      <div role="list" className="mt-2 divide-y divide-brand-text/7 overflow-hidden rounded-2xl border border-brand-text/7 bg-brand-bg/35">
+        {visibleRows.map((row, index) => (
+          <div role="listitem" key={`${row.flight}-${row.platform}-${index}`} className="flex items-center justify-between gap-3 px-3 py-2.5">
+            <div className="min-w-0">
+              <div className="truncate text-[11px] font-black text-brand-text">{row.flight}</div>
+              <div className="mt-0.5 text-[9px] font-bold text-brand-muted">{row.platform}</div>
+            </div>
+            <div className="flex shrink-0 items-center gap-3">
+              <div className="text-right text-[9px] leading-4 text-brand-muted"><span className="font-bold text-brand-text">{row.depart}</span><span className="mx-1">→</span><span>{row.arrive}</span></div>
+              <div className="w-12 text-right text-[11px] font-black text-brand-orange">{row.price}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {result.rows.length > 4 ? (
+        <button type="button" onClick={() => setExpanded((value) => !value)} className="mt-2 h-8 w-full rounded-xl bg-brand-orange-light text-[10px] font-black text-brand-orange">
+          {expanded ? '收起航班列表' : `查看其余 ${hiddenCount} 个航班`}
+        </button>
+      ) : null}
+      <p className="mt-2 text-[9px] leading-4 text-brand-muted">已按平台展示价排序；点击下方推荐卡查看当前最优结果详情。</p>
+    </section>
   )
 }
 
@@ -485,13 +576,16 @@ export function ChatPage({
               </div>
 
               {'hasCard' in message && message.hasCard && message.cardData ? (
-                <div className={`${compact ? 'mt-3' : 'mt-4'} w-full max-w-2xl overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card`}>
-                  <DiscoveryCardContent
-                    {...message.cardData}
-                    compact={compact || message.cardData.compact}
-                    narrow={compact}
-                    onMonitorPrice={() => setAlertCard(message.cardData ?? null)}
-                  />
+                <div className={`${compact ? 'mt-3' : 'mt-4'} w-full max-w-2xl`}>
+                  {compact ? <div className="mb-1.5 px-1 text-[9px] font-black tracking-[0.12em] text-brand-orange">当前最优结果详情</div> : null}
+                  <div className="overflow-hidden rounded-[28px] border border-brand-text/5 bg-white shadow-card">
+                    <DiscoveryCardContent
+                      {...message.cardData}
+                      compact={compact || message.cardData.compact}
+                      narrow={compact}
+                      onMonitorPrice={() => setAlertCard(message.cardData ?? null)}
+                    />
+                  </div>
                 </div>
               ) : null}
             </motion.div>

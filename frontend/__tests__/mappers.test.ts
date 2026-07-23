@@ -69,6 +69,7 @@ test("preserves null price and baggage fields when mapping a deal", () => {
   expect(card.prices[0].price).toBeNull();
   expect(card.currency).toBe("CNY");
   expect(card.recommendScore).toBe("8.6");
+  expect(card.stops).toBe(0);
 });
 
 test("preserves a nullable score and per-row currencies", () => {

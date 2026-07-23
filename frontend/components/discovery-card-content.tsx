@@ -90,6 +90,7 @@ export type DiscoveryCardContentProps = {
   date?: string
   flightNo?: string
   airline?: string
+  stops?: number
   signals?: string[]
   basePrice: number | null
   totalPrice?: number | null
@@ -121,6 +122,7 @@ export function DiscoveryCardContent({
   date,
   flightNo,
   airline,
+  stops,
   signals = [],
   basePrice,
   totalPrice,
@@ -226,11 +228,24 @@ export function DiscoveryCardContent({
     }).catch(() => undefined)
   }
   const cardPadding = narrow ? 'p-2.5' : compact ? 'p-3.5 sm:p-4' : 'p-5 sm:p-6'
-  const sectionGap = narrow ? 'mb-2.5' : compact ? 'mb-3.5' : 'mb-5'
+  const sectionGap = narrow ? 'mb-2' : compact ? 'mb-3.5' : 'mb-5'
+  const numericRecommendScore = Number(recommendScore)
+  const visibleRecommendScore =
+    recommendScore &&
+    Number.isFinite(numericRecommendScore) &&
+    numericRecommendScore > 0
+      ? recommendScore
+      : null
+  const routeKind =
+    stops === 0
+      ? '直飞特惠'
+      : typeof stops === 'number' && stops > 0
+        ? `中转 ${stops} 次`
+        : '实时航班'
 
   return (
     <div className={`flex h-full flex-col ${cardPadding}`}>
-      <div className={`flex flex-col ${narrow ? 'gap-2' : 'gap-3'} ${narrow ? '' : 'sm:flex-row sm:items-start sm:justify-between'} ${narrow ? 'mb-2' : compact ? 'mb-2.5' : 'mb-5'}`}>
+      <div className={`flex ${narrow ? 'items-start justify-between gap-2' : 'flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'} ${narrow ? 'mb-2' : compact ? 'mb-2.5' : 'mb-5'}`}>
         <div className={`flex items-center ${narrow ? 'gap-2.5' : 'gap-3'}`}>
           <div
             className={`flex items-center justify-center rounded-2xl bg-brand-orange/10 ${narrow ? 'h-8 w-8' : compact ? 'h-10 w-10' : 'h-12 w-12'}`}
@@ -249,26 +264,26 @@ export function DiscoveryCardContent({
                 : placeholder
                   ? '待查询 · 正在获取数据'
                 : hasRealtimeWinner
-                  ? `直飞特惠 · ${date || '实时价格'}`
+                  ? `${routeKind} · ${date || '实时价格'}`
                   : `航班价格参考${date ? ` · ${date}` : ''}`}
             </p>
           </div>
         </div>
-        {recommendScore ? (
-          <div className={`flex flex-col items-start ${narrow ? '' : 'sm:items-end'}`}>
+        {visibleRecommendScore ? (
+          <div className={`flex shrink-0 flex-col ${narrow ? 'items-end' : 'items-start sm:items-end'}`}>
             <div className={`${narrow ? 'mb-1 px-1.5 py-0.5 text-[8px]' : 'mb-2 px-2 py-1 text-[10px]'} rounded-md bg-green-500 font-bold uppercase tracking-[0.25em] text-white shadow-sm shadow-green-500/20`}>
               发现指数
             </div>
             <span className={`font-black leading-none tracking-tight text-green-500 ${narrow ? 'text-lg' : compact ? 'text-2xl' : 'text-3xl'}`}>
-              {recommendScore}
+              {visibleRecommendScore}
             </span>
           </div>
         ) : null}
       </div>
 
       <div
-        className={`relative ${sectionGap} grid grid-cols-2 items-center overflow-hidden rounded-2xl border border-brand-text/5 bg-brand-bg/70 ${narrow ? 'gap-2' : 'gap-3 sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:gap-2'} ${
-          narrow ? 'p-2.5' : compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'
+        className={`relative ${sectionGap} grid items-center overflow-hidden rounded-2xl border border-brand-text/5 bg-brand-bg/70 ${narrow ? 'grid-cols-4 gap-1' : 'grid-cols-2 gap-3 sm:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr] sm:gap-2'} ${
+          narrow ? 'p-2' : compact ? 'p-3 sm:p-3.5' : 'p-4 sm:p-[18px]'
         }`}
       >
         <div className="absolute left-0 top-0 h-1 w-full bg-gradient-to-r from-transparent via-brand-orange/20 to-transparent" />
@@ -301,7 +316,7 @@ export function DiscoveryCardContent({
           highlight={baggageFee !== null && baggageFee > 0}
         />
         <Equal className={`hidden h-4 w-4 text-brand-muted/40 ${narrow ? '' : 'sm:block'}`} />
-        <div className={`col-span-2 flex flex-col items-start border-t border-brand-text/5 ${narrow ? 'pt-2' : 'pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0'}`}>
+        <div className={`flex flex-col ${narrow ? 'col-span-1 items-center border-l border-brand-text/5 pl-1' : 'col-span-2 items-start border-t border-brand-text/5 pt-3 sm:col-span-1 sm:items-end sm:border-t-0 sm:pt-0'}`}>
           <span className={`${narrow ? 'mb-0.5 text-[9px]' : 'mb-1 text-[11px] sm:text-xs'} font-bold text-brand-orange`}>
             {demo
               ? '示例总价'
@@ -433,7 +448,7 @@ export function DiscoveryCardContent({
         </div>
       </div>
 
-      <div className={`mt-auto flex flex-col ${narrow ? 'gap-1.5' : 'gap-2 sm:flex-row'}`}>
+      <div className={`mt-auto flex ${narrow ? 'flex-row gap-1.5' : 'flex-col gap-2 sm:flex-row'}`}>
         {onSearch ? (
           <button
             type="button"
@@ -503,7 +518,7 @@ function PriceBlock({
   highlight?: boolean
 }) {
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex min-w-0 flex-col items-center text-center">
       <span className={`${narrow ? 'mb-0.5 text-[9px] leading-4' : `mb-1 ${compact ? 'text-[11px]' : 'text-xs'}`} text-brand-muted`}>{label}</span>
       <span className={`font-bold ${highlight ? 'text-brand-orange' : 'text-brand-text'} ${narrow ? 'text-xs' : compact ? 'text-sm' : 'text-base'}`}>{value}</span>
     </div>
