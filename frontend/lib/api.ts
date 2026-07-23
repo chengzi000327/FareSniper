@@ -588,12 +588,19 @@ export const alertsApi = {
 };
 
 export const authApi = {
-  requestOtp: (phone: string) =>
-    fetch(`${BASE}/api/auth/otp`, {
+  status: async () => {
+    const r = await fetch(`${BASE}/api/auth/status`);
+    if (!r.ok) throw new Error(`auth status failed: ${r.status}`);
+    return r.json() as Promise<{ phone_login_available: boolean }>;
+  },
+  requestOtp: async (phone: string) => {
+    const r = await fetch(`${BASE}/api/auth/otp`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ phone }),
-    }),
+    });
+    if (!r.ok) throw new Error(`otp request failed: ${r.status}`);
+  },
   verify: async (phone: string, code: string) => {
     const token = getToken();
     const r = await fetch(`${BASE}/api/auth/verify`, {

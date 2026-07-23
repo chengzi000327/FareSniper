@@ -1,5 +1,5 @@
 import { afterEach, vi } from "vitest";
-import { searchApi, type SearchStreamEvent } from "@/lib/api";
+import { authApi, searchApi, type SearchStreamEvent } from "@/lib/api";
 
 function ndjsonResponse(chunks: Uint8Array[]): Response {
   return new Response(
@@ -675,4 +675,26 @@ test("stream accepts a stale Ctrip snapshot winner and rejects other stale provi
   await expect(
     searchApi.stream({ session_id: null, message: "hi" }, () => undefined)
   ).rejects.toThrow("invalid stream event");
+});
+
+test("auth status exposes whether phone login is actually configured", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ phone_login_available: false }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })
+  );
+
+  await expect(authApi.status()).resolves.toEqual({ phone_login_available: false });
+});
+
+test("otp request rejects an unavailable SMS service", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ detail: "phone login is not configured" }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    })
+  );
+
+  await expect(authApi.requestOtp("+8613800000000")).rejects.toThrow("otp request failed: 503");
 });

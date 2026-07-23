@@ -7,12 +7,47 @@ import pytest
 from httpx import AsyncClient
 
 
+def enable_test_sms(monkeypatch) -> None:
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "sms_provider", "aliyun")
+    monkeypatch.setattr(settings, "sms_aliyun_access_key_id", "test-key")
+
+
+def test_phone_login_available_requires_provider_credentials(monkeypatch):
+    from backend.api.auth import phone_login_available
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "sms_provider", "aliyun")
+    monkeypatch.setattr(settings, "sms_aliyun_access_key_id", "")
+    assert phone_login_available() is False
+
+    monkeypatch.setattr(settings, "sms_aliyun_access_key_id", "test-key")
+    assert phone_login_available() is True
+
+
+@pytest.mark.asyncio
+async def test_auth_status_reports_unconfigured_sms(
+    client: AsyncClient, monkeypatch
+):
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "sms_provider", "aliyun")
+    monkeypatch.setattr(settings, "sms_aliyun_access_key_id", "")
+
+    response = await client.get("/api/auth/status")
+
+    assert response.status_code == 200
+    assert response.json() == {"phone_login_available": False}
+
+
 @pytest.mark.asyncio
 async def test_otp_request_and_verify(
     seeded_pg, fake_redis, fake_sms, client: AsyncClient, monkeypatch
 ):
     import backend.infrastructure.redis.session_store as ss
 
+    enable_test_sms(monkeypatch)
     monkeypatch.setattr(ss, "_pool", fake_redis)
 
     r = await client.post("/api/auth/otp", json={"phone": "+8613800000000"})
@@ -31,6 +66,7 @@ async def test_same_phone_returns_same_user_id(
 ):
     import backend.infrastructure.redis.session_store as ss
 
+    enable_test_sms(monkeypatch)
     monkeypatch.setattr(ss, "_pool", fake_redis)
 
     await client.post("/api/auth/otp", json={"phone": "+8613800000001"})

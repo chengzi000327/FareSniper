@@ -4,14 +4,19 @@ import { beforeEach, expect, test, vi } from 'vitest'
 import MobilePage from '@/app/mobile/page'
 import { MobileAppPage } from '@/components/mobile-app-page'
 
-const { getMemory, listRecommendations } = vi.hoisted(() => ({
+const { getMemory, listRecommendations, patchMemory, authStatus, requestOtp, verifyOtp } = vi.hoisted(() => ({
   getMemory: vi.fn(),
   listRecommendations: vi.fn(),
+  patchMemory: vi.fn(),
+  authStatus: vi.fn(),
+  requestOtp: vi.fn(),
+  verifyOtp: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({
-  memoryApi: { get: getMemory, patch: vi.fn(), del: vi.fn() },
+  memoryApi: { get: getMemory, patch: patchMemory, del: vi.fn() },
   recApi: { list: listRecommendations },
+  authApi: { status: authStatus, requestOtp, verify: verifyOtp },
   api: { getMemory },
   searchApi: { stream: vi.fn() },
 }))
@@ -19,6 +24,16 @@ vi.mock('@/lib/api', () => ({
 beforeEach(() => {
   getMemory.mockReset()
   listRecommendations.mockReset()
+  patchMemory.mockReset()
+  authStatus.mockReset()
+  requestOtp.mockReset()
+  verifyOtp.mockReset()
+  localStorage.setItem('fs_user_id', 'u_test')
+  localStorage.setItem('fs_phone', '+8613800000000')
+  patchMemory.mockResolvedValue({})
+  authStatus.mockResolvedValue({ phone_login_available: false })
+  requestOtp.mockResolvedValue(undefined)
+  verifyOtp.mockResolvedValue({ access_token: 'token', user_id: 'u_phone' })
   getMemory.mockResolvedValue({
     memories: [
       { field: 'companion_profile', value: { kind: 'cat', name: '云朵' }, label: '旅伴档案', value_display: '', source: 'manual' },
@@ -58,8 +73,9 @@ test('shows a four-item mobile navigation and real memory summaries', async () =
   expect(screen.queryByRole('button', { name: '历史对话' })).not.toBeInTheDocument()
   expect(screen.queryByText('¥399')).not.toBeInTheDocument()
   expect(screen.queryByText('¥568')).not.toBeInTheDocument()
+  await waitFor(() => expect(listRecommendations).toHaveBeenCalledTimes(2))
   fireEvent.click(screen.getByRole('button', { name: /查一趟具体航班/ }))
-  expect(screen.getByRole('textbox')).toHaveValue('下周上海去三亚')
+  await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('下周上海去三亚'))
   fireEvent.click(screen.getByRole('button', { name: /还没想好，先逛探索/ }))
   expect(await screen.findByText('云朵 在陪你找低价')).toBeInTheDocument()
   expect(screen.getByText('1 个明确关注')).toBeInTheDocument()
@@ -83,4 +99,58 @@ test('uses a dedicated compact memory layout with Chinese preference values', as
 
   fireEvent.click(screen.getByRole('button', { name: '查询 1' }))
   expect(screen.getByText('上海去三亚')).toBeInTheDocument()
+})
+
+test('asks a first-time user to choose and name a companion before entering the app', async () => {
+  getMemory.mockResolvedValueOnce({ memories: [], query_history: [] })
+  render(<MobileAppPage />)
+
+  expect(await screen.findByText('先选一个旅伴吧')).toBeInTheDocument()
+  expect(screen.queryByRole('navigation', { name: '手机端主导航' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: /登登柯基/ }))
+  fireEvent.change(screen.getByLabelText('旅伴名字'), { target: { value: '旺仔' } })
+  fireEvent.click(screen.getByRole('button', { name: '和旺仔一起开始' }))
+
+  await waitFor(() => expect(patchMemory).toHaveBeenCalledWith({
+    field: 'companion_profile',
+    value: { kind: 'corgi', name: '旺仔' },
+  }))
+  expect(await screen.findByRole('navigation', { name: '手机端主导航' })).toBeInTheDocument()
+  expect(screen.getByText('旺仔 在这里')).toBeInTheDocument()
+})
+
+test('shows the real guest account state when phone login is not configured', async () => {
+  localStorage.setItem('fs_user_id', 'anon_mobile_test')
+  localStorage.removeItem('fs_phone')
+  render(<MobileAppPage />)
+  await waitFor(() => expect(getMemory).toHaveBeenCalledTimes(1))
+
+  fireEvent.click(screen.getByRole('button', { name: '我的' }))
+  expect(await screen.findByText('本机游客账号')).toBeInTheDocument()
+  expect(screen.getByText('手机号登录将在短信服务配置后开放')).toBeInTheDocument()
+  expect(screen.getByText('账号编号 · BILETEST')).toBeInTheDocument()
+})
+
+test('binds a guest account by phone when SMS login is available', async () => {
+  localStorage.setItem('fs_user_id', 'anon_mobile_test')
+  localStorage.removeItem('fs_phone')
+  authStatus.mockResolvedValueOnce({ phone_login_available: true })
+  verifyOtp.mockImplementationOnce(async () => {
+    localStorage.setItem('fs_user_id', 'user_phone_test')
+    return { access_token: 'token', user_id: 'user_phone_test' }
+  })
+  render(<MobileAppPage />)
+  await waitFor(() => expect(authStatus).toHaveBeenCalledTimes(1))
+
+  fireEvent.click(screen.getByRole('button', { name: '我的' }))
+  fireEvent.click(await screen.findByRole('button', { name: '绑定手机号，跨设备保留' }))
+  fireEvent.change(screen.getByLabelText('手机号'), { target: { value: '13800000000' } })
+  fireEvent.click(screen.getByRole('button', { name: '获取验证码' }))
+  await waitFor(() => expect(requestOtp).toHaveBeenCalledWith('+8613800000000'))
+  fireEvent.change(screen.getByLabelText('验证码'), { target: { value: '123456' } })
+  fireEvent.click(screen.getByRole('button', { name: '登录并接回数据' }))
+
+  await waitFor(() => expect(verifyOtp).toHaveBeenCalledWith('+8613800000000', '123456'))
+  expect(await screen.findByText('正式账号')).toBeInTheDocument()
+  expect(screen.getByText('1380****0000')).toBeInTheDocument()
 })
