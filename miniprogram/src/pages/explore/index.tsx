@@ -107,7 +107,6 @@ export default function ExplorePage() {
           <Text className="eyebrow">你的机票发现与出行陪伴 AGENT</Text>
           <Text className="page-title">探索灵感</Text>
         </View>
-        <View className="icon-button" onClick={() => Taro.navigateTo({ url: '/pages/alerts/index' })}>♧</View>
       </View>
 
       <View className="explore-page__companion companion-card">
@@ -135,7 +134,8 @@ export default function ExplorePage() {
           <Button className="explore-page__send" disabled={!query.trim()} onClick={() => openChat(query.trim())}>➤</Button>
         </View>
         <Button className="explore-page__blind" disabled={!cards.length} onClick={() => setBlindPick(cards[Math.floor(Math.random() * cards.length)] || null)}>
-          <Text>✦</Text><Text>盲盒抽</Text>
+          <Text className="explore-page__blind-icon">✦</Text>
+          <Text className="explore-page__blind-text">抽取盲盒</Text>
         </Button>
       </View>
 

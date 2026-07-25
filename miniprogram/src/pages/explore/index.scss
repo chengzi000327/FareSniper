@@ -1,7 +1,6 @@
 .explore-page__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
 }
 .explore-page .page-title { margin-top: 5px; }
 
@@ -21,13 +20,41 @@
 .explore-page__companion-kicker { color:rgba(255,255,255,.56); font-size:10px; font-weight:700; }
 .explore-page__companion-title { margin-top:3px; font-size:16px; font-weight:900; }
 .explore-page__companion-stats { margin-top:6px; color:rgba(255,255,255,.6); font-size:9px; font-weight:700; }
-.explore-page__tools { display:grid; grid-template-columns:minmax(0,1fr) 82px; margin-top:12px; gap:9px; }
-.explore-page__search { display:flex; height:52px; align-items:center; box-sizing:border-box; padding:6px 7px 6px 12px; border:1px solid rgba(255,122,47,.15); border-radius:19px; background:#fff; box-shadow:0 5px 16px rgba(67,44,27,.05); gap:7px; }
+.explore-page__tools {
+  --explore-tool-height: 52px;
+
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  align-items: stretch;
+  margin-top: 12px;
+  gap: 9px;
+}
+.explore-page__search { display:flex; height:var(--explore-tool-height); align-items:center; box-sizing:border-box; padding:6px 7px 6px 12px; border:1px solid rgba(255,122,47,.15); border-radius:19px; background:#fff; box-shadow:0 5px 16px rgba(67,44,27,.05); gap:7px; }
 .explore-page__search-icon { color:#ff7a2f; font-size:20px; }
 .explore-page__search-input { min-width:0; flex:1; font-size:12px; font-weight:650; }
 .explore-page__send { display:flex; width:36px; height:36px; align-items:center; justify-content:center; border-radius:12px; background:#ff7a2f; color:#fff; font-size:14px; }
 .explore-page__send[disabled],.explore-page__blind[disabled] { opacity:.38; }
-.explore-page__blind { display:flex; height:52px; flex-direction:column; align-items:center; justify-content:center; border-radius:19px; background:#fff0dc; color:#ff7a2f; font-size:10px; font-weight:900; gap:2px; }
+.explore-page__blind {
+  display: flex;
+  height: var(--explore-tool-height);
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: 19px;
+  background: #fff0dc;
+  color: #ff7a2f;
+  font-weight: 900;
+  gap: 4px;
+}
+.explore-page__blind-icon {
+  flex-shrink: 0;
+  font-size: 10px;
+}
+.explore-page__blind-text {
+  font-size: 11px;
+  white-space: nowrap;
+}
 .explore-page__blind-result { display:flex; align-items:center; justify-content:space-between; margin-top:10px; padding:11px 12px; border:1px dashed rgba(255,122,47,.35); border-radius:19px; background:#fff; gap:10px; }
 .explore-page__blind-label,.explore-page__blind-title { display:block; }
 .explore-page__blind-label { color:#ff7a2f; font-size:9px; font-weight:900; }
