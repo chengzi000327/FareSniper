@@ -143,6 +143,7 @@ export default function ChatPage() {
   })
 
   const companion = companionFromMemory(memory?.memories || [])
+  const isWelcome = !messages.length && !loading
 
   const companionSaved = async (profile: CompanionProfile) => {
     setMemory((current) => ({
@@ -203,12 +204,9 @@ export default function ChatPage() {
               </Text>
               <Text className="chat-page__title">对话空间</Text>
             </View>
-            <View className="chat-page__companion-pill">
-              ◌　{companion.name}
-            </View>
           </View>
 
-          {!messages.length && !loading ? (
+          {isWelcome ? (
             <View className="chat-page__welcome">
               <Text className="chat-page__welcome-kicker">
                 ✦　{companion.name}在这里
@@ -304,26 +302,26 @@ export default function ChatPage() {
               </View>
             ) : null}
           </View>
+
+          <View className="chat-page__composer chat-page__composer--fixed">
+            <Input
+              className="chat-page__input"
+              confirmType="send"
+              placeholder="补充目的地、日期或预算…"
+              value={input}
+              onInput={(event) => setInput(event.detail.value)}
+              onConfirm={() => void sendQuery()}
+            />
+            <Button
+              className="chat-page__send"
+              disabled={!input.trim() || loading}
+              onClick={() => void sendQuery()}
+            >
+              ➤
+            </Button>
+          </View>
         </View>
       </ScrollView>
-
-      <View className="chat-page__composer">
-        <Input
-          className="chat-page__input"
-          confirmType="send"
-          placeholder="补充目的地、日期或预算…"
-          value={input}
-          onInput={(event) => setInput(event.detail.value)}
-          onConfirm={() => void sendQuery()}
-        />
-        <Button
-          className="chat-page__send"
-          disabled={!input.trim() || loading}
-          onClick={() => void sendQuery()}
-        >
-          ➤
-        </Button>
-      </View>
 
       {selectedDeal ? (
         <View
