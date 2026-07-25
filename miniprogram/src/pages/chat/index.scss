@@ -1,7 +1,9 @@
 .chat-page {
+  --composer-control-height: 46px;
+  --composer-padding-y: 9px;
+
   height: 100vh;
   box-sizing: border-box;
-  padding-bottom: 74px;
 }
 
 .chat-page__scroll {
@@ -9,7 +11,14 @@
 }
 
 .chat-page__content {
-  padding: calc(52px + env(safe-area-inset-top)) 16px 84px;
+  padding:
+    calc(52px + env(safe-area-inset-top))
+    16px
+    calc(
+      var(--composer-control-height) +
+      var(--composer-padding-y) * 2 +
+      16px
+    );
 }
 
 .chat-page__header { display:flex; align-items:center; }
@@ -147,13 +156,13 @@
   bottom: 0;
   left: 0;
   z-index: 10;
-  padding: 9px 13px calc(9px + env(safe-area-inset-bottom));
+  padding: var(--composer-padding-y) 13px;
   border-top: 1px solid rgba(67, 44, 27, 0.08);
   background: rgba(255, 251, 247, 0.95);
 }
 
 .chat-page__input {
-  height: 46px;
+  height: var(--composer-control-height);
   min-width: 0;
   flex: 1;
   box-sizing: border-box;
@@ -167,7 +176,7 @@
 .chat-page__send {
   display: flex;
   width: 46px;
-  height: 46px;
+  height: var(--composer-control-height);
   align-items: center;
   justify-content: center;
   border-radius: 15px;
