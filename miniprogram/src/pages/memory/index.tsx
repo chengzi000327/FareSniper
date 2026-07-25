@@ -427,7 +427,9 @@ export default function MemoryPage() {
               }
             >
               <Text className="idea-editor__save-icon">+</Text>
-              <Text>{savingField === 'travel_ideas' ? '保存中' : '保存'}</Text>
+              <Text className="idea-editor__save-text">
+                {savingField === 'travel_ideas' ? '保存中' : '保存关注'}
+              </Text>
             </Button>
           </View>
           {ideas.length ? (

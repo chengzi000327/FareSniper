@@ -54,17 +54,23 @@ export default function ProfilePage() {
       <View className="profile-page__companion companion-card">
         <Companion kind={companion.kind} className="profile-page__companion-avatar" />
         <View className="profile-page__companion-copy"><Text>当前旅伴</Text><Text className="profile-page__companion-name">{companion.name}</Text><Text>陪你记忆和提醒，不替你做购买决定。</Text></View>
-        <Button onClick={() => {
-          Taro.setStorageSync('fs_choose_companion', true)
-          Taro.switchTab({ url: '/pages/chat/index' })
-        }}>更换</Button>
+        <Button
+          className="profile-page__change-companion"
+          onClick={() => {
+            Taro.setStorageSync('fs_choose_companion', true)
+            Taro.switchTab({ url: '/pages/chat/index' })
+          }}
+        >
+          <Text>更换旅伴</Text>
+          <Text className="profile-page__change-arrow">›</Text>
+        </Button>
       </View>
 
       <View className="profile-page__menu">
-        <MenuRow icon="♡" title="管理机票偏好" detail={`${preferenceCount(memory?.memories || [])} 项会参与下次查价和排序`} onClick={() => Taro.switchTab({ url: '/pages/memory/index' })} />
-        <MenuRow icon="▤" title="查看旅行手帐" detail="确认成行后才会写入真实旅行" onClick={() => { Taro.setStorageSync('fs_memory_section', 'journal'); Taro.switchTab({ url: '/pages/memory/index' }) }} />
-        <MenuRow icon="◌" title="继续查票对话" detail="接着当前上下文补充时间和条件" onClick={() => Taro.switchTab({ url: '/pages/chat/index' })} />
-        <MenuRow icon="♧" title="价格提醒" detail={`${activeAlerts} 条监控中 · 查看微信订阅状态`} onClick={() => Taro.navigateTo({ url: '/pages/alerts/index' })} />
+        <MenuRow icon="preferences" title="管理机票偏好" detail={`${preferenceCount(memory?.memories || [])} 项会参与下次查价和排序`} onClick={() => Taro.switchTab({ url: '/pages/memory/index' })} />
+        <MenuRow icon="journal" title="查看旅行手帐" detail="确认成行后才会写入真实旅行" onClick={() => { Taro.setStorageSync('fs_memory_section', 'journal'); Taro.switchTab({ url: '/pages/memory/index' }) }} />
+        <MenuRow icon="chat" title="继续查票对话" detail="接着当前上下文补充时间和条件" onClick={() => Taro.switchTab({ url: '/pages/chat/index' })} />
+        <MenuRow icon="alert" title="价格提醒" detail={`${activeAlerts} 条监控中 · 查看微信订阅状态`} onClick={() => Taro.navigateTo({ url: '/pages/alerts/index' })} />
       </View>
 
       <View className="profile-page__notice">
@@ -75,6 +81,51 @@ export default function ProfilePage() {
   )
 }
 
-function MenuRow({ icon, title, detail, onClick }: { icon: string; title: string; detail: string; onClick: () => void }) {
-  return <View className="profile-row" onClick={onClick}><View className="profile-row__icon">{icon}</View><View className="profile-row__copy"><Text>{title}</Text><Text>{detail}</Text></View><Text className="profile-row__arrow">›</Text></View>
+type ProfileIcon = 'preferences' | 'journal' | 'chat' | 'alert'
+
+function ProfileGlyph({ icon }: { icon: ProfileIcon }) {
+  if (icon === 'preferences') {
+    return (
+      <View className="profile-glyph profile-glyph--preferences">
+        <View><Text /></View>
+        <View><Text /></View>
+        <View><Text /></View>
+      </View>
+    )
+  }
+
+  if (icon === 'journal') {
+    return (
+      <View className="profile-glyph profile-glyph--journal">
+        <View />
+        <View />
+      </View>
+    )
+  }
+
+  if (icon === 'chat') {
+    return <View className="profile-glyph profile-glyph--chat" />
+  }
+
+  return (
+    <View className="profile-glyph profile-glyph--alert">
+      <View />
+      <Text />
+    </View>
+  )
+}
+
+function MenuRow({ icon, title, detail, onClick }: { icon: ProfileIcon; title: string; detail: string; onClick: () => void }) {
+  return (
+    <View className="profile-row" onClick={onClick}>
+      <View className="profile-row__icon">
+        <ProfileGlyph icon={icon} />
+      </View>
+      <View className="profile-row__copy">
+        <Text>{title}</Text>
+        <Text>{detail}</Text>
+      </View>
+      <Text className="profile-row__arrow">›</Text>
+    </View>
+  )
 }
