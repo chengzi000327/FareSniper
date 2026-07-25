@@ -75,6 +75,39 @@ def _patch_renderable_pool(monkeypatch) -> None:
 
 # ── 分页 ──────────────────────────────────────────────────────────────────────
 
+def test_discovery_pool_expands_hot_routes_without_duplicates():
+    assert svc.DISCOVERY_ROUTES[: len(svc.HOT_ROUTES)] == svc.HOT_ROUTES
+    assert len(svc.DISCOVERY_ROUTES) > 200
+    assert len(svc.DISCOVERY_ROUTES) == len(set(svc.DISCOVERY_ROUTES))
+
+
+@pytest.mark.asyncio
+async def test_discovery_only_reads_snapshots_for_monitored_routes(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    async def no_inventory(**kwargs):
+        calls.append((kwargs["origin_code"], kwargs["destination_code"]))
+        return []
+
+    monkeypatch.setattr(svc, "HOT_ROUTES", [("BJS", "SHA")])
+    monkeypatch.setattr(
+        svc,
+        "DISCOVERY_ROUTES",
+        [("BJS", "SHA"), ("BJS", "LJG")],
+    )
+    monkeypatch.setattr(svc, "read_deals", no_inventory)
+
+    cards = await svc._build_card_pool()
+
+    assert [card.id for card in cards] == [
+        "route-bjs-sha",
+        "route-bjs-ljg",
+    ]
+    assert calls == [("BJS", "SHA")] * 3
+    assert cards[1].preview_deal is None
+    assert "真实可售航班" in cards[1].reason
+
+
 @pytest.mark.asyncio
 async def test_pagination_first_page_has_more(
     seeded_pg, patched_redis, monkeypatch

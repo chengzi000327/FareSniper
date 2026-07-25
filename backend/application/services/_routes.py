@@ -31,6 +31,34 @@ HOT_ROUTES: list[tuple[str, str]] = [
 ]
 
 _AIRPORT_CATALOG = AirportCatalog.load_default()
+
+
+def _build_discovery_routes() -> list[tuple[str, str]]:
+    """热门报价航线优先，其余可售城市补成可查询的探索池。"""
+    routes = list(HOT_ROUTES)
+    seen = set(routes)
+    for city in _AIRPORT_CATALOG.cities:
+        destination = city.provider_codes.get("ctrip")
+        route = ("BJS", destination) if destination else None
+        if (
+            route is None
+            or destination == "BJS"
+            or route in seen
+            or not any(
+                airport.bookable and airport.commercial_passenger
+                for airport in city.airports
+            )
+        ):
+            continue
+        routes.append(route)
+        seen.add(route)
+    return routes
+
+
+# 探索 Feed 的完整目的地池。只有 HOT_ROUTES 会触发快照查询，其余路线
+# 只作为真实查票入口，不在没有库存证据时展示价格。
+DISCOVERY_ROUTES = _build_discovery_routes()
+
 CITY_NAMES = MappingProxyType(
     {
         code: city.name

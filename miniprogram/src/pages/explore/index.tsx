@@ -1,6 +1,10 @@
 import { Button, Image, Input, Text, View } from '@tarojs/components'
-import Taro, { useDidShow, usePullDownRefresh } from '@tarojs/taro'
-import { useCallback, useState } from 'react'
+import Taro, {
+  useDidShow,
+  usePullDownRefresh,
+  useReachBottom,
+} from '@tarojs/taro'
+import { useCallback, useRef, useState } from 'react'
 
 import { Companion } from '../../components/Companion'
 import { miniApi } from '../../services/api'
@@ -17,6 +21,8 @@ import syxImage from '../../assets/destinations/SYX.jpg'
 import xmnImage from '../../assets/destinations/XMN.jpg'
 import './index.scss'
 
+const PAGE_SIZE = 10
+
 const DESTINATION_IMAGE: Record<string, string> = {
   三亚: syxImage,
   厦门: xmnImage,
@@ -28,6 +34,32 @@ const DESTINATION_IMAGE: Record<string, string> = {
 function destinationFromTitle(title = '') {
   const parts = title.split('→')
   return parts[parts.length - 1]?.trim() || ''
+}
+
+function recommendationKey(card: RecommendationCard) {
+  return card.id || card.title?.trim() || card.query_hint?.trim() || ''
+}
+
+function mergeRecommendationCards(
+  current: RecommendationCard[],
+  incoming: RecommendationCard[],
+) {
+  const seen = new Set(
+    current.map(recommendationKey).filter((key) => Boolean(key)),
+  )
+  return [
+    ...current,
+    ...incoming.filter((card) => {
+      const key = recommendationKey(card)
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    }),
+  ]
+}
+
+function fallbackVariant(value: string) {
+  return [...value].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 5
 }
 
 export default function ExplorePage() {
@@ -42,19 +74,32 @@ export default function ExplorePage() {
   const [hasMore, setHasMore] = useState(false)
   const [nextOffset, setNextOffset] = useState(0)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState(false)
+  const loadingMoreRef = useRef(false)
+  const feedGenerationRef = useRef(0)
+  const initializedRef = useRef(false)
 
   const load = useCallback(async () => {
+    const generation = feedGenerationRef.current + 1
+    feedGenerationRef.current = generation
+    loadingMoreRef.current = false
     setLoading(true)
+    setLoadingMore(false)
+    setLoadMoreError(false)
     try {
       const [page, nextMemory] = await Promise.all([
-        miniApi.recommendationPage(8, 0),
+        miniApi.recommendationPage(PAGE_SIZE, 0),
         miniApi.memory(),
       ])
-      setCards(page.cards)
+      if (generation !== feedGenerationRef.current) return
+      setCards(mergeRecommendationCards([], page.cards))
       setHasMore(Boolean(page.has_more))
       setNextOffset(page.next_offset ?? page.cards.length)
       setMemory(nextMemory)
+      initializedRef.current = true
     } catch {
+      if (generation !== feedGenerationRef.current) return
+      initializedRef.current = false
       await Taro.showToast({
         title: '推荐暂时没有加载出来',
         icon: 'none',
@@ -65,26 +110,42 @@ export default function ExplorePage() {
     }
   }, [])
 
-  const loadMore = async () => {
-    if (!hasMore || loadingMore) return
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMoreRef.current) return
+    const generation = feedGenerationRef.current
+    const offset = nextOffset
+    loadingMoreRef.current = true
     setLoadingMore(true)
+    setLoadMoreError(false)
     try {
-      const page = await miniApi.recommendationPage(8, nextOffset)
-      setCards((current) => [...current, ...page.cards])
+      const page = await miniApi.recommendationPage(PAGE_SIZE, offset)
+      if (generation !== feedGenerationRef.current) return
+      setCards((current) => mergeRecommendationCards(current, page.cards))
       setHasMore(Boolean(page.has_more))
-      setNextOffset(page.next_offset ?? nextOffset + page.cards.length)
+      setNextOffset(page.next_offset ?? offset + page.cards.length)
     } catch {
-      await Taro.showToast({ title: '更多推荐暂时没有加载出来', icon: 'none' })
+      if (generation === feedGenerationRef.current) {
+        setLoadMoreError(true)
+      }
     } finally {
-      setLoadingMore(false)
+      if (generation === feedGenerationRef.current) {
+        loadingMoreRef.current = false
+        setLoadingMore(false)
+      }
     }
-  }
+  }, [hasMore, nextOffset])
 
   useDidShow(() => {
-    void load()
+    if (!initializedRef.current) {
+      initializedRef.current = true
+      void load()
+    }
   })
   usePullDownRefresh(() => {
     void load()
+  })
+  useReachBottom(() => {
+    void loadMore()
   })
 
   const openChat = (query: string) => {
@@ -181,7 +242,11 @@ export default function ExplorePage() {
                     />
                   ) : (
                     <View className="explore-card__image explore-card__image--fallback">
-                      <Text>{destination || '下一程'}</Text>
+                      <View
+                        className={`explore-card__fallback-color explore-card__fallback-color--${fallbackVariant(destination)}`}
+                      >
+                        <Text>{destination || '下一程'}</Text>
+                      </View>
                     </View>
                   )}
                   <View className="explore-card__shade" />
@@ -207,17 +272,25 @@ export default function ExplorePage() {
         ))}
       </View>
       {!loading && cards.length ? (
-        <Button
-          className="explore-page__load-more"
-          disabled={!hasMore || loadingMore}
-          onClick={() => void loadMore()}
-        >
-          {loadingMore
-            ? '正在发现更多目的地…'
-            : hasMore
-              ? '继续发现'
-              : '这次先逛到这里'}
-        </Button>
+        <View className="explore-page__feed-status">
+          {loadingMore ? (
+            <View className="explore-page__loading-more">
+              <View className="explore-page__spinner" />
+              <Text>正在发现更多真实目的地</Text>
+            </View>
+          ) : loadMoreError ? (
+            <Button
+              className="explore-page__retry"
+              onClick={() => void loadMore()}
+            >
+              加载失败，点击重试
+            </Button>
+          ) : hasMore ? (
+            <Text>继续下滑，自动发现更多</Text>
+          ) : (
+            <Text>本轮真实目的地已全部展示</Text>
+          )}
+        </View>
       ) : null}
     </View>
   )

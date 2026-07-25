@@ -167,6 +167,7 @@ async def test_historical_only_inventory_never_becomes_a_preview_link(monkeypatc
         ]
 
     monkeypatch.setattr(svc, "HOT_ROUTES", [("BJS", "SHA")])
+    monkeypatch.setattr(svc, "DISCOVERY_ROUTES", [("BJS", "SHA")])
     monkeypatch.setattr(svc, "read_deals", no_upcoming)
     monkeypatch.setattr(
         svc, "read_deals_latest", historical_latest, raising=False
@@ -587,6 +588,7 @@ async def test_card_pool_selects_and_compares_one_currency_per_route(monkeypatch
         ]
 
     monkeypatch.setattr(svc, "HOT_ROUTES", [("BJS", "SHA")])
+    monkeypatch.setattr(svc, "DISCOVERY_ROUTES", [("BJS", "SHA")])
     monkeypatch.setattr(svc, "read_deals", mixed_currency_batch)
 
     cards = await svc._build_card_pool()

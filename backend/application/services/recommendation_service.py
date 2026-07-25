@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import hashlib
 import statistics
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -12,6 +11,7 @@ from backend.application.contracts.recommendations import RecCard, Recommendatio
 from backend.application.contracts.flight_provider import is_complete_https_url
 from backend.application.services._routes import (
     CITY_NAMES,
+    DISCOVERY_ROUTES,
     HOT_ROUTES,
     ROUTE_TAGS,
     route_city_name,
@@ -27,7 +27,7 @@ from backend.schemas.common import DealCardDto
 # ── 缓存分层 ──────────────────────────────────────────────────────────────────
 # L1:全局未排序卡片池,全用户共享,key=rec:pool:v3,TTL 受库存到期时间约束。
 # L2:请求时在内存里做个性化排序(读 frequent_cities),不进 L1 缓存。
-POOL_CACHE_KEY = "rec:pool:v4"
+POOL_CACHE_KEY = "rec:pool:v5"
 POOL_CACHE_TTL = 600  # 10 分钟
 POOL_CACHE_ENVELOPE_VERSION = 1
 
@@ -304,7 +304,7 @@ async def _get_card_pool() -> list[RecCard]:
 
 
 async def _build_card_pool() -> list[RecCard]:
-    """遍历全部热门路线,生成未排序、未个性化的卡片池。"""
+    """热门路线读取报价，其余机场城市生成不带虚假价格的查票入口。"""
     today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
     dates = [
         (today + timedelta(days=i + 1)).isoformat() for i in range(3)
@@ -313,18 +313,23 @@ async def _build_card_pool() -> list[RecCard]:
     cards: list[RecCard] = []
     seen_destinations: set[str] = set()
 
-    for origin, dest in HOT_ROUTES:
+    for origin, dest in DISCOVERY_ROUTES:
         if dest in seen_destinations:
             continue
 
         batch: list[dict[str, Any]] = []
         chosen_date: str | None = None
-        for d in dates:
-            deals = await read_deals(origin_code=origin, destination_code=dest, depart_date=d)
-            if deals:
-                batch = deals
-                chosen_date = d
-                break
+        if (origin, dest) in HOT_ROUTES:
+            for d in dates:
+                deals = await read_deals(
+                    origin_code=origin,
+                    destination_code=dest,
+                    depart_date=d,
+                )
+                if deals:
+                    batch = deals
+                    chosen_date = d
+                    break
         best_deal: dict[str, Any] | None = None
         market_avg: int | None = None
         sample_n = 0
@@ -426,7 +431,7 @@ def _build_card(
         currency = _deal_currency(deal)
         if not currency:
             return RecCard(
-                id=str(uuid.uuid4())[:8],
+                id=f"route-{origin.lower()}-{dest.lower()}",
                 title=f"{origin_name}→{dest_name}",
                 reason=_build_reason(dest_name, None, None, False),
                 query_hint=f"明天从{origin_name}到{dest_name}的机票",
@@ -570,7 +575,7 @@ def _build_card(
     )
 
     return RecCard(
-        id=str(uuid.uuid4())[:8],
+        id=f"route-{origin.lower()}-{dest.lower()}",
         title=f"{origin_name}→{dest_name}",
         reason=reason,
         query_hint=(
@@ -781,4 +786,4 @@ def _build_reason(
         return f"{dest} 近日机票略低于近期均价,可考虑出行"
     if deal:
         return f"{dest} 热门目的地,近期有充足席位,价格正常"
-    return f"{dest} 热门出行目的地,AI 持续监控中"
+    return f"发现 {dest} 的下一程灵感，进入对话查询真实可售航班"
