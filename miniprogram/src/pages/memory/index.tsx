@@ -92,13 +92,23 @@ function queryText(item: MemoryResponse['query_history'][number]) {
   return '一次机票查询'
 }
 
+function shortDate(value?: string) {
+  if (!value) return '时间未记录'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10)
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: 'long',
+    day: 'numeric',
+  }).format(date)
+}
+
 export default function MemoryPage() {
   const [memory, setMemory] = useState<MemoryResponse>({
     memories: [],
     query_history: [],
   })
   const [section, setSection] = useState<Section>('preferences')
-  const [loading, setLoading] = useState(true)
   const [editingField, setEditingField] = useState('')
   const [draft, setDraft] = useState('')
   const [adding, setAdding] = useState(false)
@@ -108,13 +118,11 @@ export default function MemoryPage() {
   const [savingField, setSavingField] = useState('')
 
   const load = useCallback(async () => {
-    setLoading(true)
     try {
       setMemory(await miniApi.memory())
     } catch {
       await Taro.showToast({ title: '记忆暂时没有接上', icon: 'none' })
     } finally {
-      setLoading(false)
       Taro.stopPullDownRefresh()
     }
   }, [])
@@ -220,12 +228,6 @@ export default function MemoryPage() {
           <Text className="eyebrow">只记真实发生的事</Text>
           <Text className="page-title">我的记忆</Text>
         </View>
-        <View
-          className={`icon-button ${loading ? 'is-loading' : ''}`}
-          onClick={() => void load()}
-        >
-          ↻
-        </View>
       </View>
 
       <View className="memory-page__hero companion-card">
@@ -270,44 +272,51 @@ export default function MemoryPage() {
               className="memory-add"
               onClick={() => setAdding((current) => !current)}
             >
-              {adding ? '收起' : '＋ 添加'}
+              <Text className="memory-add__icon">{adding ? '×' : '+'}</Text>
+              <Text>{adding ? '收起' : '添加偏好'}</Text>
             </Button>
           </View>
 
           {adding ? (
             <View className="memory-editor card">
-              <Picker
-                mode="selector"
-                range={PREFERENCE_OPTIONS.map((option) => option.label)}
-                value={newFieldIndex}
-                onChange={(event) => {
-                  setNewFieldIndex(Number(event.detail.value))
-                  setNewValue('')
-                }}
-              >
-                <View className="memory-editor__picker">
-                  {PREFERENCE_OPTIONS[newFieldIndex].label}
-                  <Text>⌄</Text>
-                </View>
-              </Picker>
-              <Input
-                className="memory-editor__input"
-                type={
-                  PREFERENCE_OPTIONS[newFieldIndex].field === 'budget'
-                    ? 'number'
-                    : 'text'
-                }
-                placeholder={
-                  PREFERENCE_OPTIONS[newFieldIndex].field === 'budget'
-                    ? '例如：800'
-                    : '多项内容用顿号分开'
-                }
-                value={newValue}
-                onInput={(event) => setNewValue(event.detail.value)}
-              />
+              <View className="memory-editor__field">
+                <Text className="memory-editor__label">偏好类型</Text>
+                <Picker
+                  mode="selector"
+                  range={PREFERENCE_OPTIONS.map((option) => option.label)}
+                  value={newFieldIndex}
+                  onChange={(event) => {
+                    setNewFieldIndex(Number(event.detail.value))
+                    setNewValue('')
+                  }}
+                >
+                  <View className="memory-editor__picker">
+                    <Text>{PREFERENCE_OPTIONS[newFieldIndex].label}</Text>
+                    <Text className="memory-editor__chevron">⌄</Text>
+                  </View>
+                </Picker>
+              </View>
+              <View className="memory-editor__field">
+                <Text className="memory-editor__label">偏好内容</Text>
+                <Input
+                  className="memory-editor__input"
+                  type={
+                    PREFERENCE_OPTIONS[newFieldIndex].field === 'budget'
+                      ? 'number'
+                      : 'text'
+                  }
+                  placeholder={
+                    PREFERENCE_OPTIONS[newFieldIndex].field === 'budget'
+                      ? '例如：800'
+                      : '多项内容用顿号分开'
+                  }
+                  value={newValue}
+                  onInput={(event) => setNewValue(event.detail.value)}
+                />
+              </View>
               <Button
                 className="primary-button"
-                disabled={!newValue.trim()}
+                disabled={!newValue.trim() || savingField === PREFERENCE_OPTIONS[newFieldIndex].field}
                 onClick={() =>
                   void savePreference(
                     PREFERENCE_OPTIONS[newFieldIndex].field,
@@ -315,7 +324,9 @@ export default function MemoryPage() {
                   )
                 }
               >
-                保存偏好
+                {savingField === PREFERENCE_OPTIONS[newFieldIndex].field
+                  ? '保存中'
+                  : '保存偏好'}
               </Button>
             </View>
           ) : null}
@@ -397,24 +408,26 @@ export default function MemoryPage() {
           <View className="idea-editor card">
             <Input
               className="memory-editor__input"
-              placeholder="例如：今年秋天想去青岛"
+              placeholder="例如：秋天想去青岛吹海风"
               value={ideaText}
               onInput={(event) => setIdeaText(event.detail.value)}
             />
             <Button
-              disabled={!ideaText.trim()}
+              className="idea-editor__save"
+              disabled={!ideaText.trim() || savingField === 'travel_ideas'}
               onClick={() =>
                 void saveIdeas([
-                  ...ideas,
                   {
                     id: `idea_${Date.now()}`,
                     text: ideaText.trim(),
                     created_at: new Date().toISOString(),
                   },
+                  ...ideas,
                 ])
               }
             >
-              保存关注
+              <Text className="idea-editor__save-icon">+</Text>
+              <Text>{savingField === 'travel_ideas' ? '保存中' : '保存'}</Text>
             </Button>
           </View>
           {ideas.length ? (
@@ -455,8 +468,10 @@ export default function MemoryPage() {
             memory.query_history.map((item, index) => (
               <View className="query-item card" key={String(item.id || index)}>
                 <View className="query-item__icon">⌕</View>
-                <View>
-                  <Text className="memory-item__source">真实查询</Text>
+                <View className="query-item__body">
+                  <Text className="memory-item__source">
+                    真实查询 · {shortDate(item.created_at)}
+                  </Text>
                   <Text className="query-item__text">{queryText(item)}</Text>
                 </View>
               </View>
@@ -470,28 +485,57 @@ export default function MemoryPage() {
         </View>
       ) : (
         <View className="journal">
+          <View className="journal__binding">
+            {[0, 1, 2, 3, 4].map((hole) => (
+              <View className="journal__hole" key={hole} />
+            ))}
+          </View>
+          <View className="journal__tape" />
           <Text className="journal__stamp">尚未成行</Text>
-          <Text className="journal__kicker">TRAVEL NOTE · 第一页</Text>
-          <Text className="journal__title">把真正出发的那天，留给手帐</Text>
-          <View className="journal__middle">
-            <Text className="journal__detail">
-              确认买票或录入真实行程后，旅伴才会写下日期、目的地和当时的想法。
+          <View className="journal__page">
+            <Text className="journal__kicker">TRAVEL NOTE · PAGE 01</Text>
+            <View className="journal__meta">
+              <View>
+                <Text className="journal__meta-label">日期</Text>
+                <Text className="journal__meta-value">____ 年 __ 月 __ 日</Text>
+              </View>
+              <View>
+                <Text className="journal__meta-label">心情</Text>
+                <Text className="journal__meta-value">等待出发</Text>
+              </View>
+            </View>
+            <Text className="journal__title">把真正出发的那天，留给手帐</Text>
+            <View className="journal__middle">
+              <View className="journal__detail-wrap">
+                <Text className="journal__highlight">第一段旅程，先留白</Text>
+                <Text className="journal__detail">
+                  确认买票或录入真实行程后，{companion.name}
+                  才会写下日期、目的地和当时的想法。
+                </Text>
+              </View>
+              <View className="journal__photo">
+                <Companion
+                  kind={companion.kind}
+                  pose="journal"
+                  className="journal__companion"
+                />
+                <Text>等你出发</Text>
+              </View>
+            </View>
+            <View className="journal__future">
+              <Text className="journal__future-title">未来的一页会记录</Text>
+              <View className="journal__tags">
+                {['出发日期', '真实行程', '你的想法', '旅伴小记'].map(
+                  (tag) => (
+                    <Text key={tag}>{tag}</Text>
+                  ),
+                )}
+              </View>
+            </View>
+            <Text className="journal__note">
+              查询、关注和点击预订只保留原本含义，不会被写成已经去过。
             </Text>
-            <Companion
-              kind={companion.kind}
-              pose="journal"
-              className="journal__companion"
-            />
           </View>
-          <View className="journal__future">
-            <Text>未来的一页会记录</Text>
-            <Text className="journal__tags">
-              出发日期 · 真实行程 · 你的想法 · 旅伴小记
-            </Text>
-          </View>
-          <Text className="journal__note">
-            查询、关注和点击预订仍只保留原本含义，不会被写成已经去过。
-          </Text>
         </View>
       )}
     </View>
