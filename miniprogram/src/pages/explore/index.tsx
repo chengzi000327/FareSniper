@@ -8,7 +8,11 @@ import { useCallback, useRef, useState } from 'react'
 
 import { Companion } from '../../components/Companion'
 import { miniApi } from '../../services/api'
-import type { MemoryResponse, RecommendationCard } from '../../types/api'
+import type {
+  DealCard,
+  MemoryResponse,
+  RecommendationCard,
+} from '../../types/api'
 import {
   companionFromMemory,
   explicitIdeaCount,
@@ -62,11 +66,31 @@ function fallbackVariant(value: string) {
   return [...value].reduce((sum, character) => sum + character.charCodeAt(0), 0) % 5
 }
 
+function dealPrice(deal: DealCard | null | undefined) {
+  return deal?.total_price ?? deal?.base_price ?? null
+}
+
+function lowestPricedDeal(deals: DealCard[]) {
+  return deals
+    .map((deal) => ({ deal, price: dealPrice(deal) }))
+    .filter(
+      (item): item is { deal: DealCard; price: number } =>
+        typeof item.price === 'number' && item.price > 0,
+    )
+    .sort((left, right) => left.price - right.price)[0]?.deal
+}
+
+interface BlindPickResult {
+  card: RecommendationCard
+  deal: DealCard | null
+  state: 'loading' | 'ready' | 'empty'
+}
+
 export default function ExplorePage() {
   const [cards, setCards] = useState<RecommendationCard[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
-  const [blindPick, setBlindPick] = useState<RecommendationCard | null>(null)
+  const [blindPick, setBlindPick] = useState<BlindPickResult | null>(null)
   const [memory, setMemory] = useState<MemoryResponse>({
     memories: [],
     query_history: [],
@@ -155,6 +179,44 @@ export default function ExplorePage() {
     })
   }
 
+  const drawBlindPick = useCallback(async () => {
+    if (!cards.length || blindPick?.state === 'loading') return
+    const pricedCards = cards.filter((card) => dealPrice(card.preview_deal) !== null)
+    const candidates = pricedCards.length ? pricedCards : cards
+    const card =
+      candidates[Math.floor(Math.random() * candidates.length)] || candidates[0]
+    if (!card) return
+
+    setBlindPick({
+      card,
+      deal: card.preview_deal || null,
+      state: 'loading',
+    })
+
+    try {
+      const response = await miniApi.search(
+        card.query_hint || `明天${card.title}的机票`,
+        null,
+      )
+      const deal =
+        lowestPricedDeal(response.deals || []) ||
+        (dealPrice(card.preview_deal) !== null ? card.preview_deal || null : null)
+      setBlindPick({
+        card,
+        deal,
+        state: deal ? 'ready' : 'empty',
+      })
+    } catch {
+      const fallbackDeal =
+        dealPrice(card.preview_deal) !== null ? card.preview_deal || null : null
+      setBlindPick({
+        card,
+        deal: fallbackDeal,
+        state: fallbackDeal ? 'ready' : 'empty',
+      })
+    }
+  }, [blindPick?.state, cards])
+
   const companion = companionFromMemory(memory.memories)
   const columns = [
     cards.filter((_, index) => index % 2 === 0),
@@ -194,16 +256,47 @@ export default function ExplorePage() {
           <Input className="explore-page__search-input" value={query} placeholder="说一个想去的地方" confirmType="send" onInput={(event) => setQuery(event.detail.value)} onConfirm={() => query.trim() && openChat(query.trim())} />
           <Button className="explore-page__send" disabled={!query.trim()} onClick={() => openChat(query.trim())}>➤</Button>
         </View>
-        <Button className="explore-page__blind" disabled={!cards.length} onClick={() => setBlindPick(cards[Math.floor(Math.random() * cards.length)] || null)}>
+        <Button className="explore-page__blind" disabled={!cards.length || blindPick?.state === 'loading'} onClick={() => void drawBlindPick()}>
           <Text className="explore-page__blind-icon">✦</Text>
-          <Text className="explore-page__blind-text">抽取盲盒</Text>
+          <Text className="explore-page__blind-text">
+            {blindPick?.state === 'loading' ? '正在开奖' : '抽取盲盒'}
+          </Text>
         </Button>
       </View>
 
       {blindPick ? (
         <View className="explore-page__blind-result">
-          <View><Text className="explore-page__blind-label">今天的盲盒目的地</Text><Text className="explore-page__blind-title">{blindPick.title}</Text></View>
-          <Button onClick={() => openChat(blindPick.query_hint || `查询${blindPick.title}的机票`)}>去查票</Button>
+          <View className="explore-page__blind-route">
+            <Text className="explore-page__blind-label">今天的盲盒目的地</Text>
+            <Text className="explore-page__blind-title">
+              {blindPick.card.title}
+            </Text>
+            {blindPick.state === 'ready' && blindPick.deal ? (
+              <Text className="explore-page__blind-meta">
+                {blindPick.deal.depart_date} · {blindPick.deal.flight_no}{' '}
+                {blindPick.deal.airline}
+              </Text>
+            ) : null}
+          </View>
+          {blindPick.state === 'loading' ? (
+            <View className="explore-page__blind-price is-loading">
+              <View className="explore-page__spinner" />
+              <Text>正在核验报价</Text>
+            </View>
+          ) : blindPick.state === 'ready' && blindPick.deal ? (
+            <View className="explore-page__blind-price">
+              <Text className="explore-page__blind-price-label">
+                {blindPick.deal.platform || '当前最低价'}
+              </Text>
+              <Text className="explore-page__blind-price-value">
+                ¥{dealPrice(blindPick.deal)}
+              </Text>
+            </View>
+          ) : (
+            <View className="explore-page__blind-price is-empty">
+              <Text>暂无可核验报价</Text>
+            </View>
+          )}
         </View>
       ) : null}
 

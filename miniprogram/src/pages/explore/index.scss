@@ -55,11 +55,17 @@
   font-size: 11px;
   white-space: nowrap;
 }
-.explore-page__blind-result { display:flex; align-items:center; justify-content:space-between; margin-top:10px; padding:11px 12px; border:1px dashed rgba(255,122,47,.35); border-radius:19px; background:#fff; gap:10px; }
-.explore-page__blind-label,.explore-page__blind-title { display:block; }
+.explore-page__blind-result { display:flex; min-height:56px; align-items:center; justify-content:space-between; margin-top:10px; box-sizing:border-box; padding:10px 12px; border:1px dashed rgba(255,122,47,.35); border-radius:19px; background:#fff; gap:10px; }
+.explore-page__blind-route { min-width:0; flex:1; }
+.explore-page__blind-label,.explore-page__blind-title,.explore-page__blind-meta,.explore-page__blind-price-label,.explore-page__blind-price-value { display:block; }
 .explore-page__blind-label { color:#ff7a2f; font-size:9px; font-weight:900; }
 .explore-page__blind-title { margin-top:3px; font-size:12px; font-weight:900; }
-.explore-page__blind-result button { width:64px; height:34px; border-radius:11px; background:#432c1b; color:#fff; font-size:10px; font-weight:900; }
+.explore-page__blind-meta { margin-top:3px; overflow:hidden; color:#8c7b6e; font-size:8px; white-space:nowrap; text-overflow:ellipsis; }
+.explore-page__blind-price { display:flex; min-width:72px; min-height:42px; flex-shrink:0; flex-direction:column; align-items:flex-end; justify-content:center; padding:0 4px; text-align:right; }
+.explore-page__blind-price-label { max-width:90px; overflow:hidden; color:#8c7b6e; font-size:8px; font-weight:700; white-space:nowrap; text-overflow:ellipsis; }
+.explore-page__blind-price-value { margin-top:2px; color:#ff7a2f; font-size:18px; font-weight:900; line-height:1; }
+.explore-page__blind-price.is-loading { flex-direction:row; align-items:center; color:#8c7b6e; font-size:9px; font-weight:800; gap:6px; }
+.explore-page__blind-price.is-empty { color:#8c7b6e; font-size:9px; font-weight:800; }
 .explore-page__section-head { display:flex; align-items:flex-end; justify-content:space-between; margin:20px 1px 12px; }
 .explore-page__real,.explore-page__section-title { display:block; }
 .explore-page__real { color:#ff7a2f; font-size:11px; font-weight:800; }

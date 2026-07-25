@@ -77,72 +77,70 @@
 
 .search-progress {
   display: flex;
-  width: fit-content;
-  max-width: 82%;
   align-items: center;
-  padding: 13px 15px;
-  border: 1px solid rgba(67, 44, 27, 0.08);
-  border-radius: 20px 20px 20px 7px;
-  background: #fff;
-  box-shadow: 0 5px 18px rgba(67, 44, 27, 0.05);
-  gap: 11px;
+  color: #ff7a2f;
+  font-weight: 800;
+  gap: 8px;
 }
 
-.search-progress__dots {
-  display: flex;
-  width: 32px;
-  height: 32px;
+.search-progress__radar {
+  position: relative;
+  width: 17px;
+  height: 17px;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: 12px;
-  background: #fff0e5;
-  gap: 3px;
 }
 
-.search-progress__dots text {
-  width: 4px;
-  height: 4px;
+.search-progress__radar-ring,
+.search-progress__radar-sweep,
+.search-progress__radar-dot {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.search-progress__radar-ring {
+  inset: 1px;
+  border: 1.5px solid #ff7a2f;
+  border-radius: 50%;
+}
+
+.search-progress__radar-ring::after {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  bottom: 3px;
+  left: 3px;
+  border: 1px solid rgba(255, 122, 47, 0.38);
+  border-radius: 50%;
+  content: "";
+}
+
+.search-progress__radar-sweep {
+  top: 8px;
+  left: 8px;
+  width: 7px;
+  height: 1.5px;
+  border-radius: 2px;
+  background: #ff7a2f;
+  transform-origin: left center;
+  animation: search-radar 1.1s linear infinite;
+}
+
+.search-progress__radar-dot {
+  top: 4px;
+  right: 3px;
+  width: 3px;
+  height: 3px;
   border-radius: 50%;
   background: #ff7a2f;
-  animation: search-dot 1.1s infinite ease-in-out;
-}
-
-.search-progress__dots text:nth-child(2) {
-  animation-delay: 0.14s;
-}
-
-.search-progress__dots text:nth-child(3) {
-  animation-delay: 0.28s;
-}
-
-.search-progress__title,
-.search-progress__detail {
-  display: block;
 }
 
 .search-progress__title {
-  font-size: 12px;
-  font-weight: 900;
+  font-size: 11px;
+  line-height: 1.5;
 }
 
-.search-progress__detail {
-  margin-top: 4px;
-  color: #8c7b6e;
-  font-size: 9px;
-}
-
-@keyframes search-dot {
-  0%,
-  60%,
-  100% {
-    opacity: 0.35;
-    transform: translateY(0);
-  }
-  30% {
-    opacity: 1;
-    transform: translateY(-3px);
-  }
+@keyframes search-radar {
+  to { transform: rotate(360deg); }
 }
 
 .chat-page__composer {

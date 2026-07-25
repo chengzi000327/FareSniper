@@ -285,20 +285,15 @@ export default function ChatPage() {
               </View>
             ))}
             {loading ? (
-              <View className="search-progress">
-                <View className="search-progress__dots">
-                  <Text />
-                  <Text />
-                  <Text />
+              <View className="chat-bubble chat-bubble--assistant search-progress">
+                <View className="search-progress__radar">
+                  <View className="search-progress__radar-ring" />
+                  <View className="search-progress__radar-sweep" />
+                  <View className="search-progress__radar-dot" />
                 </View>
-                <View>
-                  <Text className="search-progress__title">
-                    正在为你搜寻
-                  </Text>
-                  <Text className="search-progress__detail">
-                    核对日期、航班与多平台完整总价
-                  </Text>
-                </View>
+                <Text className="search-progress__title">
+                  正在为您深度扫描全网特价资源...
+                </Text>
               </View>
             ) : null}
           </View>
