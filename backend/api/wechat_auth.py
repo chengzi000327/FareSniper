@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import jwt
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from backend.config import settings
+from backend.infrastructure.db.user_repo import merge_anonymous_user
 from backend.infrastructure.db.wechat_repo import find_or_create_wechat_user
 from backend.infrastructure.notifications.wechat import (
     WechatApiError,
@@ -23,9 +24,38 @@ class WechatSessionRsp(BaseModel):
     user_id: str
 
 
+def _wechat_login_configured() -> bool:
+    return bool(
+        settings.wechat_mini_app_id.strip()
+        and settings.wechat_mini_app_secret.strip()
+    )
+
+
+def _anonymous_user_id(authorization: str | None) -> str | None:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    try:
+        payload = jwt.decode(
+            authorization.split(" ", 1)[1],
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+        )
+    except jwt.PyJWTError:
+        return None
+    return str(payload["sub"]) if payload.get("anon") and payload.get("sub") else None
+
+
+@router.get("/status")
+async def wechat_login_status() -> dict[str, bool]:
+    return {"configured": _wechat_login_configured()}
+
+
 @router.post("/session", response_model=WechatSessionRsp)
-async def create_wechat_session(req: WechatSessionReq) -> WechatSessionRsp:
-    if not settings.wechat_mini_app_id or not settings.wechat_mini_app_secret:
+async def create_wechat_session(
+    req: WechatSessionReq,
+    authorization: str | None = Header(default=None),
+) -> WechatSessionRsp:
+    if not _wechat_login_configured():
         raise HTTPException(503, "wechat login is not configured")
     try:
         wechat_session = await exchange_login_code(req.code)
@@ -38,6 +68,12 @@ async def create_wechat_session(req: WechatSessionReq) -> WechatSessionRsp:
         open_id=wechat_session.open_id,
         union_id=wechat_session.union_id,
     )
+    anonymous_user_id = _anonymous_user_id(authorization)
+    if anonymous_user_id and anonymous_user_id != user_id:
+        await merge_anonymous_user(
+            anon_id=anonymous_user_id,
+            target_id=user_id,
+        )
     token = jwt.encode(
         {"sub": user_id, "provider": "wechat"},
         settings.jwt_secret,

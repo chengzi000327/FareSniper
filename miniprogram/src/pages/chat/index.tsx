@@ -34,28 +34,24 @@ function answerFromSearch(response: SearchResponse) {
       '我还需要更多信息才能开始搜索。'
     )
   }
-  const priced = deals
-    .map((deal) => ({
-      deal,
-      price: deal.total_price ?? deal.base_price,
-      isComplete: deal.total_price !== null,
-    }))
-    .filter(
-      (
-        item,
-      ): item is {
-        deal: DealCard
-        price: number
-        isComplete: boolean
-      } => typeof item.price === 'number',
-    )
-    .sort((left, right) => left.price - right.price)
-  if (!priced.length) {
-    return `已找到 ${deals.length} 个可核验航班，报价详情请查看下方卡片。`
-  }
-  const best = priced[0]
-  const priceKind = best.isComplete ? '完整总价' : '平台展示价'
-  return `已找到 ${deals.length} 个可核验航班。当前最低${priceKind} ¥${best.price}，来自${best.deal.platform}；下方卡片与这条结论使用同一份实时报价。`
+  const best = deals[0]
+  const bestPrice = best.total_price ?? best.base_price
+  const priceKind = best.total_price !== null ? '完整总价' : '平台展示价'
+  const headline =
+    typeof bestPrice === 'number'
+      ? `已找到 ${deals.length} 个可核验航班。综合你的条件，最合适的是 ${best.flight_no}，${priceKind} ¥${bestPrice}，来自${best.platform}；下方只展示这一张推荐卡。`
+      : `已找到 ${deals.length} 个可核验航班。综合你的条件，最合适的是 ${best.flight_no}；下方只展示这一张推荐卡。`
+  const list = deals
+    .map((deal, index) => {
+      const price = deal.total_price ?? deal.base_price
+      const routeKind =
+        deal.stops === 0 ? '直飞' : `${deal.stops}次中转`
+      return `${index + 1}. ${deal.flight_no} ${deal.airline}｜${deal.depart_time}→${deal.arrive_time}｜${routeKind}｜${deal.platform}｜${
+        typeof price === 'number' ? `¥${price}` : '价格待确认'
+      }`
+    })
+    .join('\n')
+  return `${headline}\n\n全部航班\n${list}`
 }
 
 export default function ChatPage() {
@@ -95,7 +91,7 @@ export default function ChatPage() {
             id: `assistant_${requestId}`,
             role: 'assistant',
             text: answer,
-            deals: response.deals || [],
+            deals: response.deals?.slice(0, 1) || [],
           },
         ])
       } catch {

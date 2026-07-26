@@ -31,7 +31,8 @@ async def test_wechat_session_issues_existing_project_jwt(monkeypatch):
     monkeypatch.setattr(wechat_auth, "find_or_create_wechat_user", fake_find_or_create)
 
     result = await wechat_auth.create_wechat_session(
-        wechat_auth.WechatSessionReq(code="login-code")
+        wechat_auth.WechatSessionReq(code="login-code"),
+        authorization=None,
     )
     claims = jwt.decode(
         result.access_token,
@@ -52,7 +53,54 @@ async def test_wechat_session_reports_missing_configuration(monkeypatch):
 
     with pytest.raises(HTTPException) as exc:
         await wechat_auth.create_wechat_session(
-            wechat_auth.WechatSessionReq(code="login-code")
+            wechat_auth.WechatSessionReq(code="login-code"),
+            authorization=None,
         )
 
     assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_wechat_status_reports_configuration(monkeypatch):
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "wechat_mini_app_id", "wx-test-app")
+    monkeypatch.setattr(settings, "wechat_mini_app_secret", "secret")
+
+    assert await wechat_auth.wechat_login_status() == {"configured": True}
+
+
+@pytest.mark.asyncio
+async def test_wechat_session_merges_existing_visitor(monkeypatch):
+    from backend.config import settings
+
+    monkeypatch.setattr(settings, "wechat_mini_app_id", "wx-test-app")
+    monkeypatch.setattr(settings, "wechat_mini_app_secret", "secret")
+
+    async def fake_exchange(_code: str):
+        return WechatSession("openid-1", "session-key", None)
+
+    async def fake_find_or_create(**_kwargs):
+        return "wechat-user"
+
+    merged: list[tuple[str, str]] = []
+
+    async def fake_merge(*, anon_id: str, target_id: str):
+        merged.append((anon_id, target_id))
+
+    visitor_token = jwt.encode(
+        {"sub": "visitor-user", "anon": True},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    monkeypatch.setattr(wechat_auth, "exchange_login_code", fake_exchange)
+    monkeypatch.setattr(wechat_auth, "find_or_create_wechat_user", fake_find_or_create)
+    monkeypatch.setattr(wechat_auth, "merge_anonymous_user", fake_merge)
+
+    result = await wechat_auth.create_wechat_session(
+        wechat_auth.WechatSessionReq(code="login-code"),
+        authorization=f"Bearer {visitor_token}",
+    )
+
+    assert result.user_id == "wechat-user"
+    assert merged == [("visitor-user", "wechat-user")]

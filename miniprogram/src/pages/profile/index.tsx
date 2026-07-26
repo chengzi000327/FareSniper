@@ -1,9 +1,13 @@
-import { Button, Text, View } from '@tarojs/components'
+import { Button, Image, Input, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { useState } from 'react'
 
 import { Companion } from '../../components/Companion'
-import { ensureWechatSession, miniApi } from '../../services/api'
+import {
+  connectWechatSession,
+  ensureWechatSession,
+  miniApi,
+} from '../../services/api'
 import type { AlertItem, MemoryResponse } from '../../types/api'
 import {
   companionFromMemory,
@@ -11,11 +15,28 @@ import {
 } from '../../utils/companion'
 import './index.scss'
 
+const WECHAT_PROFILE_KEY = 'fs_wechat_profile'
+
+interface WechatProfile {
+  nickname: string
+  avatarUrl: string
+}
+
 export default function ProfilePage() {
   const [memory, setMemory] = useState<MemoryResponse | null>(null)
   const [userId, setUserId] = useState('')
   const [alerts, setAlerts] = useState<AlertItem[]>([])
   const [authMode, setAuthMode] = useState('')
+  const [wechatConfigured, setWechatConfigured] = useState(false)
+  const [connectingWechat, setConnectingWechat] = useState(false)
+  const [wechatProfile, setWechatProfile] = useState<WechatProfile>(() => {
+    return (
+      Taro.getStorageSync<WechatProfile>(WECHAT_PROFILE_KEY) || {
+        nickname: '',
+        avatarUrl: '',
+      }
+    )
+  })
 
   useDidShow(() => {
     void (async () => {
@@ -23,12 +44,14 @@ export default function ProfilePage() {
         await ensureWechatSession()
         setUserId(miniApi.userId())
         setAuthMode(miniApi.authMode())
-        const [nextMemory, nextAlerts] = await Promise.all([
+        const [nextMemory, nextAlerts, authStatus] = await Promise.all([
           miniApi.memory(),
           miniApi.alerts(),
+          miniApi.wechatAuthStatus(),
         ])
         setMemory(nextMemory)
         setAlerts(nextAlerts)
+        setWechatConfigured(authStatus.configured)
       } catch {
         await Taro.showToast({
           title: '用户信息暂时没有加载出来',
@@ -40,6 +63,58 @@ export default function ProfilePage() {
 
   const companion = companionFromMemory(memory?.memories || [])
   const activeAlerts = alerts.filter((item) => item.status === 'active').length
+  const connected = authMode === 'wechat' || authMode === 'mock'
+
+  const saveWechatProfile = (profile: WechatProfile) => {
+    setWechatProfile(profile)
+    Taro.setStorageSync(WECHAT_PROFILE_KEY, profile)
+  }
+
+  const connectWechat = async () => {
+    if (connectingWechat || connected) return
+    if (!wechatConfigured) {
+      await Taro.showToast({
+        title: '服务端尚未配置微信登录密钥',
+        icon: 'none',
+      })
+      return
+    }
+    setConnectingWechat(true)
+    try {
+      await connectWechatSession()
+      setUserId(miniApi.userId())
+      setAuthMode(miniApi.authMode())
+      const [nextMemory, nextAlerts] = await Promise.all([
+        miniApi.memory(),
+        miniApi.alerts(),
+      ])
+      setMemory(nextMemory)
+      setAlerts(nextAlerts)
+      await Taro.showToast({ title: '微信账号已连接', icon: 'success' })
+    } catch (error) {
+      await Taro.showToast({
+        title:
+          error instanceof Error ? error.message : '微信登录没有成功',
+        icon: 'none',
+      })
+    } finally {
+      setConnectingWechat(false)
+    }
+  }
+
+  const chooseAvatar = async (avatarUrl: string) => {
+    if (!avatarUrl) return
+    try {
+      const saved = await Taro.saveFile({ tempFilePath: avatarUrl })
+      if (!('savedFilePath' in saved)) throw new Error('头像保存失败')
+      saveWechatProfile({
+        ...wechatProfile,
+        avatarUrl: saved.savedFilePath,
+      })
+    } catch {
+      saveWechatProfile({ ...wechatProfile, avatarUrl })
+    }
+  }
 
   return (
     <View className="page-shell profile-page">
@@ -47,8 +122,79 @@ export default function ProfilePage() {
       <Text className="page-title">我的</Text>
 
       <View className="profile-page__identity card">
-        <View className="profile-page__avatar">旅</View>
-        <View><Text className="profile-page__label">{authMode === 'wechat' ? '微信身份' : authMode === 'mock' ? '界面验收' : '临时身份'}</Text><Text className="profile-page__name">FareSniper 旅行者</Text><Text className="profile-page__connection">{authMode === 'wechat' ? '微信账号已连接，数据可跨会话保留' : authMode === 'mock' ? '当前使用显式演示数据' : userId ? '已连接真实服务，微信账号绑定即将开放' : '正在连接账号'}</Text></View>
+        <Button
+          className="profile-page__avatar-button"
+          openType={connected ? 'chooseAvatar' : undefined}
+          onChooseAvatar={(event) =>
+            void chooseAvatar(String(event.detail.avatarUrl || ''))
+          }
+          onClick={() => !connected && void connectWechat()}
+        >
+          {wechatProfile.avatarUrl ? (
+            <Image
+              className="profile-page__avatar-image"
+              mode="aspectFill"
+              src={wechatProfile.avatarUrl}
+            />
+          ) : (
+            <Text className="profile-page__avatar">
+              {connected ? '微' : '旅'}
+            </Text>
+          )}
+        </Button>
+        <View className="profile-page__identity-copy">
+          <View className="profile-page__identity-status">
+            <View className={connected ? 'is-connected' : ''} />
+            <Text className="profile-page__label">
+              {authMode === 'wechat'
+                ? '微信账号'
+                : authMode === 'mock'
+                  ? '界面验收'
+                  : '游客模式'}
+            </Text>
+          </View>
+          {connected ? (
+            <Input
+              className="profile-page__name-input"
+              type="nickname"
+              value={wechatProfile.nickname}
+              placeholder="微信旅行者"
+              onInput={(event) =>
+                setWechatProfile((current) => ({
+                  ...current,
+                  nickname: event.detail.value,
+                }))
+              }
+              onBlur={() => saveWechatProfile(wechatProfile)}
+            />
+          ) : (
+            <Text className="profile-page__name">FareSniper 旅行者</Text>
+          )}
+          <Text className="profile-page__connection">
+            {authMode === 'wechat'
+              ? '已连接微信，偏好、记忆和提醒可跨会话保留'
+              : authMode === 'mock'
+                ? '当前使用显式演示数据'
+                : wechatConfigured
+                  ? '连接微信后保留偏好、记忆与价格提醒'
+                  : '微信登录待服务端密钥配置'}
+          </Text>
+        </View>
+        <Button
+          className={`profile-page__login ${
+            connected ? 'is-connected' : ''
+          }`}
+          disabled={connectingWechat || connected || !wechatConfigured}
+          onClick={() => void connectWechat()}
+        >
+          {connected
+            ? '已连接'
+            : connectingWechat
+              ? '连接中'
+              : wechatConfigured
+                ? '微信登录'
+                : '待配置'}
+        </Button>
       </View>
 
       <View className="profile-page__companion companion-card">

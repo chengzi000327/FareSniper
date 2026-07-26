@@ -30,21 +30,15 @@ interface VisitorSessionResponse extends WechatSessionResponse {
   session_id: string
 }
 
+interface WechatAuthStatus {
+  configured: boolean
+}
+
 function token() {
   return Taro.getStorageSync<string>(TOKEN_KEY) || ''
 }
 
-export async function ensureWechatSession(force = false): Promise<string> {
-  if (USE_MOCK) {
-    Taro.setStorageSync(USER_KEY, 'wechat_mock_user')
-    Taro.setStorageSync(AUTH_MODE_KEY, 'mock')
-    return 'wechat_mock_token'
-  }
-  if (!API_BASE) {
-    throw new Error('未配置 TARO_APP_API_BASE_URL')
-  }
-  if (!force && token()) return token()
-
+async function exchangeWechatSession(): Promise<string> {
   const login = await Taro.login()
   if (!login.code) throw new Error('微信登录未返回 code')
   const response = await Taro.request<
@@ -54,6 +48,7 @@ export async function ensureWechatSession(force = false): Promise<string> {
     method: 'POST',
     header: {
       'content-type': 'application/json',
+      ...(token() ? { authorization: `Bearer ${token()}` } : {}),
     },
     data: {
       code: login.code,
@@ -65,11 +60,35 @@ export async function ensureWechatSession(force = false): Promise<string> {
     Taro.setStorageSync(AUTH_MODE_KEY, 'wechat')
     return response.data.access_token
   }
+  throw new Error(
+    response.statusCode === 503
+      ? '微信登录服务尚未配置'
+      : `微信登录失败：${response.statusCode}`,
+  )
+}
 
-  if (response.statusCode !== 404 && response.statusCode !== 503) {
-    throw new Error(`微信登录失败：${response.statusCode}`)
+export async function connectWechatSession(): Promise<string> {
+  if (USE_MOCK) {
+    Taro.setStorageSync(USER_KEY, 'wechat_mock_user')
+    Taro.setStorageSync(AUTH_MODE_KEY, 'mock')
+    return 'wechat_mock_token'
   }
+  if (!API_BASE) throw new Error('未配置 TARO_APP_API_BASE_URL')
+  return exchangeWechatSession()
+}
 
+export async function ensureWechatSession(force = false): Promise<string> {
+  if (USE_MOCK) return connectWechatSession()
+  if (!API_BASE) {
+    throw new Error('未配置 TARO_APP_API_BASE_URL')
+  }
+  if (!force && token()) return token()
+
+  try {
+    return await exchangeWechatSession()
+  } catch {
+    // Browsing and search remain usable before the operator configures AppSecret.
+  }
   const visitor = await Taro.request<VisitorSessionResponse>({
     url: `${API_BASE}/api/session`,
     method: 'POST',
@@ -125,6 +144,18 @@ async function request<T>(
 }
 
 export const miniApi = {
+  async wechatAuthStatus(): Promise<WechatAuthStatus> {
+    if (USE_MOCK) return { configured: true }
+    if (!API_BASE) return { configured: false }
+    const response = await Taro.request<WechatAuthStatus>({
+      url: `${API_BASE}/api/auth/wechat/status`,
+      method: 'GET',
+    })
+    return response.statusCode === 200
+      ? response.data
+      : { configured: false }
+  },
+
   async search(
     message: string,
     sessionId: string | null,
